@@ -27,6 +27,7 @@ import { mountTransport } from "./ui/transport.js";
 import { mountRightRail } from "./ui/right-rail.js";
 import { createSoundBrowserPanel } from "./ui/sound-browser.js";
 import { createReferencePanel } from "./ui/reference-panel.js";
+import { createConsolePanel } from "./ui/console-panel.js";
 import { renderRoll } from "./ui/piano-roll.js";
 import { prompt, confirm } from "./ui/modal.js";
 import {
@@ -172,6 +173,13 @@ const initialCode =
 
 let currentName = initialName;
 
+// Forward declaration so the StrudelMirror `onEvalError` callback below
+// can close over the console panel before it's actually constructed —
+// the right rail (and the panel itself) are mounted further down in
+// this file, but the callback is only invoked on a real eval error,
+// by which time the panel exists. Same pattern as `referencePanel`.
+let consolePanel = null;
+
 const editor = new StrudelMirror({
   defaultOutput: webaudioOutput,
   getTime: () => getAudioContext().currentTime,
@@ -180,6 +188,21 @@ const editor = new StrudelMirror({
   initialCode,
   drawTime,
   autodraw: true,
+  // Pattern transpile/runtime failures land here. StrudelMirror passes
+  // `onEvalError` through to the underlying repl (see
+  // strudel-source/packages/core/repl.mjs — `onEvalError?.(err)` is
+  // called after `logger(...)` has already dispatched a `strudel.log`
+  // CustomEvent, but with the raw Error this path also gives us the
+  // stack when we want it). Routed into the console panel so composers
+  // don't need devtools open to see why an evaluation failed.
+  onEvalError: (err) => {
+    if (!consolePanel) return;
+    try {
+      consolePanel.error(err?.message || String(err), { error: err });
+    } catch (panelErr) {
+      console.warn("[strasbeat/console] error() failed:", panelErr);
+    }
+  },
   onDraw: (haps, time) =>
     renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor }),
   prebake: async () => {
@@ -414,6 +437,48 @@ rightRail.registerPanel(referencePanel);
 // has been activated for the first time.
 referencePanel.setBufferText(editor.code ?? "");
 
+// Console panel — third tab in the right rail. See
+// src/ui/console-panel.js and design/work/08-feature-parity-and-beyond.md
+// "Phase 3". Assigned to the forward-declared `consolePanel` so the
+// StrudelMirror `onEvalError` callback (set up earlier in this file)
+// can find it without needing the panel to exist at constructor time.
+//
+// The panel is dumb about where its entries come from — three hooks
+// below feed it: the `strudel.log` CustomEvent on `document` captures
+// scheduler + audio + eval log messages; `onEvalError` (above) captures
+// transpile/runtime failures in user pattern code; and the
+// `editor.evaluate` wrapper (further down) fires a divider before each
+// evaluation so the user can tell one eval's tail output from the next
+// one's head. No `console.*` patching — per CLAUDE.md's "don't silently
+// patch globals" spirit, we stick to Strudel's own event surface.
+consolePanel = createConsolePanel({
+  onFocusEditor: () => editor.editor.focus(),
+});
+rightRail.registerPanel(consolePanel);
+
+// Hook 1 — Strudel's `logger()` dispatches a `strudel.log` CustomEvent
+// on `document` for every internal log message. Shape (from
+// strudel-source/packages/core/logger.mjs):
+//   { detail: { message: string, type: string, data: any } }
+// `type` is a freeform label set by the caller — empty for info,
+// "error" for errors, "warning" for warnings, plus whatever else
+// upstream decides to emit. Map the ones we recognise into the
+// panel's level taxonomy, route everything else to log().
+document.addEventListener("strudel.log", (e) => {
+  if (!consolePanel) return;
+  const detail = e?.detail ?? {};
+  const type = typeof detail.type === "string" ? detail.type : "";
+  const message = detail.message ?? "";
+  const data = detail.data ?? null;
+  try {
+    if (type === "error") consolePanel.error(message, data);
+    else if (type === "warning") consolePanel.warn(message, data);
+    else consolePanel.log(message, data);
+  } catch (panelErr) {
+    console.warn("[strasbeat/console] dispatch failed:", panelErr);
+  }
+});
+
 // Refresh the panel once the prebake has populated soundMap. Prebake is
 // off-limits (CLAUDE.md / SYSTEM.md §11) so we can't hook into it
 // directly — instead we poll the soundMap until it has entries, then
@@ -445,9 +510,20 @@ referencePanel.setBufferText(editor.code ?? "");
 // evaluate. Both scans are string matches (not AST), cheap enough to
 // run synchronously. Wrapping `editor.evaluate` lets us catch *all*
 // eval entry points (toolbar, Cmd+Enter, share-link reload, …) without
-// touching the Strudel keymap.
+// touching the Strudel keymap. The same wrapper fires a console-panel
+// divider before the eval so the console's scroll region gets a
+// visible separator between one evaluation's tail output and the next
+// one's head.
 const _editorEvaluate = editor.evaluate.bind(editor);
 editor.evaluate = async function patchedEvaluate(...args) {
+  // Fire the divider BEFORE the eval runs, so any log / warn / error
+  // lines produced by the evaluation land *below* the divider, not
+  // above it. Guarded so a console failure never blocks the eval.
+  try {
+    consolePanel?.divider(currentName || "eval");
+  } catch (err) {
+    console.warn("[strasbeat/console] divider failed:", err);
+  }
   const result = await _editorEvaluate(...args);
   try {
     soundBrowser.setBufferText(editor.code ?? "");
@@ -1096,16 +1172,33 @@ captureBtn.addEventListener("click", async () => {
 // Strudel sound names are not 1:1 with the official GM-128 names. Use
 // `strasbeat.findSounds("piano")` from devtools to discover what's actually
 // loaded before guessing in your patterns.
+// Echo helper output into the console panel alongside devtools so the
+// composer can see results without switching windows. Additive —
+// devtools still get the same `console.log` lines.
+function echoHelper(message, data) {
+  console.log(message, data ?? "");
+  try {
+    consolePanel?.log(message, data);
+  } catch (err) {
+    console.warn("[strasbeat/console] helper echo failed:", err);
+  }
+}
+
 window.strasbeat = {
   /** List loaded sounds whose key matches `query` (regex, case-insensitive). */
   findSounds(query = "") {
     const all = Object.keys(soundMap.get());
     if (!query) {
-      console.log(`${all.length} sounds loaded — pass a query to filter`);
+      echoHelper(`${all.length} sounds loaded — pass a query to filter`);
       return all.slice(0, 30);
     }
     const re = new RegExp(query, "i");
-    return all.filter((k) => re.test(k));
+    const matches = all.filter((k) => re.test(k));
+    echoHelper(
+      `findSounds(${JSON.stringify(query)}) → ${matches.length} match${matches.length === 1 ? "" : "es"}`,
+      matches.slice(0, 30),
+    );
+    return matches;
   },
   /** Total number of registered sounds (samples + soundfonts + synths). */
   countSounds() {
@@ -1146,7 +1239,7 @@ window.strasbeat = {
     setSuperdoughAudioController(null);
     resetGlobalEffects();
     await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
-    return {
+    const stats = {
       cps,
       cycles,
       scheduled,
@@ -1154,6 +1247,11 @@ window.strasbeat = {
       absMax,
       percentNonZero: (100 * nz) / ch0.length,
     };
+    echoHelper(
+      `probeRender(${cycles}) → ${scheduled} events, absMax=${absMax.toFixed(3)}`,
+      stats,
+    );
+    return stats;
   },
 };
 

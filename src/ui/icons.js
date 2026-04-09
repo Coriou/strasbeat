@@ -24,6 +24,8 @@ import {
   Save,
   Music2,
   BookOpen,
+  Terminal,
+  Eraser,
 } from 'lucide';
 
 const ICONS = {
@@ -40,6 +42,8 @@ const ICONS = {
   save: Save,
   music: Music2,
   'book-open': BookOpen,
+  terminal: Terminal,
+  eraser: Eraser,
 };
 
 /**
