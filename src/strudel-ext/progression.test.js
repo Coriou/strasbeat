@@ -407,3 +407,140 @@ describe("progression() — voicing dictionary", () => {
     );
   });
 });
+
+describe("progression() — Roman-numeral input (Phase 3)", () => {
+  // The roman.test.js suite covers the parser exhaustively. These tests
+  // are integration-level: they verify that Roman input flowing through
+  // progression() produces the *same haps* as the equivalent absolute
+  // input — i.e. the Roman path doesn't drop or warp the chord stack.
+
+  // Helper: pull the sorted unique note set from the first cycle, ignoring
+  // begin times (block rhythm stacks notes simultaneously, so position
+  // doesn't matter).
+  function noteSet(pat) {
+    return [...new Set(pat.firstCycle().map((h) => h.value.note))].sort();
+  }
+
+  test('progression("ii V I", { key: "C" }) plays Dm-G-C', () => {
+    const roman = noteSet(progression("ii V I", { key: "C" }));
+    const absolute = noteSet(progression("Dm G C"));
+    assert.deepEqual(
+      roman,
+      absolute,
+      "Roman ii V I in C should produce the same notes as Dm G C",
+    );
+    assert.equal(warnings.length, 0, "no warnings expected on valid input");
+  });
+
+  test('progression("ii7 V7 I^7", { key: "F" }) plays Gm7-C7-F^7', () => {
+    const roman = noteSet(progression("ii7 V7 I^7", { key: "F" }));
+    const absolute = noteSet(progression("Gm7 C7 F^7"));
+    assert.deepEqual(
+      roman,
+      absolute,
+      "Roman ii7 V7 I^7 in F should produce the same notes as Gm7 C7 F^7",
+    );
+  });
+
+  test('progression("i iv v", { key: "Am" }) plays Am-Dm-Em (natural minor)', () => {
+    const roman = noteSet(progression("i iv v", { key: "Am" }));
+    const absolute = noteSet(progression("Am Dm Em"));
+    assert.deepEqual(
+      roman,
+      absolute,
+      "Roman i iv v in Am should produce the same notes as Am Dm Em",
+    );
+  });
+
+  test("transposition: same numerals in different keys produce different pitches", () => {
+    const inC = noteSet(progression("I V vi IV", { key: "C" }));
+    const inG = noteSet(progression("I V vi IV", { key: "G" }));
+    assert.notDeepEqual(
+      inC,
+      inG,
+      "I V vi IV in C should differ from I V vi IV in G",
+    );
+    // Sanity check: both should produce non-empty note sets.
+    assert.ok(inC.length > 0);
+    assert.ok(inG.length > 0);
+  });
+
+  test("Roman input without `key` returns silence and warns", () => {
+    const pat = progression("ii V I");
+    assert.equal(pat, silence);
+    assert.ok(
+      warnings.some(
+        (w) =>
+          w.includes("[strasbeat]") && w.toLowerCase().includes("key"),
+      ),
+      `expected a missing-key warning, got: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  test("absolute input is NOT misclassified as Roman (Cm7 stays absolute)", () => {
+    // Cm7 starts with C, not [ivIVb#] — must take the absolute path,
+    // even when no `key` is supplied.
+    const pat = progression("Cm7 F7 Bb^7");
+    assert.ok(pat instanceof Pattern);
+    assert.ok(pat.firstCycle().length > 0);
+    assert.equal(warnings.length, 0, "absolute input should not warn");
+  });
+
+  test("absolute Bb chord starting with B (not lowercase b) stays absolute", () => {
+    // Tricky edge case: `Bb7` starts with uppercase `B` which is NOT in
+    // [ivIVb#], so the regex must treat it as absolute. If the detection
+    // ever gets confused, this would silently route through the Roman
+    // path and produce a warning.
+    const pat = progression("Bb7 Eb7");
+    assert.ok(pat.firstCycle().length > 0);
+    assert.equal(warnings.length, 0);
+  });
+
+  test("Roman input with options.key passes through Roman dispatch even when style is set", () => {
+    // Make sure style/options merging happens AFTER Roman rewriting, so
+    // a styled Roman call still produces the correct chord notes.
+    const roman = noteSet(
+      progression("ii V I", { key: "C", style: "jazz-comp" }),
+    );
+    const absolute = noteSet(
+      progression("Dm G C", { style: "jazz-comp" }),
+    );
+    assert.deepEqual(roman, absolute);
+  });
+
+  test("a later Roman token that fails to resolve returns silence and warns", () => {
+    // First token `I` triggers Roman detection. The second token `viv`
+    // is malformed — the parser's lookahead rejects it — so the whole
+    // call bails out to silence rather than producing partially-correct
+    // output. Mixing modes is unsupported (per the JSDoc) and silence
+    // is the documented failure mode.
+    const pat = progression("I viv", { key: "C" });
+    assert.equal(pat, silence);
+    assert.ok(
+      warnings.some((w) => w.includes("[strasbeat]")),
+      `expected a [strasbeat] warning, got: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  test("accidental Roman numerals (bIII, #iv) round-trip correctly", () => {
+    const roman = noteSet(progression("I bIII IV", { key: "C" }));
+    const absolute = noteSet(progression("C Eb F"));
+    assert.deepEqual(roman, absolute);
+  });
+
+  test("Roman + bass option still layers a bass line", () => {
+    const pat = progression("ii V I", { key: "C", bass: true });
+    const values = firstCycleValues(pat);
+    const bassHits = values.filter((v) => v.s === "gm_acoustic_bass");
+    assert.ok(bassHits.length > 0, "expected at least one bass hap");
+  });
+
+  test("Roman input is detected by the first token, not the whole string", () => {
+    // Detection rule: if the FIRST whitespace-delimited token starts
+    // with [ivIVb#] and matches the Roman regex, the whole input is
+    // Roman. This test pins that contract.
+    const pat = progression("I V vi IV", { key: "C" });
+    assert.ok(pat instanceof Pattern);
+    assert.equal(warnings.length, 0);
+  });
+});

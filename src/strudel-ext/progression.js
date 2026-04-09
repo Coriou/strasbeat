@@ -18,6 +18,7 @@ import { mini } from "@strudel/mini";
 // it here so progression.js works in any context that pulls in this file
 // (notably node --test, which doesn't load main.js).
 import "@strudel/tonal";
+import { isRomanToken, romanToChord } from "./roman.js";
 import { STYLES } from "./styles.js";
 
 // Mini-notation arp index strings, one per rhythm preset. The chord pattern
@@ -56,8 +57,11 @@ const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
 /**
  * Turn a one-line chord progression into a playable Strudel pattern.
  *
- * Accepts whitespace-separated absolute chord symbols (`Cm7 F7 Bb^7`),
- * cycles through them at one chord per cycle, and runs them through
+ * Accepts either:
+ *   - **absolute** chord symbols (`Cm7 F7 Bb^7`), or
+ *   - **Roman numerals** (`ii7 V7 I^7`) when an `options.key` is supplied.
+ *
+ * Cycles through the chords at one per cycle and runs them through
  * `chord().dict().voicing()` from @strudel/tonal — so voice leading, slash
  * chord parsing (`Cm7/G`), and the voicing dictionaries (`ireal`,
  * `lefthand`, `triads`, `guidetones`, `legacy`) all come for free.
@@ -65,19 +69,37 @@ const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
  * Returns a real Strudel `Pattern`, so the result chains with `.slow()`,
  * `.gain()`, `.every()`, etc. like any other source.
  *
- * @param {string} chords whitespace-separated chord symbols
+ * **Roman numeral input** (Phase 3): if the first whitespace-delimited
+ * token looks like a Roman numeral (`I`, `ii`, `V7`, `bIII`, `vii°`,
+ * `#iv`, …), the entire input is treated as Roman and dispatched
+ * through `romanToChord()`. Mixing Roman and absolute tokens in the
+ * same call is **not** supported — once detection picks Roman mode,
+ * every token must parse as Roman or it produces silence + a warning.
+ * Uppercase = major, lowercase = minor; minor keys use natural minor
+ * (Aeolian).
+ *
+ * **Missing key**: if Roman input is detected but no `options.key` is
+ * supplied, returns silence and warns — guessing a key would be worse
+ * than failing audibly.
+ *
+ * @param {string} chords whitespace-separated chord symbols OR Roman numerals
  * @param {object} [options]
  * @param {string} [options.sound="gm_epiano1"] sound name (verify with `strasbeat.hasSound`)
  * @param {string} [options.dict="ireal"] voicing dictionary name
  * @param {string} [options.rhythm="block"] rhythm preset name OR a raw mini-notation arp string
  * @param {boolean|string} [options.bass=false] layer a bass line on the chord roots; pass a sound name to override `gm_acoustic_bass`
  * @param {string} [options.style] style preset that bundles sound + dict + rhythm + FX. Built-in styles: `jazz-comp`, `pop-pad`, `lo-fi`, `folk-strum`, `piano-bare`. Explicit options always override the style — `{ style: "jazz-comp", sound: "gm_piano" }` is "jazz comp on a real piano".
+ * @param {string} [options.key] required when `chords` is in Roman-numeral form. Major (`"C"`, `"G"`, `"Bb"`) or minor (`"Am"`, `"Cm"`).
  * @returns {Pattern}
  *
  * @example
  * progression("Cm7 F7 Bb^7 Eb^7")
  * @example
- * progression("ii V I", { sound: "gm_pad_warm", rhythm: "arp-up" })
+ * progression("ii V I", { key: "C" })
+ * @example
+ * progression("ii7 V7 I^7", { key: "F", style: "jazz-comp" })
+ * @example
+ * progression("i iv v", { key: "Am", bass: true })
  * @example
  * progression("Cm7 F7 Bb^7", { style: "jazz-comp" })
  * @example
@@ -92,6 +114,40 @@ export function progression(chords, options = {}) {
       '[strasbeat] progression(): empty chord input, returning silence',
     );
     return silence;
+  }
+
+  // Roman-numeral detection (Phase 3). If the first token looks like a
+  // Roman numeral, treat the *entire* input as Roman and rewrite each
+  // token to its absolute chord symbol via romanToChord(). The detection
+  // is intentionally one-shot — mixing Roman and absolute tokens in a
+  // single call would be a footgun (which mode wins on `Cm7 V7`?), so
+  // the documented contract is "all-or-nothing" and any token that
+  // fails to parse in Roman mode bails out to silence.
+  //
+  // We deliberately rewrite *before* style/options merging because the
+  // rest of the function (cyclePat, voicing, FX) is identical regardless
+  // of how the chord symbols arrived — keeping the dispatch shallow.
+  const inputTokens = chords.trim().split(/\s+/);
+  if (isRomanToken(inputTokens[0])) {
+    if (options.key == null) {
+      console.warn(
+        "[strasbeat] progression(): Roman-numeral input requires options.key (e.g. { key: \"C\" } or { key: \"Am\" }), returning silence",
+      );
+      return silence;
+    }
+    const rewritten = [];
+    for (const token of inputTokens) {
+      const abs = romanToChord(token, options.key);
+      if (abs == null) {
+        // romanToChord already warned with a [strasbeat] prefix.
+        console.warn(
+          `[strasbeat] progression(): Roman-numeral token "${token}" failed to resolve in key "${options.key}", returning silence`,
+        );
+        return silence;
+      }
+      rewritten.push(abs);
+    }
+    chords = rewritten.join(" ");
   }
 
   // Resolve the style preset (Phase 2). When set, the style fills in
