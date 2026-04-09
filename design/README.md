@@ -48,7 +48,12 @@ on earlier ones:
    symbols + rhythm presets) is small and shippable on its own.
    **Not a design-pass feature** — runtime only, touches `evalScope` in
    `main.js` minimally and additively. Independent of 1–5.
-7. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
+7. **`work/08-feature-parity-and-beyond.md`** — right-rail panel system:
+   sound browser, API reference, console, export panel, enhanced
+   settings. Phased; Phase 1 (right rail + sound browser) is the
+   highest-value delivery and builds the infrastructure all other
+   panels depend on. Depends on `01-shell.md` being landed.
+8. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
    multi-track DAW). **Not actionable yet** — read for context only when
    working on the actionable specs above, so you don't paint us into a
    corner.
@@ -65,10 +70,10 @@ That's it. Each spec is written to be picked up cold.
 
 ## What's not in this directory
 
-Things deliberately *not* in scope for this design pass:
+Things deliberately _not_ in scope for this design pass:
 
 - Refactoring `src/main.js` plumbing (Strudel boot, prebake, WAV export,
-  MIDI bridge wiring, share encode/decode). The editor *settings* block
+  MIDI bridge wiring, share encode/decode). The editor _settings_ block
   in `main.js` and the editor's CodeMirror extensions are fair game; the
   rest is off-limits. See `SYSTEM.md` §11 for the exact table.
 - Server-side or build-pipeline changes beyond what a feature explicitly
