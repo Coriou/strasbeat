@@ -1,0 +1,345 @@
+/* Export panel — fourth tab in the right rail. See
+   src/ui/export-panel.js and design/work/08-feature-parity-and-beyond.md.
+   Visual rhythm matches the sound browser / reference / console panels
+   so all four feel like siblings — same header padding, same surface
+   palette, same control sizing. */
+
+.export-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-3);
+  gap: var(--space-3);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+.export-panel::-webkit-scrollbar {
+  width: 6px;
+}
+.export-panel::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 3px;
+}
+
+/* ─── Controls block (filename / cycles / rate) ─────────────────────── */
+
+.export-panel__controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.export-panel__row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.export-panel__row-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-mut);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.export-panel__row-control {
+  display: flex;
+  min-width: 0;
+}
+
+.export-panel__input,
+.export-panel__select {
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  outline: none;
+  transition:
+    border-color var(--t-hover),
+    background var(--t-hover);
+}
+.export-panel__input::placeholder {
+  color: var(--text-dim);
+}
+.export-panel__input:focus,
+.export-panel__select:focus {
+  border-color: var(--accent);
+}
+.export-panel__input:disabled,
+.export-panel__select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Hide the native number spin buttons — the spec wants a clean control
+   and the user can drag the editor numeric scrubber if they want to
+   scrub. Firefox uses appearance, WebKit wants vendor selectors. */
+.export-panel__input--num {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.export-panel__input--num::-webkit-outer-spin-button,
+.export-panel__input--num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Native <select> needs a bit of help to match the other controls.
+   Keep the default caret — a custom popover is a whole feature of its
+   own — but restyle the surface so it doesn't jar visually. */
+.export-panel__select {
+  padding-right: var(--space-4);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-mut) 50%),
+    linear-gradient(135deg, var(--text-mut) 50%, transparent 50%);
+  background-position:
+    calc(100% - 10px) 13px,
+    calc(100% - 6px) 13px;
+  background-size:
+    4px 4px,
+    4px 4px;
+  background-repeat: no-repeat;
+  -moz-appearance: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+/* ─── Export button ─────────────────────────────────────────────────── */
+
+.export-panel__export {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  background: var(--accent-wash);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover),
+    opacity var(--t-hover);
+}
+.export-panel__export:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent-hi);
+}
+.export-panel__export:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.export-panel__export:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.export-panel__export.is-running {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-mut);
+}
+
+.export-panel__export-icon {
+  display: inline-flex;
+}
+.export-panel__export-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* The progress / result / error sections use the HTML `hidden` attr to
+   toggle visibility (export-panel.js sets `.hidden = true|false`). An
+   explicit `display: flex` in author CSS overrides the UA stylesheet's
+   `[hidden] { display: none }`, silently breaking the toggle. These
+   selectors restore the expected behavior. */
+.export-panel__progress[hidden],
+.export-panel__result[hidden],
+.export-panel__error[hidden] {
+  display: none;
+}
+
+/* ─── Progress row ─────────────────────────────────────────────────── */
+
+.export-panel__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.export-panel__progress-bar {
+  flex: 1 1 auto;
+  height: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.export-panel__progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  /* Soft ease so discrete poll steps don't read as stair-steps. The
+     240ms budget is intentionally longer than the polling interval
+     (100ms) so the bar keeps moving between updates. */
+  transition: width 240ms linear;
+}
+
+.export-panel__progress-label {
+  flex: 0 0 auto;
+  min-width: 36px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-mut);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Result section (waveform + stats + download again) ───────────── */
+
+.export-panel__result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.export-panel__waveform {
+  display: block;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.export-panel__waveform-canvas {
+  display: block;
+  width: 100%;
+  height: 64px;
+}
+
+.export-panel__stats {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+}
+.export-panel__stats--name {
+  color: var(--text);
+  font-weight: 600;
+  word-break: break-all;
+}
+.export-panel__stats--peak {
+  color: var(--text-mut);
+  font-variant-numeric: tabular-nums;
+}
+.export-panel__stats--peak.export-panel__stats--silent {
+  color: var(--rec);
+  font-weight: 600;
+}
+
+/* Silent-export warning — matches the console panel's error entry
+   treatment: soft --rec wash background, --rec-tinted text. */
+.export-panel__warning {
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in oklch, var(--rec) 12%, transparent);
+  color: color-mix(in oklch, var(--text), var(--rec) 30%);
+  border: 1px solid color-mix(in oklch, var(--rec) 40%, transparent);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: var(--lh-sm);
+}
+
+/* Subtle secondary button — the "download again" affordance shouldn't
+   compete with the primary Export button above it, so ghost it. */
+.export-panel__download-again {
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 var(--space-3);
+  background: var(--surface-2);
+  color: var(--text-mut);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover);
+}
+.export-panel__download-again:hover {
+  background: var(--surface-3);
+  color: var(--text);
+  border-color: var(--border);
+}
+.export-panel__download-again:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ─── Error section ─────────────────────────────────────────────────── */
+
+.export-panel__error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: color-mix(in oklch, var(--rec) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--rec) 40%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.export-panel__error-message {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: color-mix(in oklch, var(--text), var(--rec) 25%);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.export-panel__try-again {
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 var(--space-3);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover);
+}
+.export-panel__try-again:hover {
+  background: var(--surface-3);
+  border-color: var(--border);
+}
+.export-panel__try-again:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
