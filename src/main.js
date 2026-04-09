@@ -17,6 +17,7 @@ import * as strudelTonal from "@strudel/tonal";
 import * as strudelWebaudio from "@strudel/webaudio";
 import * as strudelExt from "./strudel-ext/index.js";
 import { Prec, StateEffect } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
 import { MidiBridge, presets as midiPresets } from "./midi-bridge.js";
 import { formatExtension } from "./editor/format.js";
 import { createVscodeKeymap } from "./editor/keymap.js";
@@ -44,6 +45,7 @@ import {
   saveStoredAccent,
   clearStoredAccent,
 } from "./ui/settings-drawer.js";
+import { createLocalStore } from "./store.js";
 
 const { evalScope, controls } = strudelCore;
 const {
@@ -81,6 +83,13 @@ for (const [filePath, mod] of Object.entries(patternModules)) {
   patterns[name] = mod.default;
 }
 const patternNames = Object.keys(patterns).sort();
+
+// ─── Persistence store ───────────────────────────────────────────────────
+// Every edit the user makes is automatically persisted to localStorage
+// via a debounced autosave. Switching patterns, refreshing, closing the
+// tab, and reopening restore exactly where the user left off. See
+// design/work/09-pattern-persistence.md.
+const store = createLocalStore();
 
 // ─── DOM refs ────────────────────────────────────────────────────────────
 // Existing IDs preserved so the off-limits prebake / WAV / share sections
@@ -178,17 +187,39 @@ function readSharedFromHash() {
 }
 
 // ─── Editor ──────────────────────────────────────────────────────────────
-// If we were opened with a #code=... share link, that takes precedence over
-// the auto-discovered patterns.
+// Boot sequence: share link > store lastOpen > first shipped pattern.
+// The store restores working copies so edits survive reload/tab-close.
 const shared = readSharedFromHash();
+const storeIndex = store.getIndex();
 const fallbackName = patternNames[0] ?? "empty";
-const initialName = shared
-  ? `shared-${shared.name}`.replace(/[^a-z0-9_-]/gi, "-").slice(0, 40)
-  : fallbackName;
-const initialCode =
-  shared?.code ??
-  patterns[fallbackName] ??
-  `// no patterns found in /patterns yet — type some Strudel here\nsound("bd sd hh*4")`;
+
+let initialName, initialCode;
+if (shared) {
+  // Share links override everything.
+  initialName = `shared-${shared.name}`
+    .replace(/[^a-z0-9_-]/gi, "-")
+    .slice(0, 40);
+  initialCode = shared.code;
+} else if (storeIndex.lastOpen) {
+  // Restore last-open pattern. Prefer working copy over original.
+  initialName = storeIndex.lastOpen;
+  const record = store.get(initialName);
+  if (record) {
+    initialCode = record.code;
+  } else if (initialName in patterns) {
+    initialCode = patterns[initialName];
+  } else {
+    // lastOpen references a pattern that no longer exists — fall back.
+    initialName = fallbackName;
+    initialCode =
+      patterns[fallbackName] ?? `// no patterns found\nsound("bd sd hh*4")`;
+  }
+} else {
+  initialName = fallbackName;
+  initialCode =
+    patterns[fallbackName] ??
+    `// no patterns found in /patterns yet — type some Strudel here\nsound("bd sd hh*4")`;
+}
 
 let currentName = initialName;
 
@@ -216,7 +247,10 @@ function readStoredCmSettingsFromLocalStorage() {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch (err) {
-    console.warn("[strasbeat/settings] could not read stored CM settings:", err);
+    console.warn(
+      "[strasbeat/settings] could not read stored CM settings:",
+      err,
+    );
     return null;
   }
 }
@@ -454,18 +488,78 @@ installSoundCompletion(editor.editor, [
 // that lives in the left rail and grows naturally to host other
 // collections later (instruments, samples, captured phrases). See
 // design/SYSTEM.md §3 and design/work/01-shell.md.
+//
+// User patterns from the store are merged in alongside shipped patterns.
+// The rail also receives a dirtySet (shipped patterns with working copies)
+// and exposes controls for revert/delete.
+
+/** Compute which shipped patterns have working copies that differ from the original. */
+function computeDirtySet() {
+  const dirty = new Set();
+  for (const name of patternNames) {
+    const record = store.get(name);
+    if (record && record.code !== patterns[name]) {
+      dirty.add(name);
+    }
+  }
+  return dirty;
+}
+
+/** Build ordered list of user pattern names from the store index. */
+function getUserPatternNames() {
+  const idx = store.getIndex();
+  // Filter out any that no longer have a record (deleted outside our control).
+  return idx.userPatterns.filter((n) => store.get(n) !== null);
+}
+
 const leftRail = mountLeftRail({
   container: leftRailContainer,
   patterns,
-  currentName: patternNames.includes(currentName) ? currentName : null,
-  devMode: import.meta.env.DEV,
+  userPatterns: getUserPatternNames(),
+  dirtySet: computeDirtySet(),
+  currentName: currentName,
   onSelect(name) {
+    // Flush current buffer to store before switching.
+    flushToStore();
     setCurrentName(name);
-    editor.setCode(patterns[name]);
+    // Load from working copy first, then original.
+    const record = store.get(name);
+    if (record) {
+      editor.setCode(record.code);
+    } else if (name in patterns) {
+      editor.setCode(patterns[name]);
+    }
+    // Update store index.
+    const idx = store.getIndex();
+    idx.lastOpen = name;
+    store.setIndex(idx);
     transport.setStatus(`loaded "${name}" — press play to hear it`);
   },
   onCreate() {
-    if (import.meta.env.DEV) handleNewPatternClick();
+    handleNewPatternClick();
+  },
+  onRevert(name) {
+    store.delete(name);
+    _lastDirtyState.delete(name);
+    if (currentName === name) {
+      editor.setCode(patterns[name]);
+    }
+    leftRail.updateDirtySet(computeDirtySet());
+    transport.setStatus(`reverted "${name}" to original`);
+  },
+  onDelete(name) {
+    store.delete(name);
+    const idx = store.getIndex();
+    idx.userPatterns = idx.userPatterns.filter((n) => n !== name);
+    leftRail.removeUserPattern(name);
+    if (currentName === name) {
+      const fallback = patternNames[0];
+      setCurrentName(fallback);
+      editor.setCode(patterns[fallback]);
+      idx.lastOpen = fallback;
+    }
+    store.setIndex(idx);
+    transport.setStatus(`deleted "${name}"`);
   },
 });
 
@@ -485,10 +579,88 @@ const transport = mountTransport({
 function setCurrentName(name) {
   currentName = name;
   patternMenuName.textContent = name || "untitled";
-  if (name && name in patterns) leftRail.setCurrent(name);
+  // The rail knows about both shipped and user patterns.
+  if (name) leftRail.setCurrent(name);
   else leftRail.clearCurrent();
 }
 setCurrentName(currentName);
+
+// Show a one-time boot message if we restored a working copy.
+if (!shared && storeIndex.lastOpen && store.get(storeIndex.lastOpen)) {
+  transport.setStatus(`restored your edits to "${storeIndex.lastOpen}"`);
+}
+
+// ─── Autosave ────────────────────────────────────────────────────────────
+// Every document change is debounced 1000ms then flushed to the store.
+// Switching patterns or closing the tab triggers an immediate flush.
+let _autosaveTimer = null;
+/** Tracks per-pattern dirty state to avoid redundant renderList() calls. */
+const _lastDirtyState = new Map();
+
+/** Write the current editor buffer to the store as a working copy. */
+function flushToStore() {
+  if (_autosaveTimer != null) {
+    clearTimeout(_autosaveTimer);
+    _autosaveTimer = null;
+  }
+  if (!currentName) return;
+  const code = editor.code;
+  if (code == null) return;
+  const isUserPattern = !(currentName in patterns);
+  try {
+    store.set(currentName, {
+      code,
+      modified: new Date().toISOString(),
+      isUserPattern,
+    });
+  } catch (err) {
+    if (err?.name === "QuotaExceededError") {
+      transport.setStatus(
+        "\u26a0 couldn\u2019t save \u2014 browser storage full",
+      );
+    }
+    return;
+  }
+  // Update dirty dot for shipped patterns — only if dirty state changed.
+  if (!isUserPattern) {
+    const isDirtyNow = code !== patterns[currentName];
+    const wasDirty = _lastDirtyState.get(currentName) ?? false;
+    if (isDirtyNow !== wasDirty) {
+      _lastDirtyState.set(currentName, isDirtyNow);
+      leftRail.updateDirtySet(computeDirtySet());
+    }
+  }
+}
+
+function scheduleAutosave() {
+  if (_autosaveTimer != null) clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(flushToStore, 1000);
+}
+
+// Hook into CodeMirror's update listener. StrudelMirror exposes the
+// EditorView at `editor.editor`, which accepts a dispatch listener via
+// the standard CM6 updateListener extension. We add it the same way we
+// added the formatter/keymap — via StateEffect.appendConfig.
+editor.editor.dispatch({
+  effects: StateEffect.appendConfig.of([
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) scheduleAutosave();
+    }),
+  ]),
+});
+
+// Update store index with lastOpen on boot.
+{
+  const idx = store.getIndex();
+  idx.lastOpen = currentName;
+  store.setIndex(idx);
+}
+
+// Flush on tab close / reload — synchronous localStorage write is safe
+// in beforeunload.
+window.addEventListener("beforeunload", () => {
+  flushToStore();
+});
 
 // ─── Top bar wiring ──────────────────────────────────────────────────────
 // Clicking the pattern wordmark focuses the left-rail search input —
@@ -670,10 +842,7 @@ function applyPanelSetting(key, value) {
   try {
     editor.changeSetting(key, value);
   } catch (err) {
-    console.warn(
-      `[strasbeat/settings] changeSetting("${key}") failed:`,
-      err,
-    );
+    console.warn(`[strasbeat/settings] changeSetting("${key}") failed:`, err);
     return;
   }
   try {
@@ -1013,11 +1182,12 @@ function endRollDrag(e) {
 rollDivider.addEventListener("pointerup", endRollDrag);
 rollDivider.addEventListener("pointercancel", endRollDrag);
 
-// ─── New pattern ("+") button — dev only ─────────────────────────────────
-// Reuses the existing /api/save endpoint with a tiny template body so the
-// "+" affordance is a UI shape change, not a new server pipe. HMR picks
-// up the new file and the page reloads.
+// ─── New pattern ("+") button ─────────────────────────────────────────────
+// In dev: writes to disk via /api/save, HMR reloads.
+// In prod: creates a user pattern in the store, appears in left rail.
 async function handleNewPatternClick() {
+  // Flush current buffer before creating a new pattern.
+  flushToStore();
   const name = await prompt({
     title: "New pattern name",
     placeholder: "letters, numbers, - and _",
@@ -1027,21 +1197,48 @@ async function handleNewPatternClick() {
       /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
   });
   if (!name) return;
-  if (name in patterns) {
+  // Check both shipped patterns and user patterns.
+  if (name in patterns || store.get(name)?.isUserPattern) {
     transport.setStatus(`"${name}" already exists — pick another name`);
     return;
   }
   const code = `// ${name}\nsetcps(120/60/4)\n\nsound("bd ~ sd ~")\n`;
-  const res = await fetch("/api/save", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, code }),
-  });
-  if (!res.ok) {
-    transport.setStatus(`save failed: ${await res.text()}`);
-    return;
+  if (import.meta.env.DEV) {
+    const res = await fetch("/api/save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, code }),
+    });
+    if (!res.ok) {
+      transport.setStatus(`save failed: ${await res.text()}`);
+      return;
+    }
+    transport.setStatus(`created "${name}" — HMR will reload`);
+  } else {
+    // Prod: store as user pattern.
+    try {
+      store.set(name, {
+        code,
+        modified: new Date().toISOString(),
+        isUserPattern: true,
+      });
+      const idx = store.getIndex();
+      idx.userPatterns = [...idx.userPatterns.filter((n) => n !== name), name];
+      idx.lastOpen = name;
+      store.setIndex(idx);
+    } catch (err) {
+      if (err?.name === "QuotaExceededError") {
+        transport.setStatus(
+          "\u26a0 couldn\u2019t save \u2014 browser storage full",
+        );
+      }
+      return;
+    }
+    leftRail.addUserPattern(name);
+    setCurrentName(name);
+    editor.setCode(code);
+    transport.setStatus(`created "${name}"`);
   }
-  transport.setStatus(`created "${name}" — HMR will reload`);
 }
 
 // ─── Transport ───────────────────────────────────────────────────────────
@@ -1079,6 +1276,9 @@ if (import.meta.env.DEV) {
     }
     const { path } = await res.json();
     setCurrentName(name);
+    // Disk is now canonical — clear the working copy from store.
+    store.delete(name);
+    leftRail.updateDirtySet(computeDirtySet());
     status.textContent = `saved → ${path}`;
     // Vite HMR will pick up the new file and re-fire the glob below.
   });
@@ -1478,10 +1678,9 @@ async function runExport(options) {
     // error in its own error state via showError, so this is a
     // deliberate double-surface.
     try {
-      consolePanel?.error(
-        `export failed: ${err?.message ?? String(err)}`,
-        { error: err },
-      );
+      consolePanel?.error(`export failed: ${err?.message ?? String(err)}`, {
+        error: err,
+      });
     } catch (panelErr) {
       console.warn("[strasbeat/console] export error echo failed:", panelErr);
     }
@@ -1569,11 +1768,37 @@ captureBtn.addEventListener("click", async () => {
     return;
   }
   if (import.meta.env.PROD) {
-    // No filesystem in prod — drop the captured phrase into the editor
-    // and let the user share it via the share button.
+    // No filesystem in prod — save as a user pattern in the store.
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[-:T.]/g, "")
+      .slice(0, 14);
+    const captureName = `captured-${stamp}`;
+    try {
+      store.set(captureName, {
+        code,
+        modified: new Date().toISOString(),
+        isUserPattern: true,
+      });
+      const idx = store.getIndex();
+      idx.userPatterns = [
+        ...idx.userPatterns.filter((n) => n !== captureName),
+        captureName,
+      ];
+      idx.lastOpen = captureName;
+      store.setIndex(idx);
+    } catch (err) {
+      if (err?.name === "QuotaExceededError") {
+        transport.setStatus(
+          "\u26a0 couldn\u2019t save \u2014 browser storage full",
+        );
+      }
+      return;
+    }
+    leftRail.addUserPattern(captureName);
     editor.setCode(code);
-    setCurrentName("captured");
-    transport.setStatus("captured phrase loaded · share to send it");
+    setCurrentName(captureName);
+    transport.setStatus(`captured phrase → "${captureName}"`);
     return;
   }
   const stamp = new Date()
@@ -1603,6 +1828,7 @@ captureBtn.addEventListener("click", async () => {
     return;
   }
   const { path } = await res.json();
+  store.delete(name); // disk is canonical, clear working copy
   transport.setStatus(`captured phrase → ${path} (HMR will reload)`);
 });
 

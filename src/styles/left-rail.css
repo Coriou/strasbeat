@@ -36,8 +36,13 @@
   height: 22px;
   color: var(--text-mut);
 }
-.left-rail__plus:hover { color: var(--text); }
-.left-rail__plus svg { width: 14px; height: 14px; }
+.left-rail__plus:hover {
+  color: var(--text);
+}
+.left-rail__plus svg {
+  width: 14px;
+  height: 14px;
+}
 
 .left-rail__search {
   position: relative;
@@ -54,7 +59,9 @@
   font: inherit;
   font-size: var(--text-sm);
   outline: none;
-  transition: border-color var(--t-hover), background var(--t-hover);
+  transition:
+    border-color var(--t-hover),
+    background var(--t-hover);
 }
 .left-rail__search-input::placeholder {
   color: var(--text-dim);
@@ -72,7 +79,10 @@
   color: var(--text-dim);
   pointer-events: none;
 }
-.left-rail__search-icon svg { width: 14px; height: 14px; }
+.left-rail__search-icon svg {
+  width: 14px;
+  height: 14px;
+}
 
 .left-rail__list {
   flex: 1 1 auto;
@@ -83,8 +93,13 @@
   scrollbar-width: thin;
   scrollbar-color: var(--surface-3) transparent;
 }
-.left-rail__list::-webkit-scrollbar { width: 6px; }
-.left-rail__list::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 3px; }
+.left-rail__list::-webkit-scrollbar {
+  width: 6px;
+}
+.left-rail__list::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 3px;
+}
 
 .left-rail__item {
   display: flex;
@@ -101,7 +116,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background var(--t-hover), color var(--t-hover);
+  transition:
+    background var(--t-hover),
+    color var(--t-hover);
 }
 .left-rail__item:hover {
   background: var(--surface-2);
@@ -137,4 +154,62 @@
   font-size: var(--text-xs);
   color: var(--text-dim);
   text-align: center;
+}
+
+/* ─── Dirty dot (modified indicator) ──────────────────────────────────── */
+.left-rail__dirty-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: auto;
+}
+
+/* ─── User patterns divider ───────────────────────────────────────────── */
+.left-rail__divider {
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+/* ─── Context menu ────────────────────────────────────────────────────── */
+.left-rail__context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 160px;
+  padding: var(--space-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.3));
+}
+
+.left-rail__context-item {
+  display: block;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-hover);
+}
+.left-rail__context-item:hover {
+  background: var(--surface-3);
+}
+.left-rail__context-item--danger {
+  color: var(--red, #f87171);
+}
+.left-rail__context-item--danger:hover {
+  background: color-mix(in oklch, var(--red, #f87171) 15%, transparent);
 }
