@@ -211,6 +211,27 @@ const editor = new StrudelMirror({
   },
 });
 
+// Strudel resets the Drawer's drawTime to [0, 0] after every eval when the
+// pattern has no .onPaint() / .pianoroll() calls
+// (@strudel/codemirror/codemirror.mjs:221-222 — the user-facing afterEval
+// hook fires *before* the reset, so re-setting from there gets immediately
+// overwritten). We render the piano roll via the constructor's `onDraw`,
+// not via .onPaint() on individual patterns, so the reset would collapse
+// our 4-cycle window to "currently playing only": the framer's per-frame
+// filter `endClipped >= phase - lookbehind - lookahead` becomes
+// `endClipped >= phase`, pruning every hap the instant it ends. Intercept
+// the reset at the drawer level so both the immediate `invalidate()` call
+// (which pre-loads future haps in [t, t + lookahead]) and the per-frame
+// filter see our intended window.
+const _setDrawTime = editor.drawer.setDrawTime.bind(editor.drawer);
+editor.drawer.setDrawTime = (dt) => {
+  if (Array.isArray(dt) && dt[0] === 0 && dt[1] === 0) {
+    _setDrawTime(drawTime);
+  } else {
+    _setDrawTime(dt);
+  }
+};
+
 // ─── IDE-quality editor settings ─────────────────────────────────────────
 // Strudel ships autocomplete, hover tooltips, bracket matching, multi-cursor
 // etc. but defaults all of them OFF. Turn them on so the editor feels like a
