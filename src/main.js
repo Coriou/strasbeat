@@ -24,6 +24,10 @@ import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
 import { renderRoll } from "./ui/piano-roll.js";
 import { prompt } from "./ui/modal.js";
+import {
+  applyStoredAccent,
+  mountSettingsDrawer,
+} from "./ui/settings-drawer.js";
 
 const { evalScope, controls } = strudelCore;
 const {
@@ -82,6 +86,10 @@ const rollDivider = document.getElementById("roll-divider");
 // rest of the wiring runs — every later attachShell handler can rely on
 // the icons already being in the DOM.
 hydrateIcons(document);
+
+// Restore the user's chosen accent (if any) before any other UI mounts so
+// the page never flashes the default rose pink. See settings-drawer.js.
+applyStoredAccent();
 
 // Toggle dev-only chrome (e.g. the disk-backed save button) via a body
 // class. CSS hides .dev-only by default and reveals it when .dev-mode is
@@ -308,12 +316,10 @@ setCurrentName(currentName);
 // ─── Top bar wiring ──────────────────────────────────────────────────────
 // Clicking the pattern wordmark focuses the left-rail search input —
 // gives the user a one-click path from "what am I editing" to "what else
-// is in the library". Settings is a placeholder for v1; the spec
-// (01-shell.md) explicitly allows a no-op icon button.
+// is in the library". The settings popover is wired by the settings-drawer
+// module — it handles open/close, focus, and persistence internally.
 patternMenuBtn.addEventListener("click", () => leftRail.focusSearch());
-settingsBtn.addEventListener("click", () => {
-  transport.setStatus("settings drawer is coming in v2 (design/work)");
-});
+mountSettingsDrawer({ button: settingsBtn });
 
 // ─── Collapsible piano roll ──────────────────────────────────────────────
 // Click the transport's roll-toggle button to collapse/expand. The shell

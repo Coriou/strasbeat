@@ -1,0 +1,193 @@
+/*
+ * Settings popover — anchored under the #settings button.
+ * See design/SYSTEM.md §2.6 (floating contextual actions), §5–§8
+ * (surfaces, elevation, radii) and §9 (motion).
+ */
+
+.settings-pop {
+  position: fixed;
+  z-index: 900;
+  width: 280px;
+  padding: var(--space-4);
+  background: var(--surface-1);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  /* Enter animation: 120ms ease-out per SYSTEM.md §9. */
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transform-origin: top right;
+  transition: opacity var(--t-pop-in), transform var(--t-pop-in);
+}
+
+.settings-pop--open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.settings-pop--exiting {
+  opacity: 0;
+  transform: translateY(-2px) scale(0.99);
+  transition: opacity var(--t-pop-out), transform var(--t-pop-out);
+}
+
+.settings-pop__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.settings-pop__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.settings-pop__title {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.settings-pop__swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-low);
+}
+
+.settings-pop__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.settings-pop__field-label {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-mut);
+  user-select: none;
+}
+
+/* ─── Range slider ─── */
+
+.settings-pop__slider {
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+  margin: 0;
+}
+
+.settings-pop__slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+}
+.settings-pop__slider::-moz-range-track {
+  height: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+}
+
+/* The hue track gets a rainbow so the user can see the spectrum. */
+.settings-pop__slider.settings-pop__hue-track::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    oklch(0.63 0.19 0),
+    oklch(0.63 0.19 60),
+    oklch(0.63 0.19 120),
+    oklch(0.63 0.19 180),
+    oklch(0.63 0.19 240),
+    oklch(0.63 0.19 300),
+    oklch(0.63 0.19 360)
+  );
+}
+.settings-pop__slider.settings-pop__hue-track::-moz-range-track {
+  background: linear-gradient(
+    to right,
+    oklch(0.63 0.19 0),
+    oklch(0.63 0.19 60),
+    oklch(0.63 0.19 120),
+    oklch(0.63 0.19 180),
+    oklch(0.63 0.19 240),
+    oklch(0.63 0.19 300),
+    oklch(0.63 0.19 360)
+  );
+}
+
+.settings-pop__slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--text);
+  border: 2px solid var(--surface-1);
+  box-shadow: var(--shadow-low);
+  transition: transform var(--t-hover);
+}
+.settings-pop__slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  border: 2px solid var(--surface-1);
+  box-shadow: var(--shadow-low);
+}
+
+.settings-pop__slider:focus-visible {
+  outline: none;
+}
+.settings-pop__slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.settings-pop__slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* ─── Reset link ─── */
+
+.settings-pop__reset-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-1);
+}
+
+.settings-pop__reset {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--text-mut);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+  transition: color var(--t-hover), text-decoration-color var(--t-hover);
+}
+.settings-pop__reset:hover {
+  color: var(--accent-hi);
+  text-decoration-color: var(--accent);
+}
+.settings-pop__reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
