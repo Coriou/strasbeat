@@ -22,9 +22,9 @@ import { signatureHint } from "./editor/signature-hint.js";
 import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
+import { renderRoll } from "./ui/piano-roll.js";
 
 const { evalScope, controls } = strudelCore;
-const { drawPianoroll } = strudelDraw;
 const {
   getAudioContext,
   webaudioOutput,
@@ -163,7 +163,7 @@ const editor = new StrudelMirror({
   drawTime,
   autodraw: true,
   onDraw: (haps, time) =>
-    drawPianoroll({ haps, time, ctx: drawCtx, drawTime, fold: 0 }),
+    renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor }),
   prebake: async () => {
     initAudioOnFirstClick();
     // evalScope uses Promise.allSettled, so passing module values is fine —
