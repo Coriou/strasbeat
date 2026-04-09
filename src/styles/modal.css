@@ -1,0 +1,113 @@
+/*
+ * Modal — in-app prompt replacement (src/ui/modal.js).
+ * See design/SYSTEM.md §2.7 (no native dialogs), §5–§8 (surfaces, elevation,
+ * radii) and §9 (motion).
+ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: oklch(0 0 0 / 0.4);
+  /* Start hidden so the open animation has somewhere to come from. */
+  opacity: 0;
+  transition: opacity var(--t-pop-in);
+}
+
+.modal-overlay--open {
+  opacity: 1;
+}
+
+.modal-overlay--exiting {
+  opacity: 0;
+  transition: opacity var(--t-pop-out);
+}
+
+.modal {
+  min-width: 360px;
+  max-width: min(480px, calc(100vw - var(--space-6)));
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  /* Mirror the overlay's enter/exit timing with a tiny pop. */
+  transform: translateY(4px) scale(0.98);
+  transition: transform var(--t-pop-in);
+}
+
+.modal-overlay--open .modal {
+  transform: translateY(0) scale(1);
+}
+
+.modal-overlay--exiting .modal {
+  transform: translateY(2px) scale(0.99);
+  transition: transform var(--t-pop-out);
+}
+
+.modal__title {
+  font-size: var(--text-base);
+  line-height: var(--lh-base);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal__input {
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--space-2);
+  background: var(--surface-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  outline: none;
+  transition: border-color var(--t-hover), background var(--t-hover);
+}
+.modal__input::placeholder {
+  color: var(--text-dim);
+}
+.modal__input:focus {
+  border-color: var(--accent);
+}
+
+.modal__error {
+  min-height: var(--lh-xs);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--rec);
+  /* Reserve the line so the dialog doesn't jump when an error appears. */
+}
+.modal__error:empty {
+  /* keep the height even when empty */
+}
+
+.modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.modal__confirm {
+  --btn-bg: var(--accent);
+  --btn-fg: var(--text);
+  --btn-bd: var(--accent);
+}
+.modal__confirm:hover {
+  --btn-bg: var(--accent-hi);
+  --btn-bd: var(--accent-hi);
+}
+.modal__confirm:active {
+  --btn-bg: var(--accent-lo);
+  --btn-bd: var(--accent-lo);
+}

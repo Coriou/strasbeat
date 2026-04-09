@@ -23,6 +23,7 @@ import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
 import { renderRoll } from "./ui/piano-roll.js";
+import { prompt } from "./ui/modal.js";
 
 const { evalScope, controls } = strudelCore;
 const {
@@ -374,16 +375,17 @@ rollDivider.addEventListener("pointercancel", endRollDrag);
 // "+" affordance is a UI shape change, not a new server pipe. HMR picks
 // up the new file and the page reloads.
 async function handleNewPatternClick() {
-  // TODO: replace window.prompt with an in-app modal — see SYSTEM.md §2.7.
-  const name = window.prompt(
-    "New pattern name (letters/numbers/-_):",
-    `untitled-${Date.now().toString(36)}`,
-  );
+  const name = await prompt({
+    title: "New pattern name",
+    placeholder: "letters, numbers, - and _",
+    defaultValue: `untitled-${Date.now().toString(36)}`,
+    confirmLabel: "Create",
+    validate: (v) =>
+      /^[a-z0-9_-]+$/i.test(v)
+        ? null
+        : "use only letters, numbers, - and _",
+  });
   if (!name) return;
-  if (!/^[a-z0-9_-]+$/i.test(name)) {
-    transport.setStatus("invalid name — use only letters, numbers, - and _");
-    return;
-  }
   if (name in patterns) {
     transport.setStatus(`"${name}" already exists — pick another name`);
     return;
@@ -416,15 +418,17 @@ stopBtn.addEventListener("click", () => editor.stop());
 if (import.meta.env.DEV) {
   saveBtn.addEventListener("click", async () => {
     const suggestion = currentName || "untitled";
-    const name = window.prompt(
-      "Save as (filename without .js, letters/numbers/-_):",
-      suggestion,
-    );
+    const name = await prompt({
+      title: "Save pattern as",
+      placeholder: "filename without .js",
+      defaultValue: suggestion,
+      confirmLabel: "Save",
+      validate: (v) =>
+        /^[a-z0-9_-]+$/i.test(v)
+          ? null
+          : "use only letters, numbers, - and _",
+    });
     if (!name) return;
-    if (!/^[a-z0-9_-]+$/i.test(name)) {
-      status.textContent = "invalid name — use only letters, numbers, - and _";
-      return;
-    }
     const res = await fetch("/api/save", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -594,7 +598,18 @@ function downloadWav(arrayBuf, filename) {
 }
 
 exportBtn.addEventListener("click", async () => {
-  const input = window.prompt("Render length (in cycles):", "4");
+  const input = await prompt({
+    title: "Render length",
+    placeholder: "cycles",
+    defaultValue: "4",
+    confirmLabel: "Render",
+    validate: (v) => {
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) && n >= 1
+        ? null
+        : "must be a positive integer";
+    },
+  });
   if (input == null) return;
   const cycles = parseInt(input, 10);
   if (!Number.isFinite(cycles) || cycles < 1) {
@@ -737,22 +752,23 @@ captureBtn.addEventListener("click", async () => {
     transport.setStatus("captured phrase loaded · share to send it");
     return;
   }
-  // TODO: replace window.prompt with an in-app modal — see SYSTEM.md §2.7.
   const stamp = new Date()
     .toISOString()
     .replace(/[-:T.]/g, "")
     .slice(0, 14);
   const suggestion = `captured-${stamp}`;
-  const name = window.prompt(
-    "Save captured phrase as (filename without .js):",
-    suggestion,
-  );
+  const name = await prompt({
+    title: "Save captured phrase",
+    placeholder: "filename without .js",
+    defaultValue: suggestion,
+    confirmLabel: "Save",
+    validate: (v) =>
+      /^[a-z0-9_-]+$/i.test(v)
+        ? null
+        : "use only letters, numbers, - and _",
+  });
   if (!name) {
     transport.setStatus("capture discarded");
-    return;
-  }
-  if (!/^[a-z0-9_-]+$/i.test(name)) {
-    transport.setStatus("invalid name — use only letters, numbers, - and _");
     return;
   }
   const res = await fetch("/api/save", {
