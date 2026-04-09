@@ -1,0 +1,160 @@
+// Sugar over the canonical chord().dict().voicing().arp().s() chain so a
+// pattern file can sketch a tune from any chord chart in one line:
+//
+//   $: progression("Cm7 F7 Bb^7 Eb^7")
+//   $: progression("Cm7 F7 Bb^7 Eb^7", { rhythm: "arp-up" })
+//   $: progression("Cm7 F7 Bb^7", { bass: true })
+//
+// Voice leading, voicing dictionaries, and chord parsing all stay delegated
+// to @strudel/tonal — this module owns nothing musical, only the choice of
+// defaults and the rhythm preset table. See design/work/07-chord-progression.md
+// for the spec this implements (Phase 1).
+
+import { chord, silence, slowcat, stack } from "@strudel/core";
+import { mini } from "@strudel/mini";
+// Side-effect import: @strudel/tonal registers .voicing(), .dict() (the
+// dictionary control comes from core/controls.mjs), and .rootNotes() on
+// Pattern.prototype. main.js imports this transitively, but we re-import
+// it here so progression.js works in any context that pulls in this file
+// (notably node --test, which doesn't load main.js).
+import "@strudel/tonal";
+
+// Mini-notation arp index strings, one per rhythm preset. The chord pattern
+// has its voicing computed first, then `.arp(...)` indexes into the resulting
+// notes — `i % haps.length` in @strudel/core/pattern.mjs:1003 means these
+// indices wrap modulo the voicing size, so they work for both 3- and 4-note
+// dictionaries without per-dict tuning.
+//
+// `block` is special: no `.arp()` call at all, so the whole chord plays as
+// one sustained event per cycle.
+const RHYTHMS = {
+  block: null,
+  // 4 strums per cycle, each strum a fast 4-note ascending sweep.
+  strum: "[0 1 2 3]*4",
+  // Jazz-style offbeat comp: 8 8th-note steps, full chord stab on the
+  // "and" of beat 2 and the "and" of beat 4 (the classic left-hand
+  // anticipations).
+  comp: "~ ~ ~ [0,1,2,3] ~ ~ ~ [0,1,2,3]",
+  // Ascending arpeggio across the cycle.
+  "arp-up": "0 1 2 3",
+  // Descending.
+  "arp-down": "3 2 1 0",
+  // Alberti pattern (root-top-middle-top), classical left-hand figure.
+  alberti: "0 2 1 2",
+};
+
+const DEFAULTS = {
+  sound: "gm_epiano1",
+  dict: "ireal",
+  rhythm: "block",
+  bass: false,
+};
+
+const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
+
+/**
+ * Turn a one-line chord progression into a playable Strudel pattern.
+ *
+ * Accepts whitespace-separated absolute chord symbols (`Cm7 F7 Bb^7`),
+ * cycles through them at one chord per cycle, and runs them through
+ * `chord().dict().voicing()` from @strudel/tonal — so voice leading, slash
+ * chord parsing (`Cm7/G`), and the voicing dictionaries (`ireal`,
+ * `lefthand`, `triads`, `guidetones`, `legacy`) all come for free.
+ *
+ * Returns a real Strudel `Pattern`, so the result chains with `.slow()`,
+ * `.gain()`, `.every()`, etc. like any other source.
+ *
+ * @param {string} chords whitespace-separated chord symbols
+ * @param {object} [options]
+ * @param {string} [options.sound="gm_epiano1"] sound name (verify with `strasbeat.hasSound`)
+ * @param {string} [options.dict="ireal"] voicing dictionary name
+ * @param {string} [options.rhythm="block"] rhythm preset name OR a raw mini-notation arp string
+ * @param {boolean|string} [options.bass=false] layer a bass line on the chord roots; pass a sound name to override `gm_acoustic_bass`
+ * @returns {Pattern}
+ *
+ * @example
+ * progression("Cm7 F7 Bb^7 Eb^7")
+ * @example
+ * progression("ii V I", { sound: "gm_pad_warm", rhythm: "arp-up" })
+ */
+export function progression(chords, options = {}) {
+  // Empty input → return silence loudly. Patterns are re-evaluated live and
+  // a thrown error would stop the scheduler entirely (CLAUDE.md "surface
+  // silent failures loudly").
+  if (typeof chords !== "string" || chords.trim() === "") {
+    console.warn(
+      '[strasbeat] progression(): empty chord input, returning silence',
+    );
+    return silence;
+  }
+
+  const opts = { ...DEFAULTS, ...options };
+
+  // Resolve the rhythm: a known preset name → its arp string (or null for
+  // `block`); an unknown preset name → warn + fall back to block; anything
+  // else (including raw mini-notation strings like "0 [0,2] 1") is forwarded
+  // verbatim as the escape hatch.
+  let arpString;
+  if (opts.rhythm in RHYTHMS) {
+    arpString = RHYTHMS[opts.rhythm];
+  } else if (typeof opts.rhythm === "string" && /[~\[\],]|\s/.test(opts.rhythm)) {
+    // Looks like a raw mini-notation pattern (contains whitespace, brackets,
+    // commas, or rests) — forward as-is.
+    arpString = opts.rhythm;
+  } else {
+    console.warn(
+      `[strasbeat] progression(): unknown rhythm "${opts.rhythm}", falling back to "block". Known: ${Object.keys(RHYTHMS).join(", ")}`,
+    );
+    arpString = RHYTHMS.block;
+  }
+
+  // Build the per-chord pattern using slowcat() — the JS equivalent of the
+  // `<a b c>` mini-notation construct. We can't route the chord names
+  // through mini() because mini reserves `/` as the slow operator, which
+  // collides with slash-chord notation like `Cm7/G`. slowcat treats each
+  // arg as a literal cycle, so the slash flows through unchanged and is
+  // resolved later by tokenizeChord() inside @strudel/tonal.
+  const tokens = chords.trim().split(/\s+/);
+  const cyclePat = slowcat(...tokens);
+
+  // chord(pat) attaches the chord control so .voicing() / .dict() / .arp()
+  // know which symbol to render. Slash chords (`Cm7/G`) flow through
+  // tokenizeChord in @strudel/tonal/tonleiter.mjs:22 — we don't reinvent
+  // the parser.
+  let chordPat = chord(cyclePat);
+
+  // Only emit .dict() when the user picked something other than the Strudel
+  // default — keeps the chain shorter for the 80% case.
+  if (opts.dict !== DEFAULTS.dict) {
+    chordPat = chordPat.dict(opts.dict);
+  }
+
+  chordPat = chordPat.voicing();
+
+  if (arpString != null) {
+    // mini() needed for the same reason as above: the inner mini-notation
+    // string isn't auto-wrapped outside the transpiler.
+    chordPat = chordPat.arp(mini(arpString));
+  }
+
+  chordPat = chordPat.s(opts.sound);
+
+  if (!opts.bass) {
+    return chordPat;
+  }
+
+  // Bass layer: take the same chord cycle, extract the root note in octave
+  // 2, set it as a note pattern, and pick a bass sound. rootNotes() comes
+  // from @strudel/tonal/voicings.mjs and only reads the chord *symbol*, so
+  // slash chord bass notes (`Cm7/G`) are ignored at this layer — the slash
+  // bass still appears in the voicing itself.
+  const bassSound =
+    typeof opts.bass === "string" ? opts.bass : DEFAULT_BASS_SOUND;
+  const bassPat = cyclePat.rootNotes(2).note().s(bassSound);
+
+  return stack(chordPat, bassPat);
+}
+
+// Re-exported so unit tests can assert against the canonical preset list
+// without duplicating the keys.
+export { RHYTHMS };

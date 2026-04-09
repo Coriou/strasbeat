@@ -9,7 +9,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "gen:docs": "node scripts/build-strudel-docs.mjs"
+    "gen:docs": "node scripts/build-strudel-docs.mjs",
+    "test": "node --import ./scripts/test-register.mjs --test src/strudel-ext/progression.test.js"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",
