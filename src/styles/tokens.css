@@ -6,29 +6,32 @@
 
 :root {
   /* ─── Surfaces (pure greyscale, OKLCH for perceptual evenness) ─── */
-  --surface-0: oklch(0.16 0 0);   /* page background */
-  --surface-1: oklch(0.20 0 0);   /* panels: left rail, transport, roll */
-  --surface-2: oklch(0.24 0 0);   /* elevated: buttons, dropdowns, popovers */
-  --surface-3: oklch(0.28 0 0);   /* hover states */
-  --border:      oklch(0.30 0 0); /* visible hairlines, ~1px */
+  --surface-0: oklch(0.16 0 0); /* page background */
+  --surface-1: oklch(0.2 0 0); /* panels: left rail, transport, roll */
+  --surface-2: oklch(0.24 0 0); /* elevated: buttons, dropdowns, popovers */
+  --surface-3: oklch(0.28 0 0); /* hover states */
+  --border: oklch(0.3 0 0); /* visible hairlines, ~1px */
   --border-soft: oklch(0.24 0 0); /* subtle dividers */
 
   /* ─── Text ─── */
-  --text:     oklch(0.96 0 0);
+  --text: oklch(0.96 0 0);
   --text-mut: oklch(0.65 0 0);
   --text-dim: oklch(0.45 0 0);
+  --foreground: var(
+    --text
+  ); /* Strudel highlight.mjs uses var(--foreground) for active-note outlines */
 
   /* ─── Accent (rose pink — see design/SYSTEM.md §5.1 for the hex equivalents
      and rationale; do not duplicate them here so the OKLCH values stay the
      single source of truth in CSS). ─── */
-  --accent:      oklch(0.63 0.19 358);
-  --accent-hi:   oklch(0.70 0.20 358);
-  --accent-lo:   oklch(0.42 0.12 358);
+  --accent: oklch(0.63 0.19 358);
+  --accent-hi: oklch(0.7 0.2 358);
+  --accent-lo: oklch(0.42 0.12 358);
   --accent-wash: oklch(0.63 0.19 358 / 0.12);
 
   /* ─── Semantic (only when meaningful) ─── */
-  --rec: oklch(0.65 0.22 25);   /* recording, errors */
-  --ok:  oklch(0.78 0.16 150);  /* MIDI connected, success */
+  --rec: oklch(0.65 0.22 25); /* recording, errors */
+  --ok: oklch(0.78 0.16 150); /* MIDI connected, success */
 
   /* ─── Spacing scale ─── */
   --space-0: 0;
@@ -42,25 +45,26 @@
   --space-8: 64px;
 
   /* ─── Type ─── */
-  --font-sans: 'Geist Variable', system-ui, -apple-system, Segoe UI, sans-serif;
-  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: "Geist Variable", system-ui, -apple-system, Segoe UI, sans-serif;
+  --font-mono:
+    "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
 
-  --text-xs:   11px;
-  --text-sm:   12px;
+  --text-xs: 11px;
+  --text-sm: 12px;
   --text-base: 13px;
-  --text-md:   14px;
-  --code-sm:   13px;
+  --text-md: 14px;
+  --code-sm: 13px;
   --code-base: 15px;
 
-  --lh-xs:   16px;
-  --lh-sm:   18px;
+  --lh-xs: 16px;
+  --lh-sm: 18px;
   --lh-base: 20px;
-  --lh-md:   22px;
+  --lh-md: 22px;
 
   /* ─── Elevation ─── */
   --shadow-low: 0 1px 2px oklch(0 0 0 / 0.4);
-  --shadow-pop: 0 2px 4px oklch(0 0 0 / 0.4),
-                0 8px 24px oklch(0 0 0 / 0.5);
+  --shadow-pop: 0 2px 4px oklch(0 0 0 / 0.4), 0 8px 24px oklch(0 0 0 / 0.5);
 
   /* ─── Radii ─── */
   --radius-sm: 4px;
@@ -70,14 +74,14 @@
   /* ─── Motion ─── */
   --t-hover: 120ms ease-out;
   --t-panel: 200ms cubic-bezier(0.16, 1, 0.3, 1);
-  --t-pop-in:  120ms ease-out;
-  --t-pop-out:  80ms ease-in;
+  --t-pop-in: 120ms ease-out;
+  --t-pop-out: 80ms ease-in;
 
   /* ─── Shell-specific (consumed by .shell grid) ─── */
   --top-bar-h: 40px;
   --transport-h: 32px;
   --left-rail-w: 240px;
-  --roll-h: 180px;       /* current value when expanded; JS toggles between 0 and this */
+  --roll-h: 180px; /* current value when expanded; JS toggles between 0 and this */
   --roll-min-h: 80px;
   --roll-max-h: 360px;
 }
