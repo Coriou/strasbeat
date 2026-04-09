@@ -55,6 +55,12 @@ const BOTTOM_LABEL_H = 14;   // reserved strip at the bottom for cycle labels
 const LEFT_GUTTER_W = 44;    // reserved strip on the left for row labels
 const PILL_RADIUS = 3;       // ≈ --radius-sm minus a hair so corners stay crisp
 const MIN_PX_PER_BEAT = 8;   // hide beat lines below this density
+// How long a row stays reserved after we last saw any pill on it. The
+// framer's visibleHaps is only ~4 cycles wide and patterns with masks /
+// long periods don't show every value every frame, so we cache row values
+// across frames. 16 cycles covers most metric loops while still letting
+// truly-removed rows decay (e.g. after the user edits the pattern).
+const ROW_STABILITY_CYCLES = 16;
 
 // Per-canvas state. Keyed by HTMLCanvasElement so the click listener and
 // the persistent color map are bound exactly once even though the renderer
@@ -71,6 +77,13 @@ function ensureState(canvas) {
       // First-sight → palette index. Persistent across frames so a layer's
       // color never re-flips when other layers appear or disappear.
       colorForKey: new Map(),
+      // value → t1 of the most recent frame in which a pill for this value
+      // was visible. Used to keep the row layout stable across frames even
+      // when the framer's visibleHaps slice doesn't contain every row.
+      valueLastSeen: new Map(),
+      // Last frame's t1 in cycles, for detecting backward time jumps
+      // (stop+play, scrub, pattern eval that resets time).
+      lastT1: -Infinity,
     };
     stateByCanvas.set(canvas, s);
   }
@@ -280,18 +293,30 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     visibleHaps.push({ hap, begin, end, val });
   }
 
-  // Fold layout: collect all unique values and map each to a slot index.
+  // Fold layout: rows are derived from a per-canvas cache that persists
+  // across frames. Without this, the row set rebuilds from `visibleHaps`
+  // every frame, which is unstable: the framer's slice is ~4 cycles wide,
+  // patterns with masks or long periods don't show every value every frame,
+  // and the labels would shuffle as values come and go. The cache holds the
+  // most recent t1 each value was seen at; values not seen for
+  // ROW_STABILITY_CYCLES are dropped, so genuinely-removed rows still decay
+  // (e.g. after a pattern edit) without per-frame churn.
+  if (t1 < state.lastT1 - 0.5) {
+    // Time jumped backward: stop+play, scrub, or pattern eval reset.
+    // Dropping the cache prevents stale rows from a previous run.
+    state.valueLastSeen.clear();
+  }
+  state.lastT1 = t1;
+  for (const item of visibleHaps) {
+    if (item.val != null) state.valueLastSeen.set(item.val, t1);
+  }
+  const decayCutoff = t1 - ROW_STABILITY_CYCLES;
+  for (const [val, lastT] of state.valueLastSeen) {
+    if (lastT < decayCutoff) state.valueLastSeen.delete(val);
+  }
+  const uniqueValues = Array.from(state.valueLastSeen.keys());
   // strings (drum sounds) sort first so they anchor at the bottom of the
   // canvas after y-inversion; numbers (pitched notes) sort after, ascending.
-  const uniqueValues = [];
-  const seenValues = new Set();
-  for (const item of visibleHaps) {
-    const val = item.val;
-    if (val != null && !seenValues.has(val)) {
-      seenValues.add(val);
-      uniqueValues.push(val);
-    }
-  }
   uniqueValues.sort((a, b) => {
     if (typeof a === 'number' && typeof b === 'number') return a - b;
     if (typeof a === 'number') return 1;  // numbers sort AFTER strings
