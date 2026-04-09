@@ -58,10 +58,16 @@ on earlier ones:
    indicators. Phased; Phase 1 (autosave + store abstraction) solves the
    "lose work" problem. Phase 3 sketches migration to API-backed user
    accounts. Independent of 1–7 (touches `main.js` boot + left rail).
-9. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
-   multi-track DAW). **Not actionable yet** — read for context only when
-   working on the actionable specs above, so you don't paint us into a
-   corner.
+9. **`work/10-main-refactor.md`** — pure refactor of `src/main.js`
+   (1,925 → ~600 lines). Extracts seven focused modules (`share.js`,
+   `export.js`, `editor-actions.js`, `piano-roll-resize.js`, `debug.js`,
+   `patterns.js`, `editor-setup.js`). No features, no logic changes, no
+   visual changes. Independent of 1–8 (but best done after 08 and 09 are
+   landed, since those are the last specs that add code to `main.js`).
+10. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
+    multi-track DAW). **Not actionable yet** — read for context only when
+    working on the actionable specs above, so you don't paint us into a
+    corner.
 
 ## Launching an agent on a task
 
