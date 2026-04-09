@@ -1,0 +1,131 @@
+/*
+ * Inline numeric scrubber styles. Goes with src/editor/numeric-scrubber.js.
+ * See design/work/03-numeric-scrubber.md §"Visual feedback".
+ *
+ * Class layout (per literal in the visible viewport):
+ *
+ *   <span class="cm-scrub-literal">0.5</span>   ← the literal text (mark)
+ *   <span class="cm-scrub-handle"></span>       ← invisible 4px hit zone
+ *
+ * During an active drag the StateField also wraps the literal with
+ * `cm-scrub-literal-active` and inserts a `cm-scrub-chip` widget at the
+ * literal's start position.
+ */
+
+/* ─── Hit zone ─────────────────────────────────────────────────────────── */
+
+/*
+ * The wrap span has zero inline width so it never shifts neighbouring
+ * characters. Its ::before is absolutely positioned, 4px wide, immediately
+ * to the right of the literal — that's where the user actually clicks. The
+ * design spec calls for a 1px hit zone but explicitly allows widening to
+ * 4–6px for reachability; 4px feels right at editor zoom.
+ */
+.cm-scrub-handle {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 1em;
+  vertical-align: text-top;
+}
+
+.cm-scrub-handle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  cursor: ew-resize;
+  /* Visually transparent — the affordance is the cursor change, not a
+     drawn handle. */
+}
+
+/* ─── Hover affordance on the literal ──────────────────────────────────── */
+
+/*
+ * When the cursor is in the hit zone, give the *adjacent* literal a subtle
+ * accent-tinted underline so the user can see what they're about to scrub.
+ * Uses :has() with the adjacent-sibling combinator (Chrome 105+, Safari
+ * 15.4+, Firefox 121+ — well within the project's "modern browsers only"
+ * baseline). Falling back to :hover on the literal itself would conflict
+ * with click-to-place-cursor behaviour, so we deliberately don't.
+ */
+.cm-scrub-literal:has(+ .cm-scrub-handle:hover) {
+  text-decoration: underline 1px solid var(--accent-wash);
+  text-underline-offset: 2px;
+}
+
+/* ─── Active drag overlay ──────────────────────────────────────────────── */
+
+.cm-scrub-literal-active {
+  /* Stronger than the hover wash — this is the "you are dragging" colour. */
+  color: var(--accent);
+  text-decoration: underline 1px solid var(--accent);
+  text-underline-offset: 2px;
+}
+
+/* ─── Floating chip readout ────────────────────────────────────────────── */
+
+/*
+ * The chip is a CodeMirror widget rendered just before the literal in the
+ * inline flow. The outer span has zero size and `position: relative` so the
+ * inner pop-out can position absolutely above the literal without disturbing
+ * line layout. Tokens come from src/styles/tokens.css per design/SYSTEM.md
+ * §5/§7/§8 — no hard-coded colours.
+ */
+.cm-scrub-chip {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+  vertical-align: baseline;
+  pointer-events: none;
+}
+
+.cm-scrub-chip__inner {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
+  white-space: nowrap;
+  /* Above the editor's gutter / cursor (CM6 cursor sits at z 200ish; the
+     chip just needs to clear inline siblings). */
+  z-index: 5;
+  /* Match the chip's pop-in to the rest of the design system's elevation
+     vocabulary — soft and quick. */
+  animation: cm-scrub-chip-in var(--t-pop-in) both;
+}
+
+@keyframes cm-scrub-chip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ─── Cursor lock during drag ──────────────────────────────────────────── */
+
+/*
+ * The pointer can leave the hit zone mid-drag (the user moves horizontally
+ * past the editor's edge, etc). Forcing ew-resize on <body> for the
+ * duration of the drag keeps the cursor consistent everywhere on screen.
+ * The class is toggled by the ViewPlugin in numeric-scrubber.js.
+ */
+body.cm-scrub-dragging,
+body.cm-scrub-dragging * {
+  cursor: ew-resize !important;
+  user-select: none;
+}

@@ -11,7 +11,11 @@ import * as strudelDraw from '@strudel/draw';
 import * as strudelMini from '@strudel/mini';
 import * as strudelTonal from '@strudel/tonal';
 import * as strudelWebaudio from '@strudel/webaudio';
+import { Prec, StateEffect } from '@codemirror/state';
 import { MidiBridge, presets as midiPresets } from './midi-bridge.js';
+import { formatExtension } from './editor/format.js';
+import { createVscodeKeymap } from './editor/keymap.js';
+import { numericScrubber } from './editor/numeric-scrubber.js';
 import { hydrateIcons } from './ui/icons.js';
 import { mount as mountLeftRail } from './ui/left-rail.js';
 import { mountTransport } from './ui/transport.js';
@@ -210,6 +214,37 @@ editor.updateSettings({
   isMultiCursorEnabled: true,
   isActiveLineHighlighted: true,
   isTabIndentationEnabled: true,
+});
+
+// Inject our editor extensions (Prettier formatter + VSCode-style keymap +
+// numeric scrubber) into the live EditorView. StrudelMirror builds the view
+// internally and doesn't expose an `extensions` array, so we use the
+// standard CM6 `StateEffect.appendConfig` mechanism to add them after
+// construction.
+//
+// Why Prec.highest on the keymaps: Strudel loads `defaultKeymap` from
+// `@codemirror/commands` at Prec.high (via the `keybindings: 'codemirror'`
+// setting), and `defaultKeymap` already binds `Mod-Enter` to `insertBlankLine`.
+// Without an explicit precedence, our `Mod-Enter → evaluate` binding would
+// sit at default precedence and lose to `insertBlankLine` — Cmd+Enter would
+// silently insert a blank line instead of evaluating. Prec.highest puts us
+// at the same level as Strudel's own `Ctrl-Enter` binding, and since none of
+// our keys collide with Strudel's Prec.highest set, both coexist cleanly.
+//
+// The numeric scrubber is left at default precedence — it's a ViewPlugin
+// (mouse handlers, decorations) not a keymap, so precedence doesn't matter.
+editor.editor.dispatch({
+  effects: StateEffect.appendConfig.of([
+    Prec.highest(formatExtension),
+    Prec.highest(createVscodeKeymap({ onEvaluate: () => editor.evaluate() })),
+    // Inline drag-to-scrub on numeric literals — see
+    // src/editor/numeric-scrubber.js. We hand the scrubber a thin
+    // re-eval shim that bypasses StrudelMirror.evaluate() so each frame
+    // doesn't fire the visual flash animation.
+    numericScrubber({
+      evaluate: () => editor.repl.evaluate(editor.code, false),
+    }),
+  ]),
 });
 
 // ─── Left rail (patterns library) ────────────────────────────────────────
