@@ -15,18 +15,19 @@
 
 .editor .cm-editor {
   height: 100%;
-  font-family: var(--font-mono);
-  font-size: var(--code-base);
+  /* font-family + font-size are NOT set here — StrudelMirror's
+     setFontFamily/setFontSize write them as inline styles on #editor and
+     .cm-scroller at boot and on every settings-panel change. Hardcoding
+     them in CSS would block the panel's font controls from having any
+     visible effect (a !important inline style still loses to a more-
+     specific CSS rule on the descendant). The boot-time merge in
+     src/main.js seeds the Geist Mono stack as strasbeat's default, so
+     the editor still looks right out of the box. */
   line-height: 1.55;
 }
 
 .editor .cm-scroller {
-  font-family: var(--font-mono);
   padding: var(--space-3) 0;
-}
-
-.editor .cm-content {
-  font-family: var(--font-mono);
 }
 
 .editor .cm-gutters {

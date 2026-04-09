@@ -1,4 +1,8 @@
-import { StrudelMirror } from "@strudel/codemirror";
+import {
+  StrudelMirror,
+  codemirrorSettings,
+  defaultSettings,
+} from "@strudel/codemirror";
 import { transpiler } from "@strudel/transpiler";
 import { registerSoundfonts } from "@strudel/soundfonts";
 // Strudel packages that are *also* fed to evalScope below: import them as
@@ -29,11 +33,16 @@ import { createSoundBrowserPanel } from "./ui/sound-browser.js";
 import { createReferencePanel } from "./ui/reference-panel.js";
 import { createConsolePanel } from "./ui/console-panel.js";
 import { createExportPanel } from "./ui/export-panel.js";
+import { createSettingsPanel } from "./ui/settings-panel.js";
 import { renderRoll } from "./ui/piano-roll.js";
 import { prompt, confirm } from "./ui/modal.js";
 import {
   applyStoredAccent,
-  mountSettingsDrawer,
+  applyAccent,
+  resetAccent,
+  readStoredAccent,
+  saveStoredAccent,
+  clearStoredAccent,
 } from "./ui/settings-drawer.js";
 
 const { evalScope, controls } = strudelCore;
@@ -52,6 +61,15 @@ const {
   setSuperdoughAudioController,
   resetGlobalEffects,
 } = strudelWebaudio;
+
+// Version strings surfaced in the settings panel's "About" section.
+// Hardcoded for now — adding a Vite `define` to inject these from
+// package.json is a small follow-up, but the off-limits note in
+// design/SYSTEM.md §11 keeps the vite.config.js mutation surface minimal
+// this pass. Keep these in sync with `package.json` and the Strudel
+// versions listed there.
+const APP_VERSION = "0.1.0";
+const STRUDEL_VERSION = "1.2.6";
 
 // ─── Auto-discover patterns ──────────────────────────────────────────────
 // Every .js file in /patterns must `export default` a string of Strudel code.
@@ -174,6 +192,35 @@ const initialCode =
 
 let currentName = initialName;
 
+// Capture the user's stored CodeMirror settings BEFORE we instantiate
+// StrudelMirror — the constructor calls `codemirrorSettings.get()`, and
+// nanostores' `.get()` triggers the persistentAtom's lazy mount, which
+// calls `restore()` → `store.set(initial)` when the localStorage key is
+// missing → this writes `defaultSettings` to localStorage. If we read
+// localStorage after the constructor runs, we'd see `defaultSettings`
+// even on a fresh boot, making the merge-with-stored logic overwrite
+// strasbeat's preferred defaults. See:
+//   - node_modules/.../nanostores/atom/index.js line 11 (get → listen)
+//   - node_modules/.../@nanostores/persistent/index.js line 68 (restore
+//     calls `store.set(initial)` when the key is missing)
+//
+// By snapshotting into `INITIAL_STORED_CM_SETTINGS` here we ensure the
+// later merge only layers actual user preferences, not defaults that
+// were backfilled by the atom's initialization hook.
+const INITIAL_STORED_CM_SETTINGS = readStoredCmSettingsFromLocalStorage();
+
+function readStoredCmSettingsFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem("codemirror-settings");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (err) {
+    console.warn("[strasbeat/settings] could not read stored CM settings:", err);
+    return null;
+  }
+}
+
 // Forward declaration so the StrudelMirror `onEvalError` callback below
 // can close over the console panel before it's actually constructed —
 // the right rail (and the panel itself) are mounted further down in
@@ -268,22 +315,74 @@ editor.drawer.setDrawTime = (dt) => {
 
 // ─── IDE-quality editor settings ─────────────────────────────────────────
 // Strudel ships autocomplete, hover tooltips, bracket matching, multi-cursor
-// etc. but defaults all of them OFF. Turn them on so the editor feels like a
-// real IDE: typing `note(` shows a doc tooltip, hovering a Strudel function
-// shows its signature, () [] {} balance highlights, Cmd-click adds a cursor.
+// etc. but defaults all of them OFF. We turn on the ones that make the
+// editor feel like a real IDE: typing `note(` shows a doc tooltip,
+// hovering a Strudel function shows its signature, () [] {} balance
+// highlights, Cmd-click adds a cursor.
 //
-// GOTCHA: updateSettings iterates ALL extension keys and reconfigures them,
-// even keys not present in this object (they get `undefined` → treated as
-// false). So isPatternHighlightingEnabled MUST be listed here explicitly or
-// the highlight compartment gets emptied and active-note outlines disappear.
-editor.updateSettings({
+// GOTCHA 1: `updateSettings` iterates ALL extension keys and
+// reconfigures them — any key absent from the passed object gets
+// `undefined` → treated as falsy → disabled. So the merged object below
+// must always include every key we care about.
+//
+// GOTCHA 2: the right-rail settings panel writes user-flipped booleans
+// to StrudelMirror's persistent atom via `editor.changeSetting`, but a
+// naive hardcoded `updateSettings` call at boot would clobber those on
+// every page load. We fix this by merging in four layers (lowest wins):
+//
+//   1. Upstream defaults (every extension key present, correct types).
+//   2. strasbeat's preferred defaults — what we turn on if the user has
+//      no stored preference. These are the "IDE feel" bonuses
+//      (bracket matching, active line highlight, multi-cursor, etc.).
+//   3. The user's stored preferences from the persistent atom
+//      (`codemirrorSettings`). Includes anything the settings panel
+//      persisted on a previous run. Wins over strasbeat defaults so a
+//      user who disabled bracket matching in the panel doesn't get it
+//      re-enabled on reload.
+//   4. Required-on settings — the two keys we never let the user turn
+//      off because they are core to the IDE feel (autocompletion,
+//      tooltips). Win over everything.
+//
+// See design/work/08-feature-parity-and-beyond.md "Phase 5" for the
+// rationale and strudel-source/packages/codemirror/codemirror.mjs
+// (defaultSettings, updateSettings, codemirrorSettings) for the API.
+
+const STRASBEAT_REQUIRED_ON = {
   isAutoCompletionEnabled: true,
   isTooltipEnabled: true,
+};
+
+// Geist Mono stack — kept in sync with `--font-mono` in
+// src/styles/tokens.css. The editor.css rules used to hardcode the same
+// stack on .cm-content, but that blocked the settings panel's font
+// family picker from having any effect; now the CSS rule is gone and
+// the stack flows through StrudelMirror's inline-style path instead.
+// See design/work/08-feature-parity-and-beyond.md "Phase 5" and the
+// rationale in src/styles/editor.css.
+const GEIST_MONO_STACK =
+  '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
+const STRASBEAT_DEFAULT_PREFERENCES = {
   isBracketMatchingEnabled: true,
   isMultiCursorEnabled: true,
   isActiveLineHighlighted: true,
   isTabIndentationEnabled: true,
   isPatternHighlightingEnabled: true,
+  fontFamily: GEIST_MONO_STACK,
+  fontSize: 18,
+};
+
+// The merge uses `INITIAL_STORED_CM_SETTINGS`, captured BEFORE the
+// StrudelMirror constructor ran. See the long comment earlier in this
+// file for why — nanostores' persistentAtom writes defaultSettings to
+// localStorage on its first touch, so reading localStorage here (after
+// the constructor) would round-trip defaults as if they were the user's
+// stored preferences.
+editor.updateSettings({
+  ...defaultSettings,
+  ...STRASBEAT_DEFAULT_PREFERENCES,
+  ...(INITIAL_STORED_CM_SETTINGS ?? {}),
+  ...STRASBEAT_REQUIRED_ON,
 });
 
 // Inject our editor extensions (Prettier formatter + VSCode-style keymap +
@@ -394,10 +493,19 @@ setCurrentName(currentName);
 // ─── Top bar wiring ──────────────────────────────────────────────────────
 // Clicking the pattern wordmark focuses the left-rail search input —
 // gives the user a one-click path from "what am I editing" to "what else
-// is in the library". The settings popover is wired by the settings-drawer
-// module — it handles open/close, focus, and persistence internally.
+// is in the library". The settings button opens the right rail to its
+// Settings tab (replacing the old popover — see settings-drawer.js, now
+// dead code kept around as a fallback until the panel settles). Clicking
+// the button again while the Settings tab is live collapses the rail,
+// matching the old popover's click-to-toggle muscle memory.
 patternMenuBtn.addEventListener("click", () => leftRail.focusSearch());
-mountSettingsDrawer({ button: settingsBtn });
+settingsBtn.addEventListener("click", () => {
+  if (rightRail.isExpanded() && rightRail.getActiveId() === "settings") {
+    rightRail.collapse();
+  } else {
+    rightRail.activate("settings");
+  }
+});
 
 // ─── Right rail (sound browser, future panels) ──────────────────────────
 // The right rail is a generic tabbed panel host (src/ui/right-rail.js).
@@ -470,6 +578,134 @@ const exportPanel = createExportPanel({
   getPatternName: () => currentName || "untitled",
 });
 rightRail.registerPanel(exportPanel);
+
+// Settings panel — fifth tab in the right rail. See
+// src/ui/settings-panel.js and design/work/08-feature-parity-and-beyond.md
+// "Phase 5". Replaces the accent-only popover in settings-drawer.js —
+// the popover stays around as dead code (see the Phase 5 cleanup note)
+// but is no longer wired. The panel owns the UI for theme / accent /
+// font / editor toggles; the host owns the persistence:
+//
+//   - `onChangeSetting(key, value)` — the panel hands off each edited
+//     setting. We apply it live via `editor.changeSetting` (which
+//     reconfigures the extension compartment immediately) AND mirror it
+//     into `codemirrorSettings` (StrudelMirror's persistent atom) so
+//     the change survives a reload. We intercept a few
+//     strasbeat-specific invariants on the way: `isAutoCompletionEnabled`
+//     and `isTooltipEnabled` are required-on and silently ignored if
+//     the user somehow submits a `false` (defensive — the panel never
+//     exposes these toggles, but a future caller might). See the boot-
+//     time merge logic earlier in this file for the companion half.
+//   - `onAccentChange` / `onAccentReset` — delegates to the same
+//     helpers settings-drawer.js uses (applyAccent, resetAccent,
+//     saveStoredAccent, clearStoredAccent) so the accent picker stays
+//     a single source of truth across the two components.
+//   - `getSettings` / `getStoredAccent` / `getSoundCount` — simple
+//     live reads so the panel reflects current state on every activate.
+const THEME_OPTIONS = [
+  { key: "strudelTheme", label: "Strudel (default)" },
+  { key: "dracula", label: "Dracula" },
+  { key: "nord", label: "Nord" },
+  { key: "vscodeDark", label: "VS Code Dark" },
+  { key: "vscodeLight", label: "VS Code Light" },
+  { key: "monokai", label: "Monokai" },
+  { key: "gruvboxDark", label: "Gruvbox Dark" },
+  { key: "gruvboxLight", label: "Gruvbox Light" },
+  { key: "solarizedDark", label: "Solarized Dark" },
+  { key: "solarizedLight", label: "Solarized Light" },
+  { key: "tokyoNight", label: "Tokyo Night" },
+  { key: "tokyoNightStorm", label: "Tokyo Night Storm" },
+  { key: "tokyoNightDay", label: "Tokyo Night Day" },
+  { key: "githubDark", label: "GitHub Dark" },
+  { key: "githubLight", label: "GitHub Light" },
+  { key: "materialDark", label: "Material Dark" },
+  { key: "materialLight", label: "Material Light" },
+  { key: "sublime", label: "Sublime" },
+  { key: "atomone", label: "Atom One" },
+  { key: "aura", label: "Aura" },
+  { key: "darcula", label: "Darcula (JetBrains)" },
+  { key: "duotoneDark", label: "Duotone Dark" },
+  { key: "noctisLilac", label: "Noctis Lilac" },
+  { key: "eclipse", label: "Eclipse" },
+  { key: "bbedit", label: "BBEdit" },
+  { key: "bluescreen", label: "Blue Screen" },
+  { key: "bluescreenlight", label: "Blue Screen Light" },
+  { key: "blackscreen", label: "Black Screen" },
+  { key: "whitescreen", label: "White Screen" },
+  { key: "teletext", label: "Teletext" },
+  { key: "algoboy", label: "Algo Boy" },
+  { key: "archBtw", label: "Arch BTW" },
+  { key: "androidstudio", label: "Android Studio" },
+  { key: "CutiePi", label: "Cutie Pi" },
+  { key: "sonicPink", label: "Sonic Pink" },
+  { key: "fruitDaw", label: "Fruit DAW" },
+  { key: "greenText", label: "Green Text" },
+  { key: "redText", label: "Red Text" },
+  { key: "xcodeLight", label: "Xcode Light" },
+];
+
+/**
+ * Apply a setting change from the settings panel: reconfigure the live
+ * editor extension AND persist the change to StrudelMirror's atom so it
+ * survives a reload. Upstream's `changeSetting` only touches the
+ * compartment — it does NOT write to the atom (see
+ * strudel-source/packages/codemirror/codemirror.mjs line 437). That's
+ * the whole reason this helper exists: without the atom write the
+ * panel's toggles would reset on every page load.
+ *
+ * `isAutoCompletionEnabled` and `isTooltipEnabled` are strasbeat-
+ * required-on. The panel doesn't surface them, but this is a belt-and-
+ * braces guard against a future caller feeding a `false` through.
+ */
+function applyPanelSetting(key, value) {
+  if (
+    (key === "isAutoCompletionEnabled" || key === "isTooltipEnabled") &&
+    value === false
+  ) {
+    console.warn(
+      `[strasbeat/settings] refusing to disable required-on setting "${key}"`,
+    );
+    return;
+  }
+  try {
+    editor.changeSetting(key, value);
+  } catch (err) {
+    console.warn(
+      `[strasbeat/settings] changeSetting("${key}") failed:`,
+      err,
+    );
+    return;
+  }
+  try {
+    const current = codemirrorSettings.get?.() ?? {};
+    codemirrorSettings.set({ ...current, [key]: value });
+  } catch (err) {
+    console.warn(
+      `[strasbeat/settings] persisting "${key}" to atom failed:`,
+      err,
+    );
+  }
+}
+
+const settingsPanel = createSettingsPanel({
+  onFocusEditor: () => editor.editor.focus(),
+  getSettings: () => codemirrorSettings.get?.() ?? {},
+  onChangeSetting: applyPanelSetting,
+  onAccentChange: (hue, lightness) => {
+    applyAccent(hue, lightness);
+    saveStoredAccent(hue, lightness);
+  },
+  onAccentReset: () => {
+    clearStoredAccent();
+    resetAccent();
+  },
+  getStoredAccent: () => readStoredAccent(),
+  getSoundCount: () => Object.keys(soundMap.get() ?? {}).length,
+  themes: THEME_OPTIONS,
+  appVersion: APP_VERSION,
+  strudelVersion: STRUDEL_VERSION,
+});
+rightRail.registerPanel(settingsPanel);
 
 // Hook 1 — Strudel's `logger()` dispatches a `strudel.log` CustomEvent
 // on `document` for every internal log message. Shape (from

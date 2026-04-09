@@ -27,10 +27,17 @@
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  /* Animate roll collapse via grid-template-rows and right-rail expand
-     via grid-template-columns. */
-  transition: grid-template-rows var(--t-panel),
-              grid-template-columns var(--t-panel);
+  /* Animate roll collapse via grid-template-rows. The right-rail column
+     used to animate too, but Chrome 146+ mis-interpolates transitions
+     on `grid-template-columns` that mix `1fr` with a custom-property-
+     driven track: the middle track locks at its old size and the right
+     column snaps back to its previous (smaller) value, leaving the
+     right rail effectively stuck at the collapsed width. Dropping the
+     grid-template-columns track from the transition makes the rail
+     snap open/close instead of slide, but the layout is correct again.
+     See design/work/08-feature-parity-and-beyond.md Phase 5 for the
+     rationale. */
+  transition: grid-template-rows var(--t-panel);
 }
 
 /* Collapsed state — toggled by JS on the body or shell. */

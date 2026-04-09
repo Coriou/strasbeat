@@ -235,8 +235,13 @@ function buildSlider({ label, field, min, max, step, value, track, onInput }) {
 }
 
 // ─── Color application ──────────────────────────────────────────────────
+// Exported so src/ui/settings-panel.js can reuse the same OKLCH math +
+// storage keys when the accent picker is driven from the right-rail
+// settings panel instead of the legacy popover. Popover stays as dead
+// code for now — see design/work/08-feature-parity-and-beyond.md Phase 5
+// cleanup note.
 
-function applyAccent(hue, lightness) {
+export function applyAccent(hue, lightness) {
   const root = document.documentElement;
   const lHi = clamp(lightness + HI_LIGHTNESS_OFFSET, 0, 1);
   const lLo = clamp(lightness + LO_LIGHTNESS_OFFSET, 0, 1);
@@ -249,7 +254,7 @@ function applyAccent(hue, lightness) {
   );
 }
 
-function resetAccent() {
+export function resetAccent() {
   // Clearing the inline properties lets :root fall back to the values in
   // tokens.css — the single source of truth (SYSTEM.md §5).
   const root = document.documentElement;
@@ -264,6 +269,21 @@ function clamp(n, lo, hi) {
 }
 
 // ─── Storage ────────────────────────────────────────────────────────────
+// Same exported-for-reuse rationale as applyAccent above: the panel
+// reads/writes the same localStorage key so the popover + panel stay
+// swap-compatible while the popover lingers as dead code.
+
+export function readStoredAccent() {
+  return readStored();
+}
+
+export function saveStoredAccent(hue, lightness) {
+  saveStored(hue, lightness);
+}
+
+export function clearStoredAccent() {
+  clearStored();
+}
 
 function readStored() {
   try {
