@@ -237,6 +237,11 @@ editor.drawer.setDrawTime = (dt) => {
 // etc. but defaults all of them OFF. Turn them on so the editor feels like a
 // real IDE: typing `note(` shows a doc tooltip, hovering a Strudel function
 // shows its signature, () [] {} balance highlights, Cmd-click adds a cursor.
+//
+// GOTCHA: updateSettings iterates ALL extension keys and reconfigures them,
+// even keys not present in this object (they get `undefined` → treated as
+// false). So isPatternHighlightingEnabled MUST be listed here explicitly or
+// the highlight compartment gets emptied and active-note outlines disappear.
 editor.updateSettings({
   isAutoCompletionEnabled: true,
   isTooltipEnabled: true,
@@ -244,6 +249,7 @@ editor.updateSettings({
   isMultiCursorEnabled: true,
   isActiveLineHighlighted: true,
   isTabIndentationEnabled: true,
+  isPatternHighlightingEnabled: true,
 });
 
 // Inject our editor extensions (Prettier formatter + VSCode-style keymap +
@@ -408,9 +414,7 @@ async function handleNewPatternClick() {
     defaultValue: `untitled-${Date.now().toString(36)}`,
     confirmLabel: "Create",
     validate: (v) =>
-      /^[a-z0-9_-]+$/i.test(v)
-        ? null
-        : "use only letters, numbers, - and _",
+      /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
   });
   if (!name) return;
   if (name in patterns) {
@@ -451,9 +455,7 @@ if (import.meta.env.DEV) {
       defaultValue: suggestion,
       confirmLabel: "Save",
       validate: (v) =>
-        /^[a-z0-9_-]+$/i.test(v)
-          ? null
-          : "use only letters, numbers, - and _",
+        /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
     });
     if (!name) return;
     const res = await fetch("/api/save", {
@@ -632,9 +634,7 @@ exportBtn.addEventListener("click", async () => {
     confirmLabel: "Render",
     validate: (v) => {
       const n = parseInt(v, 10);
-      return Number.isFinite(n) && n >= 1
-        ? null
-        : "must be a positive integer";
+      return Number.isFinite(n) && n >= 1 ? null : "must be a positive integer";
     },
   });
   if (input == null) return;
@@ -790,9 +790,7 @@ captureBtn.addEventListener("click", async () => {
     defaultValue: suggestion,
     confirmLabel: "Save",
     validate: (v) =>
-      /^[a-z0-9_-]+$/i.test(v)
-        ? null
-        : "use only letters, numbers, - and _",
+      /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
   });
   if (!name) {
     transport.setStatus("capture discarded");
