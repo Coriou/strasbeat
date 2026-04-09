@@ -45,6 +45,15 @@ the editor).
 `import.meta.glob`, wires the toolbar (play / stop / save / export wav /
 capture / preset picker), prebakes sample banks, mounts the MIDI bridge.
 
+The shell is a design-system layout (top bar with brand + pattern menu +
+share/settings, left rail patterns library, editor canvas, transport bar
+with cps/bpm + cycle + playhead + MIDI pill, collapsible piano roll at the
+bottom) and the editor is extended with a Prettier-based formatter, a
+VSCode-style keymap, a Figma-style numeric drag-to-scrub, an autocomplete
+chain (sounds / banks / chords / scales / modes / functions /
+mini-notation), hover docs, and a signature hint pill — all CodeMirror 6
+extensions layered on top of `StrudelMirror`.
+
 `vite.config.js` ships a tiny middleware at `POST /api/save` that writes the
 editor buffer to `patterns/<name>.js` so the browser-side ⤓ save button has a
 disk-side counterpart. It also proxies `/strudel-cc/*` → `https://strudel.cc/*`
@@ -60,24 +69,46 @@ uses), and supports a "capture phrase → save as pattern file" workflow.
 
 ```
 strasbeat/
-├── index.html              # page shell
+├── index.html              # shell: top bar, left rail, editor, transport, piano roll
 ├── src/
 │   ├── main.js             # boot, toolbar, prebake, WAV export, pattern auto-discovery
 │   ├── midi-bridge.js      # Web MIDI → superdough trigger-and-decay
-│   └── style.css
+│   ├── editor/
+│   │   ├── format.js       # Prettier + quote-restoration post-processor
+│   │   ├── keymap.js       # VSCode-style keybindings
+│   │   ├── numeric-scrubber.js  # Figma-style drag-to-scrub
+│   │   ├── hover-docs.js   # CM6 hoverTooltip for Strudel functions
+│   │   ├── signature-hint.js    # signature pill above cursor
+│   │   ├── strudel-docs.json    # generated JSDoc index (pnpm gen:docs)
+│   │   ├── mini-notation-tokens.js  # tokeniser for mini-notation strings
+│   │   └── completions/    # sound, bank, chord, scale, mode, function, mini-notation
+│   ├── ui/
+│   │   ├── left-rail.js    # patterns library (search, keyboard nav)
+│   │   ├── transport.js    # BPM, cycle, playhead readouts, status, MIDI pill
+│   │   ├── piano-roll.js   # Canvas2D renderer (per-layer color, click-to-locate)
+│   │   └── icons.js        # Lucide icon wrapper + hydration
+│   └── styles/             # design-system CSS (base, editor, shell, tokens, etc.)
 ├── patterns/               # *.js — each one default-exports a Strudel string
+├── scripts/
+│   ├── build-strudel-docs.mjs   # extracts JSDoc → strudel-docs.json
+│   └── test-format.mjs
+├── design/
+│   ├── README.md           # how to use the design specs
+│   ├── SYSTEM.md           # design system (type, color, spacing, layout)
+│   ├── PATTERN-STYLE.md    # modern Strudel pattern idioms
+│   └── work/               # task specs (01-shell through 06-future)
 ├── vite.config.js          # /api/save middleware + strudel.cc proxy
-├── STRUDEL.md              # mini-notation cheatsheet (read this first if new to Strudel)
+├── vercel.json             # production deployment config
+├── STRUDEL.md              # mini-notation cheatsheet
 ├── strudel-source/         # full upstream repo, READ-ONLY reference, gitignored
 └── CLAUDE.md               # you are here
 ```
 
 `strudel-source/` is a checked-out copy of the upstream repo at
-<https://codeberg.org/uzu/strudel>. It's gitignored from strasbeat itself
-(strasbeat is not yet a git repo — see "Git status" below). When you need to
-understand a Strudel function's behavior, read its source under
-`strudel-source/packages/<pkg>/`. Don't ever modify files there as part of
-strasbeat work — patches belong upstream.
+<https://codeberg.org/uzu/strudel>. It's gitignored from strasbeat itself.
+When you need to understand a Strudel function's behavior, read its source
+under `strudel-source/packages/<pkg>/`. Don't ever modify files there as
+part of strasbeat work — patches belong upstream.
 
 ## Pattern file contract
 
@@ -98,6 +129,17 @@ the source text is the input to the transpiler. Wrapping it in
 `export default \`…\`` keeps the file a normal JS module so
 `import.meta.glob` can discover it. Adding a new file → it shows up in the
 dropdown automatically (Vite HMR triggers a page reload).
+
+## Design system
+
+Visual and interaction design has a single source of truth: `design/SYSTEM.md`
+(layout grammar, type, color tokens, spacing, elevation, motion) and
+`design/README.md` (how to use the specs). Every UI feature lives as its
+own task spec under `design/work/` (01-shell, 02-format-and-keybindings,
+03-numeric-scrubber, 04-intellisense, 05-piano-roll, 06-future, …). Read
+the relevant work spec before building or modifying a UI feature, and read
+SYSTEM.md before adding any new visual primitive — the goal is that the
+chrome stays internally consistent as more features land.
 
 ## STRUDEL.md and the strudel.cc docs
 
@@ -171,8 +213,7 @@ authoritative value.
 ```
 pick pattern from dropdown → edit live → press play to hear it →
 ⤓ save (writes patterns/<name>.js) → tweak in your IDE if you want →
-HMR reloads the page → re-evaluate → eventually `git commit` (once we have a
-git repo set up)
+HMR reloads the page → re-evaluate
 ```
 
 The MIDI capture flow:
@@ -182,16 +223,11 @@ plug in keyboard → pick a preset → ● capture → play a phrase →
 ● capture again → save as patterns/<name>.js → HMR reloads → tweak / commit
 ```
 
-## Git status (as of 2026-04-09)
+## Git status
 
-strasbeat is **not yet a git repo**. The user has been iterating fast on the
-core feature set; version control will get set up once the foundations
-stabilize. The `strudel-source/` clone is its own (separate) git repo and
+strasbeat is a git repo on `main`, with a remote at `origin`. The
+`strudel-source/` clone is gitignored (it's its own separate repo) and
 should never be touched by strasbeat commits.
-
-When initializing the repo, the `.gitignore` already in the project root
-covers `node_modules/`, `dist/`, and `strudel-source/` — so the first
-`git init && git add .` should be safe.
 
 ## License note
 
