@@ -8,7 +8,7 @@ import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { Pattern, silence } from "@strudel/core";
-import { progression, RHYTHMS } from "./progression.js";
+import { progression, RHYTHMS, STYLES } from "./progression.js";
 
 // Capture console.warn so we can assert on the [strasbeat] warnings without
 // polluting the test output.
@@ -225,6 +225,165 @@ describe("progression() — empty / invalid input", () => {
     const pat = progression(undefined);
     assert.equal(pat, silence);
     assert.ok(warnings.length > 0);
+  });
+});
+
+describe("progression() — style presets (Phase 2)", () => {
+  test("STYLES exposes all five documented presets", () => {
+    const expected = [
+      "jazz-comp",
+      "pop-pad",
+      "lo-fi",
+      "folk-strum",
+      "piano-bare",
+    ];
+    for (const name of expected) {
+      assert.ok(name in STYLES, `expected STYLES.${name} to exist`);
+    }
+  });
+
+  test("each style has sound, dict, rhythm, fx fields", () => {
+    for (const [name, cfg] of Object.entries(STYLES)) {
+      assert.equal(typeof cfg.sound, "string", `${name}.sound`);
+      assert.equal(typeof cfg.dict, "string", `${name}.dict`);
+      assert.equal(typeof cfg.rhythm, "string", `${name}.rhythm`);
+      assert.equal(typeof cfg.fx, "object", `${name}.fx`);
+    }
+  });
+
+  test("style sets sound, dict, rhythm, and fx defaults", () => {
+    // jazz-comp: sound gm_epiano1, rhythm comp, fx { room: 0.4, gain: 0.65 }
+    const pat = progression("Cm7 F7 Bb^7 Eb^7", { style: "jazz-comp" });
+    const values = firstCycleValues(pat);
+    assert.ok(values.length > 0);
+    for (const v of values) {
+      assert.equal(v.s, "gm_epiano1", "style.sound should land on every hap");
+      assert.equal(v.room, 0.4, "style fx.room should land on every hap");
+      assert.equal(v.gain, 0.65, "style fx.gain should land on every hap");
+    }
+  });
+
+  test("style produces an audibly distinct pattern from default options", () => {
+    const styled = uniqueValues(
+      progression("Cm7 F7 Bb^7", { style: "jazz-comp" }),
+    );
+    const baseline = uniqueValues(progression("Cm7 F7 Bb^7"));
+    // jazz-comp uses the comp rhythm, so the hap layout is different from
+    // block (block stacks notes simultaneously; comp distributes across
+    // 8 8th-note steps).
+    assert.notDeepEqual(
+      styled.map((v) => v.note).sort(),
+      baseline.map((v) => v.note).sort(),
+    );
+  });
+
+  test("explicit option overrides style field (sound)", () => {
+    // jazz-comp normally uses gm_epiano1; explicit sound should win.
+    const pat = progression("Cm7 F7 Bb^7", {
+      style: "jazz-comp",
+      sound: "gm_piano",
+    });
+    const values = firstCycleValues(pat);
+    for (const v of values) {
+      assert.equal(v.s, "gm_piano");
+    }
+  });
+
+  test("explicit option overrides style field (rhythm)", () => {
+    // jazz-comp uses comp rhythm; explicit rhythm: arp-up should win and
+    // produce sequential single-note haps instead of stacked stabs.
+    const pat = progression("Cm7 F7 Bb^7", {
+      style: "jazz-comp",
+      rhythm: "arp-up",
+    });
+    const haps = pat.firstCycle();
+    const begins = new Set(haps.map((h) => h.whole.begin.toString()));
+    assert.equal(
+      begins.size,
+      haps.length,
+      "arp-up should sequence (every hap distinct begin)",
+    );
+  });
+
+  test("style fx is preserved when only sound is overridden", () => {
+    const pat = progression("Cm7 F7 Bb^7", {
+      style: "jazz-comp",
+      sound: "gm_piano",
+    });
+    const values = firstCycleValues(pat);
+    for (const v of values) {
+      assert.equal(v.room, 0.4, "fx.room should still apply");
+      assert.equal(v.gain, 0.65, "fx.gain should still apply");
+    }
+  });
+
+  test("user .gain() chained on the result wins over style fx.gain", () => {
+    // Strudel's control merge replaces gain when set twice — verify the
+    // user's outer chain takes precedence over the style's defaults.
+    const pat = progression("Cm7 F7 Bb^7", { style: "jazz-comp" }).gain(0.2);
+    const values = firstCycleValues(pat);
+    for (const v of values) {
+      assert.equal(v.gain, 0.2);
+    }
+  });
+
+  test("unknown style warns and falls back to no style", () => {
+    const pat = progression("Cm7 F7 Bb^7", { style: "wat-no-such" });
+    // Falls back to defaults: gm_epiano1, no fx
+    const values = firstCycleValues(pat);
+    for (const v of values) {
+      assert.equal(v.s, "gm_epiano1");
+      assert.equal(v.room, undefined, "unknown style must not apply fx");
+      assert.equal(v.gain, undefined);
+    }
+    assert.ok(
+      warnings.some(
+        (w) =>
+          w.includes("[strasbeat]") &&
+          w.includes("wat-no-such") &&
+          w.toLowerCase().includes("style"),
+      ),
+      `expected a [strasbeat] style warning, got: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  test("style + bass option still composes", () => {
+    const pat = progression("C F G", { style: "folk-strum", bass: true });
+    const values = firstCycleValues(pat);
+    const hasBass = values.some((v) => v.s === "gm_acoustic_bass");
+    const hasGuitar = values.some(
+      (v) => v.s === "gm_acoustic_guitar_nylon",
+    );
+    assert.ok(hasBass, "expected the bass layer");
+    assert.ok(hasGuitar, "expected the folk-strum guitar sound");
+    // folk-strum's room should land on both layers
+    for (const v of values) {
+      assert.equal(v.room, 0.2);
+    }
+  });
+
+  test("each documented style produces a distinct sound or rhythm signature", () => {
+    // Audition every style on a simple progression and verify they don't
+    // collapse to the same output. This guards against accidental dupes
+    // when a future style is added.
+    const sigs = new Set();
+    for (const name of Object.keys(STYLES)) {
+      const pat = progression("C F G", { style: name });
+      const haps = pat.firstCycle();
+      // Sig = sound + first few notes + hap count → loose but enough to
+      // distinguish the five built-ins.
+      const sig = JSON.stringify({
+        s: haps[0]?.value?.s,
+        notes: haps.slice(0, 4).map((h) => h.value.note),
+        count: haps.length,
+      });
+      sigs.add(sig);
+    }
+    assert.equal(
+      sigs.size,
+      Object.keys(STYLES).length,
+      "every style should produce a unique signature on the same chords",
+    );
   });
 });
 

@@ -18,6 +18,7 @@ import { mini } from "@strudel/mini";
 // it here so progression.js works in any context that pulls in this file
 // (notably node --test, which doesn't load main.js).
 import "@strudel/tonal";
+import { STYLES } from "./styles.js";
 
 // Mini-notation arp index strings, one per rhythm preset. The chord pattern
 // has its voicing computed first, then `.arp(...)` indexes into the resulting
@@ -70,12 +71,17 @@ const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
  * @param {string} [options.dict="ireal"] voicing dictionary name
  * @param {string} [options.rhythm="block"] rhythm preset name OR a raw mini-notation arp string
  * @param {boolean|string} [options.bass=false] layer a bass line on the chord roots; pass a sound name to override `gm_acoustic_bass`
+ * @param {string} [options.style] style preset that bundles sound + dict + rhythm + FX. Built-in styles: `jazz-comp`, `pop-pad`, `lo-fi`, `folk-strum`, `piano-bare`. Explicit options always override the style — `{ style: "jazz-comp", sound: "gm_piano" }` is "jazz comp on a real piano".
  * @returns {Pattern}
  *
  * @example
  * progression("Cm7 F7 Bb^7 Eb^7")
  * @example
  * progression("ii V I", { sound: "gm_pad_warm", rhythm: "arp-up" })
+ * @example
+ * progression("Cm7 F7 Bb^7", { style: "jazz-comp" })
+ * @example
+ * progression("C G Am F", { style: "folk-strum", bass: true })
  */
 export function progression(chords, options = {}) {
   // Empty input → return silence loudly. Patterns are re-evaluated live and
@@ -88,7 +94,33 @@ export function progression(chords, options = {}) {
     return silence;
   }
 
-  const opts = { ...DEFAULTS, ...options };
+  // Resolve the style preset (Phase 2). When set, the style fills in
+  // sound/dict/rhythm fields the user didn't override, and its `fx` block
+  // is applied as the final chain step before returning. Unknown style
+  // names warn loudly and continue with no style — same philosophy as
+  // unknown rhythm names.
+  let styleConfig = null;
+  if (options.style != null) {
+    if (options.style in STYLES) {
+      styleConfig = STYLES[options.style];
+    } else {
+      console.warn(
+        `[strasbeat] progression(): unknown style "${options.style}", ignoring. Known: ${Object.keys(STYLES).join(", ")}`,
+      );
+    }
+  }
+
+  // Merge precedence: defaults < style fields < explicit user options.
+  // Pluck only the non-fx fields from the style — fx is applied later as
+  // method chains, not as option values, so it must NOT leak into opts.
+  const styleFields = styleConfig
+    ? {
+        sound: styleConfig.sound,
+        dict: styleConfig.dict,
+        rhythm: styleConfig.rhythm,
+      }
+    : {};
+  const opts = { ...DEFAULTS, ...styleFields, ...options };
 
   // Resolve the rhythm: a known preset name → its arp string (or null for
   // `block`); an unknown preset name → warn + fall back to block; anything
@@ -139,22 +171,40 @@ export function progression(chords, options = {}) {
 
   chordPat = chordPat.s(opts.sound);
 
-  if (!opts.bass) {
-    return chordPat;
+  // Stack the optional bass layer first so style FX apply uniformly to
+  // both layers (room/lpf/etc. should be on the whole pattern, not just
+  // the chords). rootNotes() comes from @strudel/tonal/voicings.mjs and
+  // only reads the chord *symbol*, so slash chord bass notes (`Cm7/G`)
+  // are ignored at this layer — the slash bass still appears in the
+  // voicing itself.
+  let result;
+  if (opts.bass) {
+    const bassSound =
+      typeof opts.bass === "string" ? opts.bass : DEFAULT_BASS_SOUND;
+    const bassPat = cyclePat.rootNotes(2).note().s(bassSound);
+    result = stack(chordPat, bassPat);
+  } else {
+    result = chordPat;
   }
 
-  // Bass layer: take the same chord cycle, extract the root note in octave
-  // 2, set it as a note pattern, and pick a bass sound. rootNotes() comes
-  // from @strudel/tonal/voicings.mjs and only reads the chord *symbol*, so
-  // slash chord bass notes (`Cm7/G`) are ignored at this layer — the slash
-  // bass still appears in the voicing itself.
-  const bassSound =
-    typeof opts.bass === "string" ? opts.bass : DEFAULT_BASS_SOUND;
-  const bassPat = cyclePat.rootNotes(2).note().s(bassSound);
+  // Apply style FX defaults last, so a user chain like
+  // `progression(..., { style: "jazz-comp" }).gain(0.5)` still wins (the
+  // outer .gain() replaces the style's gain via Strudel's control merge).
+  if (styleConfig?.fx) {
+    for (const [method, value] of Object.entries(styleConfig.fx)) {
+      if (typeof result[method] !== "function") {
+        console.warn(
+          `[strasbeat] progression(): style "${options.style}" sets fx.${method} but Pattern has no .${method}() — skipping`,
+        );
+        continue;
+      }
+      result = result[method](value);
+    }
+  }
 
-  return stack(chordPat, bassPat);
+  return result;
 }
 
 // Re-exported so unit tests can assert against the canonical preset list
 // without duplicating the keys.
-export { RHYTHMS };
+export { RHYTHMS, STYLES };
