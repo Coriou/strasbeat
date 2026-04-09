@@ -10,7 +10,7 @@ const PATTERNS_DIR = path.join(__dirname, 'patterns');
 // so the dev workflow is: iterate in the browser → save → commit.
 function patternSavePlugin() {
   return {
-    name: 'beaitbox:pattern-save',
+    name: 'strasbeat:pattern-save',
     configureServer(server) {
       server.middlewares.use('/api/save', async (req, res, next) => {
         if (req.method !== 'POST') return next();

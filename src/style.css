@@ -69,6 +69,15 @@ body {
   border-color: var(--border);
 }
 
+/* Dev-only chrome (e.g. the disk-backed save button). Hidden by default so
+   prod has zero flash; main.js sets `dev-mode` on <body> in dev to reveal. */
+.dev-only {
+  display: none;
+}
+.dev-mode .dev-only {
+  display: revert;
+}
+
 .midi-controls {
   display: flex;
   gap: 6px;

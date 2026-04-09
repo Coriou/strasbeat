@@ -30,7 +30,7 @@ import { superdough, getAudioContext, getSound } from '@strudel/webaudio';
 // IMPORTANT: every `s` value below is verified to exist in the loaded
 // soundMap. The Strudel soundfont names are NOT the full GM names —
 // e.g. it's `gm_piano`, not `gm_acoustic_grand_piano`. To explore
-// what's available, run `beaitbox.findSounds('keyword')` in the browser
+// what's available, run `strasbeat.findSounds('keyword')` in the browser
 // console.
 export const presets = {
   piano: {
@@ -205,7 +205,7 @@ export class MidiBridge {
         this._warnedSounds.add(s);
         console.warn(
           `[midi] preset "${presetKey}" → drum sound "${s}" not loaded. ` +
-            `Run beaitbox.findSounds("${s}") to look for alternatives.`,
+            `Run strasbeat.findSounds("${s}") to look for alternatives.`,
         );
         return;
       }
@@ -218,7 +218,7 @@ export class MidiBridge {
         this._warnedSounds.add(preset.s);
         console.warn(
           `[midi] preset "${presetKey}" uses sound "${preset.s}" which is ` +
-            `not in the loaded soundMap. Try beaitbox.findSounds("${preset.s.replace(/^gm_/, '')}") ` +
+            `not in the loaded soundMap. Try strasbeat.findSounds("${preset.s.replace(/^gm_/, '')}") ` +
             `in the console to find a registered alternative.`,
         );
         this.onStatus({

@@ -1,4 +1,4 @@
-# beaitbox
+# strasbeat
 
 A version-controlled beat-making workspace built on
 [Strudel](https://strudel.cc) — a JavaScript port of TidalCycles.
@@ -21,7 +21,7 @@ then **▶ play** (or `Ctrl/Cmd+Enter` inside the editor).
 ## What's where
 
 ```
-beaitbox/
+strasbeat/
 ├── index.html          # page shell
 ├── src/
 │   ├── main.js         # boots StrudelMirror, wires UI, auto-loads patterns
@@ -86,5 +86,5 @@ a normal JS module that auto-discovery (`import.meta.glob`) can load.
 
 Strudel is AGPL-3.0. Code you write *on top* of Strudel that runs in the
 same process is generally considered a derivative work; if you ever
-distribute beaitbox or anything built on it, the same license applies.
+distribute strasbeat or anything built on it, the same license applies.
 For private/local use, no obligation.

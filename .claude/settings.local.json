@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /Users/ben/.claude/projects/-Users-ben-Projects-beaitbox/f6de28a0-467b-41aa-a5d4-c50836604814.jsonl /Users/ben/.claude/projects/-Users-ben-Projects-strasbeat/f6de28a0-467b-41aa-a5d4-c50836604814.jsonl)",
+      "Bash(python3 -c ':*)"
+    ]
+  }
+}

@@ -117,16 +117,16 @@ verified working ones:
 **To find what's actually loaded**, open the browser devtools and run:
 
 ```js
-beaitbox.findSounds('piano')   // any sound with "piano" in the name
-beaitbox.findSounds('gm_pad')  // all soundfont pads
-beaitbox.findSounds('909')     // every 909 sample
-beaitbox.hasSound('gm_piano')  // true / false
-beaitbox.countSounds()         // total registered sounds (~1000+)
+strasbeat.findSounds('piano')   // any sound with "piano" in the name
+strasbeat.findSounds('gm_pad')  // all soundfont pads
+strasbeat.findSounds('909')     // every 909 sample
+strasbeat.hasSound('gm_piano')  // true / false
+strasbeat.countSounds()         // total registered sounds (~1000+)
 ```
 
 > **Footgun:** if you write `sound("some_name")` and `some_name` isn't in
 > the soundMap, the pattern produces **no audible events** with no error.
-> When a layer goes silent, `beaitbox.hasSound("…")` is the first thing
+> When a layer goes silent, `strasbeat.hasSound("…")` is the first thing
 > to check. The MIDI bridge surfaces this as a console warning so you
 > notice immediately.
 
@@ -171,7 +171,7 @@ play again immediately without reloading.
 
 ## Live MIDI keyboard
 
-beaitbox has a built-in bridge from a hardware MIDI keyboard to the
+strasbeat has a built-in bridge from a hardware MIDI keyboard to the
 Strudel audio engine. Plug in a USB MIDI device — the toolbar status bar
 will show its name. Pick a **preset** (Piano, EPiano, Pluck, Pad, …) and
 play. Notes route through `superdough` directly, so they share the
@@ -220,7 +220,7 @@ Edit `src/midi-bridge.js` and add to the `presets` object:
 ```js
 mypreset: {
   label: 'My Sound',
-  s: 'gm_marimba',           // pick from beaitbox.findSounds(...)
+  s: 'gm_marimba',           // pick from strasbeat.findSounds(...)
   duration: 2,
   attack: 0.01, decay: 2, sustain: 0, release: 0.1,
   room: 0.3,
