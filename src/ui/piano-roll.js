@@ -28,19 +28,23 @@
 
 import { noteToMidi, freqToMidi } from '@strudel/core';
 
-// Six-step palette of muted, distinguishable hues that read against
-// `--surface-1`. Hand-tuned in OKLCH at uniform L=0.68 / C≈0.13 so no
+// Ten-step palette of muted, distinguishable hues that read against
+// `--surface-1`. Hand-tuned in OKLCH at uniform L=0.70 / C≈0.13 so no
 // single color screams louder than its neighbours; the rose at the start
 // matches the default `--accent` hue (358) so the primary layer feels
 // continuous with the rest of the chrome. Not derived from `--accent` at
-// runtime: an accent override is one user signature, this palette is six.
+// runtime: an accent override is one user signature, this palette is ten.
 const PALETTE = [
   'oklch(0.70 0.16 358)', // rose (default accent hue)
-  'oklch(0.70 0.13 38)',  // warm orange
-  'oklch(0.70 0.12 88)',  // olive
-  'oklch(0.70 0.13 168)', // teal
+  'oklch(0.70 0.13 28)',  // coral
+  'oklch(0.70 0.12 58)',  // amber
+  'oklch(0.70 0.12 98)',  // olive
+  'oklch(0.70 0.13 138)', // sage
+  'oklch(0.70 0.13 178)', // teal
   'oklch(0.70 0.13 218)', // sky
+  'oklch(0.70 0.13 258)', // indigo
   'oklch(0.70 0.13 298)', // lavender
+  'oklch(0.70 0.13 328)', // mauve
 ];
 
 // strasbeat patterns assume 4 beats / cycle (matches transport.js's
@@ -261,11 +265,9 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     visibleHaps.push({ hap, begin, end, val });
   }
 
-  // Fold layout: collect all unique values, sort them (numbers ascending,
-  // then strings alphabetical), and map each value to its slot index. This
-  // is how upstream pianoroll.mjs handles mixed numeric / string keys —
-  // pitched notes share the numeric portion of the axis, drum / sound-only
-  // haps each get their own row above.
+  // Fold layout: collect all unique values and map each to a slot index.
+  // strings (drum sounds) sort first so they anchor at the bottom of the
+  // canvas after y-inversion; numbers (pitched notes) sort after, ascending.
   const uniqueValues = [];
   const seenValues = new Set();
   for (const item of visibleHaps) {
@@ -277,8 +279,8 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   }
   uniqueValues.sort((a, b) => {
     if (typeof a === 'number' && typeof b === 'number') return a - b;
-    if (typeof a === 'number') return -1; // numbers first
-    if (typeof b === 'number') return 1;
+    if (typeof a === 'number') return 1;  // numbers sort AFTER strings
+    if (typeof b === 'number') return -1; // strings sort BEFORE numbers
     return String(a).localeCompare(String(b));
   });
 
@@ -309,7 +311,10 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     const pillW = Math.max(2, Math.round(wRaw) - 1);
 
     const color = colorForKey(state, getGroupKey(hap));
-    drawNotePill(ctx, x, y, pillW, pillH, color);
+    const isActive = hap.whole.begin <= time && hap.endClipped > time;
+    const { velocity = 1, gain = 1 } = hap.value || {};
+    const dynAlpha = Math.min(1, velocity * gain); // clamp — gain can exceed 1
+    drawNotePill(ctx, x, y, pillW, pillH, color, isActive, dynAlpha);
 
     const loc = getFirstLocation(hap);
     if (loc) {
@@ -343,7 +348,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   ctx.stroke();
 }
 
-function drawNotePill(ctx, x, y, w, h, color) {
+function drawNotePill(ctx, x, y, w, h, color, isActive, dynAlpha = 1) {
   const r = Math.max(0, Math.min(PILL_RADIUS, h / 2, w / 2));
   ctx.beginPath();
   if (typeof ctx.roundRect === 'function') {
@@ -353,10 +358,10 @@ function drawNotePill(ctx, x, y, w, h, color) {
     // failing back to a sharp rect is preferable to throwing.
     ctx.rect(x, y, w, h);
   }
-  ctx.globalAlpha = 0.8;
+  ctx.globalAlpha = (isActive ? 0.9 : 0.35) * dynAlpha;
   ctx.fillStyle = color;
   ctx.fill();
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = (isActive ? 1.0 : 0.5) * dynAlpha;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
   ctx.stroke();
