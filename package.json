@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Strudel-based beat-making workspace: patterns as version-controlled JS files, live-coded in the browser",
+  "packageManager": "pnpm@10.28.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

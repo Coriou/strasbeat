@@ -1,8 +1,21 @@
 import { StrudelMirror } from '@strudel/codemirror';
-import { evalScope, controls } from '@strudel/core';
-import { drawPianoroll } from '@strudel/draw';
 import { transpiler } from '@strudel/transpiler';
-import {
+import { registerSoundfonts } from '@strudel/soundfonts';
+// Strudel packages that are *also* fed to evalScope below: import them as
+// whole namespaces so we can pass the values directly. Mixing static + dynamic
+// imports of the same module triggers Vite/Rollup chunking warnings, and
+// dynamic imports here can't actually be code-split (we use named exports
+// from the same modules in this file). Single static import each, no warning.
+import * as strudelCore from '@strudel/core';
+import * as strudelDraw from '@strudel/draw';
+import * as strudelMini from '@strudel/mini';
+import * as strudelTonal from '@strudel/tonal';
+import * as strudelWebaudio from '@strudel/webaudio';
+import { MidiBridge, presets as midiPresets } from './midi-bridge.js';
+
+const { evalScope, controls } = strudelCore;
+const { drawPianoroll } = strudelDraw;
+const {
   getAudioContext,
   webaudioOutput,
   registerSynthSounds,
@@ -16,9 +29,7 @@ import {
   setAudioContext,
   setSuperdoughAudioController,
   resetGlobalEffects,
-} from '@strudel/webaudio';
-import { registerSoundfonts } from '@strudel/soundfonts';
-import { MidiBridge, presets as midiPresets } from './midi-bridge.js';
+} = strudelWebaudio;
 
 // ─── Auto-discover patterns ──────────────────────────────────────────────
 // Every .js file in /patterns must `export default` a string of Strudel code.
@@ -132,13 +143,15 @@ const editor = new StrudelMirror({
     drawPianoroll({ haps, time, ctx: drawCtx, drawTime, fold: 0 }),
   prebake: async () => {
     initAudioOnFirstClick();
+    // evalScope uses Promise.allSettled, so passing module values is fine —
+    // identical effect to passing import() promises, just no chunking warning.
     const loadModules = evalScope(
       controls,
-      import('@strudel/core'),
-      import('@strudel/draw'),
-      import('@strudel/mini'),
-      import('@strudel/tonal'),
-      import('@strudel/webaudio'),
+      strudelCore,
+      strudelDraw,
+      strudelMini,
+      strudelTonal,
+      strudelWebaudio,
     );
     // Wrap each sample bank load so a single failure (network, CORS,
     // upstream change) doesn't take down the rest of the prebake.
