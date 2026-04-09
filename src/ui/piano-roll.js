@@ -26,6 +26,8 @@
 // hit-tests against the latest map and dispatches a CM6 selection range
 // to the supplied EditorView, scrolling it into view.
 
+import { noteToMidi, freqToMidi } from '@strudel/core';
+
 // Six-step palette of muted, distinguishable hues that read against
 // `--surface-1`. Hand-tuned in OKLCH at uniform L=0.68 / C≈0.13 so no
 // single color screams louder than its neighbours; the rose at the start
@@ -70,21 +72,36 @@ function ensureState(canvas) {
   return s;
 }
 
-// Pull a hap's numeric pitch. Mirrors the helper in
-// strudel-source/packages/draw/pianoroll.mjs but trimmed to numeric values
-// only — non-numeric `s`-only haps are placed on a single shared row in
-// the renderer (drum hits don't have a meaningful pitch axis).
-function getNumericValue(hap) {
-  const v = hap?.value;
-  if (v == null) return null;
-  if (typeof v === 'number') return v;
-  if (typeof v !== 'object') return null;
-  if (typeof v.note === 'number') return v.note;
-  if (typeof v.n === 'number') return v.n;
-  if (typeof v.midi === 'number') return v.midi;
-  if (typeof v.freq === 'number' && v.freq > 0) {
-    // 12 * log2(f/440) + 69 — Strudel's freqToMidi formula.
-    return 12 * Math.log2(v.freq / 440) + 69;
+// Pull a hap's "value" for the y-axis. Mirrors the helper in
+// strudel-source/packages/draw/pianoroll.mjs:11-38. Returns either:
+//   - a number (a MIDI pitch — pitched notes resolve here, including
+//     string note names like "c3" via noteToMidi, and `freq` via
+//     freqToMidi), or
+//   - a string key like "_bd" for s-only haps (drum hits etc.) so each
+//     distinct sound name gets its own row in the fold layout, or
+//   - null when no usable value is present.
+function getValue(hap) {
+  let value = hap?.value;
+  if (typeof value !== 'object') {
+    value = { value };
+  }
+  let { note, n, freq, s } = value;
+  if (freq) {
+    return freqToMidi(freq);
+  }
+  note = note ?? n;
+  if (typeof note === 'string') {
+    try {
+      return noteToMidi(note);
+    } catch {
+      return 0;
+    }
+  }
+  if (typeof note === 'number') {
+    return note;
+  }
+  if (s) {
+    return '_' + s;
   }
   return null;
 }
@@ -232,46 +249,56 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   }
 
   // ── Note pills ───────────────────────────────────────────────────────
-  // First pass: collect visible haps + auto-range.
+  // First pass: collect visible haps.
   const visibleHaps = [];
-  let minVal = Infinity;
-  let maxVal = -Infinity;
   for (const hap of haps) {
     if (!hap || !hap.whole) continue;
     const begin = Number(hap.whole.begin);
     const end = Number(hap.whole.end);
     if (!Number.isFinite(begin) || !Number.isFinite(end)) continue;
     if (end < t0 || begin > t1) continue; // off-screen
-    const val = getNumericValue(hap);
+    const val = getValue(hap);
     visibleHaps.push({ hap, begin, end, val });
-    if (val != null) {
-      if (val < minVal) minVal = val;
-      if (val > maxVal) maxVal = val;
-    }
   }
 
-  // Auto-range with one slot of padding on each side. Pitchless haps
-  // (s-only drum hits) get parked on a single shared row.
-  let valLow = 0;
-  let valRange = 1;
-  if (Number.isFinite(minVal) && Number.isFinite(maxVal)) {
-    valLow = minVal - 1;
-    valRange = (maxVal - minVal) + 2;
+  // Fold layout: collect all unique values, sort them (numbers ascending,
+  // then strings alphabetical), and map each value to its slot index. This
+  // is how upstream pianoroll.mjs handles mixed numeric / string keys —
+  // pitched notes share the numeric portion of the axis, drum / sound-only
+  // haps each get their own row above.
+  const uniqueValues = [];
+  const seenValues = new Set();
+  for (const item of visibleHaps) {
+    const val = item.val;
+    if (val != null && !seenValues.has(val)) {
+      seenValues.add(val);
+      uniqueValues.push(val);
+    }
   }
-  const valueToY = (val) => {
-    const slotsFromTop = (valRange - 1) - (val - valLow);
-    return (slotsFromTop / valRange) * noteAreaH;
-  };
-  const rowH = noteAreaH / valRange;
+  uniqueValues.sort((a, b) => {
+    if (typeof a === 'number' && typeof b === 'number') return a - b;
+    if (typeof a === 'number') return -1; // numbers first
+    if (typeof b === 'number') return 1;
+    return String(a).localeCompare(String(b));
+  });
+
+  const slotCount = Math.max(1, uniqueValues.length);
+  const rowH = noteAreaH / slotCount;
   const pillH = Math.max(2, rowH - 2);
-  const fallbackVal = valLow + (valRange - 1) / 2;
+
+  const valueToY = (val) => {
+    const idx = uniqueValues.indexOf(val);
+    // Higher pitch = higher on screen → invert the slot index.
+    const slot = (slotCount - 1) - (idx >= 0 ? idx : 0);
+    return (slot / slotCount) * noteAreaH;
+  };
 
   // Reset hit map for this frame.
   state.hits.length = 0;
 
   for (const item of visibleHaps) {
-    const { hap, begin, end } = item;
-    const val = item.val != null ? item.val : fallbackVal;
+    const { hap, begin, end, val } = item;
+    if (val == null) continue; // truly empty haps have nowhere to land
 
     const xRaw = timeToX(begin);
     const wRaw = timeToX(end) - xRaw;
