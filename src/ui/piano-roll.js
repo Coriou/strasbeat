@@ -26,7 +26,7 @@
 // hit-tests against the latest map and dispatches a CM6 selection range
 // to the supplied EditorView, scrolling it into view.
 
-import { noteToMidi, freqToMidi } from '@strudel/core';
+import { noteToMidi, freqToMidi, midi2note } from '@strudel/core';
 
 // Ten-step palette of muted, distinguishable hues that read against
 // `--surface-1`. Hand-tuned in OKLCH at uniform L=0.70 / C≈0.13 so no
@@ -52,6 +52,7 @@ const PALETTE = [
 // convention rather than something Strudel tracks).
 const BEATS_PER_CYCLE = 4;
 const BOTTOM_LABEL_H = 14;   // reserved strip at the bottom for cycle labels
+const LEFT_GUTTER_W = 44;    // reserved strip on the left for row labels
 const PILL_RADIUS = 3;       // ≈ --radius-sm minus a hair so corners stay crisp
 const MIN_PX_PER_BEAT = 8;   // hide beat lines below this density
 
@@ -156,6 +157,7 @@ function readTokens(canvas) {
     accent:     get('--accent', '#cf418d'),
     textDim:    get('--text-dim', '#666'),
     fontSans:   get('--font-sans', 'system-ui, sans-serif'),
+    fontMono:   get('--font-mono', 'ui-monospace, monospace'),
     textXs:     get('--text-xs', '11px'),
   };
 }
@@ -203,9 +205,22 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     return;
   }
 
-  // Reserve a strip at the bottom for cycle labels.
+  // Reserve a strip at the bottom for cycle labels and one on the left for
+  // row labels. Every x-coord (gridlines, pills, playhead, hit map, cycle
+  // labels) flows through `timeToX`, so the note area shifts in lockstep.
   const noteAreaH = Math.max(0, h - BOTTOM_LABEL_H);
-  const timeToX = (t) => ((t - t0) / span) * w;
+  const noteAreaX = LEFT_GUTTER_W;
+  const noteAreaW = Math.max(0, w - noteAreaX);
+  const timeToX = (t) => noteAreaX + ((t - t0) / span) * noteAreaW;
+
+  // Clip everything that draws inside the note area (gridlines, pills,
+  // playhead glow, cycle labels) to the region right of the gutter so it
+  // can't bleed into the row labels. Full canvas height — the bottom-strip
+  // cycle labels are inside this clip block.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(noteAreaX, 0, noteAreaW, h);
+  ctx.clip();
 
   // ── Gridlines ────────────────────────────────────────────────────────
   ctx.lineWidth = 1;
@@ -298,6 +313,10 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   // Reset hit map for this frame.
   state.hits.length = 0;
 
+  // Track which row values have a currently-playing pill so the gutter
+  // label loop (drawn after the clip block) can wash matching rows.
+  const activeValues = new Set();
+
   for (const item of visibleHaps) {
     const { hap, begin, end, val } = item;
     if (val == null) continue; // truly empty haps have nowhere to land
@@ -312,6 +331,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
 
     const color = colorForKey(state, getGroupKey(hap));
     const isActive = hap.whole.begin <= time && hap.endClipped > time;
+    if (isActive) activeValues.add(val);
     const { velocity = 1, gain = 1 } = hap.value || {};
     const dynAlpha = Math.min(1, velocity * gain); // clamp — gain can exceed 1
     drawNotePill(ctx, x, y, pillW, pillH, color, isActive, dynAlpha);
@@ -346,6 +366,50 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   ctx.moveTo(px, 0);
   ctx.lineTo(px, noteAreaH);
   ctx.stroke();
+
+  ctx.restore();
+
+  // ── Row labels (left gutter) ─────────────────────────────────────────
+  // Note name (C3, Eb4 …) for pitched rows; sound name (bd, sd …) for
+  // drum rows. Font size scales with row height so dense fold layouts
+  // shrink gracefully; floor of 8px keeps labels readable.
+  const gutterFontSize = Math.min(fontSize, Math.max(8, Math.floor(rowH * 0.65)));
+  ctx.font = `500 ${gutterFontSize}px ${tokens.fontMono}`;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'right';
+  ctx.globalAlpha = 1;
+
+  for (let i = 0; i < uniqueValues.length; i++) {
+    const val = uniqueValues[i];
+    const y = valueToY(val);
+    const cy = y + rowH / 2;
+
+    // Faint accent wash behind currently-playing rows so the "bright pill
+    // = now" cue extends to the label axis.
+    if (activeValues.has(val)) {
+      ctx.fillStyle = tokens.accent;
+      ctx.globalAlpha = 0.12;
+      ctx.fillRect(0, y, LEFT_GUTTER_W, rowH);
+      ctx.globalAlpha = 1;
+    }
+
+    const label = typeof val === 'number'
+      ? midi2note(Math.round(val))            // 60 → "C4", 69 → "A4"
+      : String(val).replace(/^_/, '');        // "_bd" → "bd"
+
+    ctx.fillStyle = tokens.textDim;
+    ctx.fillText(label, LEFT_GUTTER_W - 4, cy);
+  }
+
+  // Subtle separator between gutter and note area (matches beat gridline weight).
+  ctx.strokeStyle = tokens.borderSoft;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(noteAreaX - 0.5, 0);
+  ctx.lineTo(noteAreaX - 0.5, noteAreaH);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
 }
 
 function drawNotePill(ctx, x, y, w, h, color, isActive, dynAlpha = 1) {
