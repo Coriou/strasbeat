@@ -53,7 +53,12 @@ on earlier ones:
    settings. Phased; Phase 1 (right rail + sound browser) is the
    highest-value delivery and builds the infrastructure all other
    panels depend on. Depends on `01-shell.md` being landed.
-8. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
+8. **`work/09-pattern-persistence.md`** — localStorage-backed autosave,
+   working copies, user-created patterns, revert-to-original, dirty
+   indicators. Phased; Phase 1 (autosave + store abstraction) solves the
+   "lose work" problem. Phase 3 sketches migration to API-backed user
+   accounts. Independent of 1–7 (touches `main.js` boot + left rail).
+9. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
    multi-track DAW). **Not actionable yet** — read for context only when
    working on the actionable specs above, so you don't paint us into a
    corner.
