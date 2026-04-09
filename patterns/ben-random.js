@@ -1,0 +1,36 @@
+export default `$: note("b5 c2 c2 b4").s("bd")
+
+$: note("c2*8").s("hh")
+
+lead: note("c4 a4 f4 e4")
+  .s("supersaw")
+  .lpf("2400")
+  .room("0.2")
+  .pan(sine.slow(2))
+  .mask("<0 0 0 1 1 1 1>")
+  .gain("0.8")
+
+leadrev: note("c4 a4 f4 e4")
+  .s("supersaw")
+  .lpf("800")
+  .room("0.2")
+  .pan(sine.slow(1))
+  .mask("<1 1 0 0>")
+  .rev()
+
+leaddel: note("c4 a4 f4 e4")
+  .s("supersaw")
+  .lpf("800")
+  .room("0.2")
+  .pan(sine.slow(1))
+  .delay("<0 .25 .25 0.5>")
+  .scale("c:minor")
+
+leadbis: note("c4 f4 a4 g4")
+  .s("gm_lead_6_voice")
+  .attack("<0.9 0.9 0.9 0.8>")
+  .gain("<1 1.75 1.75 1.25>")
+  .lpf("800")
+  .scale("c:major")
+  .room("<0.5 0.75>")
+`;
