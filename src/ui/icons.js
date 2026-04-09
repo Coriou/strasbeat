@@ -22,6 +22,8 @@ import {
   ChevronDown,
   ChevronsDownUp,
   Save,
+  Music2,
+  BookOpen,
 } from 'lucide';
 
 const ICONS = {
@@ -36,6 +38,8 @@ const ICONS = {
   'chevron-down': ChevronDown,
   'chevrons-down-up': ChevronsDownUp,
   save: Save,
+  music: Music2,
+  'book-open': BookOpen,
 };
 
 /**

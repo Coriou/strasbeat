@@ -84,4 +84,11 @@
   --roll-h: 180px; /* current value when expanded; JS toggles between 0 and this */
   --roll-min-h: 80px;
   --roll-max-h: 360px;
+
+  /* Right rail — JS toggles between the collapsed strip width and the
+     user's chosen panel width within --right-rail-min/max. */
+  --right-rail-w: 36px; /* default = collapsed (just the tab strip) */
+  --right-rail-tabs-w: 36px;
+  --right-rail-min: 240px;
+  --right-rail-max: 480px;
 }

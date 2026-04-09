@@ -71,6 +71,49 @@ export function prompt(opts) {
   });
 }
 
+/**
+ * Open a yes/no modal. Resolves to `true` on confirm, `false` on cancel /
+ * Escape / click-outside. Same focus-trap, same exit animation, same
+ * single-modal-at-a-time guarantee as `prompt()` — just no input field.
+ *
+ *   const ok = await confirm({
+ *     title: 'Replace current buffer with example?',
+ *     message: 'Unsaved changes will be lost.',
+ *     confirmLabel: 'Replace',
+ *     destructive: true,
+ *   });
+ *   if (!ok) return;
+ *
+ * @param {{
+ *   title: string,
+ *   message?: string,
+ *   confirmLabel?: string,
+ *   cancelLabel?: string,
+ *   destructive?: boolean,
+ * }} opts
+ * @returns {Promise<boolean>}
+ */
+export function confirm(opts) {
+  if (active) closeActive(null);
+
+  return new Promise((resolve) => {
+    const root = buildConfirm(opts, (ok) => closeActive(ok));
+    document.body.appendChild(root);
+
+    requestAnimationFrame(() => {
+      root.classList.add('modal-overlay--open');
+    });
+
+    const confirmBtn = root.querySelector('.modal__confirm');
+    confirmBtn.focus();
+
+    const prevFocus = document.activeElement;
+    const cleanup = installListeners(root, () => closeActive(false));
+
+    active = { resolve: (v) => resolve(v === true), root, prevFocus, cleanup };
+  });
+}
+
 function closeActive(value) {
   if (!active) return;
   const { resolve, root, prevFocus, cleanup } = active;
@@ -180,6 +223,62 @@ function buildModal(opts, onConfirm) {
       tryConfirm();
     }
   });
+
+  return overlay;
+}
+
+function buildConfirm(opts, onResult) {
+  const {
+    title,
+    message,
+    confirmLabel = 'OK',
+    cancelLabel = 'Cancel',
+    destructive = false,
+  } = opts;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.setAttribute('role', 'alertdialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', title);
+
+  const dialog = document.createElement('div');
+  dialog.className = 'modal';
+  overlay.appendChild(dialog);
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'modal__title';
+  titleEl.textContent = title;
+  dialog.appendChild(titleEl);
+
+  if (message) {
+    const messageEl = document.createElement('div');
+    messageEl.className = 'modal__message';
+    messageEl.textContent = message;
+    dialog.appendChild(messageEl);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'modal__actions';
+  dialog.appendChild(actions);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn btn--ghost modal__cancel';
+  cancelBtn.textContent = cancelLabel;
+  actions.appendChild(cancelBtn);
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'btn modal__confirm';
+  if (destructive) confirmBtn.classList.add('btn--destructive');
+  confirmBtn.textContent = confirmLabel;
+  actions.appendChild(confirmBtn);
+
+  confirmBtn.addEventListener('click', () => onResult(true));
+  cancelBtn.addEventListener('click', () => onResult(false));
+  // Enter on the focused confirm button is the platform default; nothing
+  // extra to wire here. Escape is handled by installListeners().
 
   return overlay;
 }

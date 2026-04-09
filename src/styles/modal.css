@@ -59,6 +59,13 @@
   color: var(--text);
 }
 
+/* Body copy for confirm() dialogs (no input field). */
+.modal__message {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+}
+
 .modal__input {
   width: 100%;
   height: 32px;
@@ -110,4 +117,17 @@
 .modal__confirm:active {
   --btn-bg: var(--accent-lo);
   --btn-bd: var(--accent-lo);
+}
+
+/* Destructive variant of the confirm button (used by confirm() when the
+   action is irreversible — e.g. replacing the editor buffer). Tints the
+   button with the rec/error color so the eye registers the consequence
+   before clicking. */
+.modal__confirm.btn--destructive {
+  --btn-bg: var(--rec);
+  --btn-bd: var(--rec);
+}
+.modal__confirm.btn--destructive:hover {
+  --btn-bg: oklch(0.7 0.22 25);
+  --btn-bd: oklch(0.7 0.22 25);
 }

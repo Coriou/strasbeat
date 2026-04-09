@@ -20,11 +20,15 @@ import { numericScrubber } from "./editor/numeric-scrubber.js";
 import { installSoundCompletion } from "./editor/completions/sounds.js";
 import { hoverDocs } from "./editor/hover-docs.js";
 import { signatureHint } from "./editor/signature-hint.js";
+import strudelDocs from "./editor/strudel-docs.json";
 import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
+import { mountRightRail } from "./ui/right-rail.js";
+import { createSoundBrowserPanel } from "./ui/sound-browser.js";
+import { createReferencePanel } from "./ui/reference-panel.js";
 import { renderRoll } from "./ui/piano-roll.js";
-import { prompt } from "./ui/modal.js";
+import { prompt, confirm } from "./ui/modal.js";
 import {
   applyStoredAccent,
   mountSettingsDrawer,
@@ -82,6 +86,10 @@ const patternMenuName = document.getElementById("pattern-menu-name");
 const settingsBtn = document.getElementById("settings");
 const rollToggleBtn = document.getElementById("roll-toggle");
 const rollDivider = document.getElementById("roll-divider");
+const rightRailEl = document.getElementById("right-rail");
+const rightRailTabsEl = document.getElementById("right-rail-tabs");
+const rightRailPanelEl = document.getElementById("right-rail-panel");
+const rightRailResizeEl = document.getElementById("right-rail-resize");
 
 // Expand <span data-icon="..."> placeholders into Lucide SVGs before the
 // rest of the wiring runs — every later attachShell handler can rely on
@@ -271,6 +279,13 @@ editor.updateSettings({
 //
 // The numeric scrubber is left at default precedence — it's a ViewPlugin
 // (mouse handlers, decorations) not a keymap, so precedence doesn't matter.
+//
+// Forward declaration so hoverDocs's deep-link callback can close over
+// the reference panel before it's actually constructed (the right rail
+// is mounted further down in this file). The closure is only invoked
+// after a real user hover, by which time the panel exists.
+let referencePanel = null;
+
 editor.editor.dispatch({
   effects: StateEffect.appendConfig.of([
     Prec.highest(formatExtension),
@@ -282,7 +297,17 @@ editor.editor.dispatch({
     numericScrubber({
       evaluate: () => editor.repl.evaluate(editor.code, false),
     }),
-    hoverDocs,
+    hoverDocs({
+      // "→ Reference" link at the bottom of every hover tooltip — opens
+      // the right rail to the API reference panel and scrolls to the
+      // hovered function. See src/editor/hover-docs.js + src/ui/
+      // reference-panel.js for the two halves of this wiring.
+      onOpenReference: (name) => {
+        if (!referencePanel) return;
+        rightRail.activate("reference"); // expands the rail if collapsed
+        referencePanel.scrollTo(name);
+      },
+    }),
     signatureHint,
   ]),
 });
@@ -349,6 +374,262 @@ setCurrentName(currentName);
 // module — it handles open/close, focus, and persistence internally.
 patternMenuBtn.addEventListener("click", () => leftRail.focusSearch());
 mountSettingsDrawer({ button: settingsBtn });
+
+// ─── Right rail (sound browser, future panels) ──────────────────────────
+// The right rail is a generic tabbed panel host (src/ui/right-rail.js).
+// Phase 1 lights up its first panel — the sound browser — which lets the
+// composer browse, audition, and insert any registered sound. See
+// design/work/08-feature-parity-and-beyond.md.
+const rightRail = mountRightRail({
+  container: rightRailEl,
+  tabsContainer: rightRailTabsEl,
+  panelContainer: rightRailPanelEl,
+  resizeHandle: rightRailResizeEl,
+  storageKey: "strasbeat:right-rail",
+  onFocusEditor: () => editor.editor.focus(),
+});
+
+const soundBrowser = createSoundBrowserPanel({
+  getSoundMap: () => soundMap.get(),
+  onPreview: (name) => previewSoundName(name),
+  onInsert: (name) => insertSoundName(name),
+  onFocusEditor: () => editor.editor.focus(),
+});
+rightRail.registerPanel(soundBrowser);
+
+// API reference panel — second tab in the right rail. See
+// src/ui/reference-panel.js and design/work/08-feature-parity-and-beyond.md
+// "Phase 2". Assigned to the forward-declared `referencePanel` so the
+// hoverDocs deep-link callback (set up earlier in this file) can find
+// it without needing the panel to exist at extension-dispatch time.
+referencePanel = createReferencePanel({
+  docs: strudelDocs,
+  onTry: (exampleCode) => tryReferenceExample(exampleCode),
+  onInsert: (name, template) => insertFunctionTemplate(name, template),
+  onFocusEditor: () => editor.editor.focus(),
+});
+rightRail.registerPanel(referencePanel);
+// Seed the "in use" highlights immediately — buildEntries() runs
+// synchronously inside the factory, so this is safe before the panel
+// has been activated for the first time.
+referencePanel.setBufferText(editor.code ?? "");
+
+// Refresh the panel once the prebake has populated soundMap. Prebake is
+// off-limits (CLAUDE.md / SYSTEM.md §11) so we can't hook into it
+// directly — instead we poll the soundMap until it has entries, then
+// fire a single refresh. Caps at ~10s so a stuck prebake doesn't leave
+// the interval running forever.
+{
+  const start = performance.now();
+  const POLL_MS = 200;
+  const TIMEOUT_MS = 10000;
+  const interval = setInterval(() => {
+    const count = Object.keys(soundMap.get() ?? {}).length;
+    if (count > 0) {
+      clearInterval(interval);
+      soundBrowser.refresh();
+      // Seed the "in use" highlights with whatever's in the editor right
+      // now (even if the user hasn't pressed evaluate yet).
+      soundBrowser.setBufferText(editor.code ?? "");
+    } else if (performance.now() - start > TIMEOUT_MS) {
+      clearInterval(interval);
+      console.warn(
+        "[strasbeat/sound-browser] soundMap still empty after 10s — " +
+          "prebake may have failed; the panel will stay empty until reload",
+      );
+    }
+  }, POLL_MS);
+}
+
+// Re-scan the editor buffer for "in use" sounds + functions on every
+// evaluate. Both scans are string matches (not AST), cheap enough to
+// run synchronously. Wrapping `editor.evaluate` lets us catch *all*
+// eval entry points (toolbar, Cmd+Enter, share-link reload, …) without
+// touching the Strudel keymap.
+const _editorEvaluate = editor.evaluate.bind(editor);
+editor.evaluate = async function patchedEvaluate(...args) {
+  const result = await _editorEvaluate(...args);
+  try {
+    soundBrowser.setBufferText(editor.code ?? "");
+  } catch (err) {
+    console.warn("[strasbeat/sound-browser] in-use scan failed:", err);
+  }
+  try {
+    referencePanel.setBufferText(editor.code ?? "");
+  } catch (err) {
+    console.warn("[strasbeat/reference-panel] in-use scan failed:", err);
+  }
+  return result;
+};
+
+// Cmd/Ctrl+B toggles the right rail (matches VSCode's sidebar toggle).
+// Captured at the document level so it works whether the focus is in
+// the editor, in the sound-browser search input, or anywhere else in
+// the shell. preventDefault keeps the browser's default "bold" mapping
+// from running on focused inputs (where it would do nothing useful).
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      !e.shiftKey &&
+      !e.altKey &&
+      e.key.toLowerCase() === "b"
+    ) {
+      e.preventDefault();
+      rightRail.toggle();
+    }
+  },
+  true,
+);
+
+/**
+ * Fire a one-shot audition of a sound through the live audio context.
+ * Mirrors the MIDI bridge's superdough call shape (src/midi-bridge.js)
+ * with a tuned envelope that works for both melodic sounds and one-shots.
+ *
+ * Unlike the MIDI bridge (which receives MIDI events that aren't user
+ * gestures), this is always called from a mousedown handler — a real user
+ * gesture. So we can (and must) resume a suspended AudioContext here
+ * rather than just bailing out. The upstream initAudioOnFirstClick
+ * listener sits on `document` and fires *after* the sound item's handler
+ * (event bubbling goes inner → outer), so on the first interaction the
+ * context is still suspended when we get here.
+ */
+async function previewSoundName(name) {
+  const ctx = getAudioContext();
+  if (!ctx) {
+    transport.setStatus("no audio context — try reloading the page");
+    return;
+  }
+  // Resume on first user gesture if the context is still suspended.
+  if (ctx.state === "suspended") {
+    try {
+      await ctx.resume();
+    } catch (err) {
+      console.warn("[strasbeat/sound-browser] ctx.resume() failed:", err);
+    }
+  }
+  if (ctx.state !== "running") {
+    transport.setStatus(
+      "click the page once to enable audio, then preview again",
+    );
+    return;
+  }
+  if (!getSound(name)) {
+    console.warn(`[strasbeat/sound-browser] sound "${name}" is not loaded`);
+    return;
+  }
+  const value = {
+    s: name,
+    note: 60, // middle C — ignored by drum hits, used by melodic sounds
+    gain: 0.8,
+    attack: 0.005,
+    decay: 0.4,
+    sustain: 0,
+    release: 0.3,
+  };
+  // 10ms latency cushion — superdough warns and skips events scheduled in
+  // the past, same as the MIDI bridge.
+  Promise.resolve(superdough(value, ctx.currentTime + 0.01, 0.5)).catch((err) =>
+    console.warn(`[strasbeat/sound-browser] preview "${name}" failed:`, err),
+  );
+}
+
+/**
+ * Insert a sound name into the editor at the cursor. Context-aware: if
+ * the cursor sits inside an existing `s("…")` / `sound("…")` literal,
+ * we replace just the inner string contents; otherwise we drop a fresh
+ * `s("name")` at the cursor (or over the current selection).
+ */
+function insertSoundName(name) {
+  const view = editor.editor;
+  if (!view) return;
+  const { state } = view;
+  const cursor = state.selection.main.head;
+  const doc = state.doc.toString();
+
+  // Detect "cursor inside an s("…") / sound("…") literal":
+  //   - look backwards for `s(` or `sound(` followed by a quote and any
+  //     non-quote/paren/newline run that ends at the cursor
+  //   - look forwards for the matching close quote on the same line
+  // If both halves match, replace the entire inner string.
+  const before = doc.slice(0, cursor);
+  const after = doc.slice(cursor);
+  const openMatch = before.match(/\b(?:s|sound)\(\s*(["'])([^"'\n)]*)$/);
+  if (openMatch) {
+    const quote = openMatch[1];
+    const innerSoFar = openMatch[2];
+    // Match a same-line run up to the matching close quote.
+    const closeRe = new RegExp(`^([^"'\\n)]*)${quote === '"' ? '"' : "'"}`);
+    const tail = after.match(closeRe);
+    if (tail) {
+      const innerStart = cursor - innerSoFar.length;
+      const innerEnd = cursor + tail[1].length;
+      view.dispatch({
+        changes: { from: innerStart, to: innerEnd, insert: name },
+        selection: { anchor: innerStart + name.length },
+      });
+      view.focus();
+      return;
+    }
+  }
+
+  // Fallback: insert a new s("name") call at the cursor (or replace the
+  // current selection if there is one).
+  const sel = state.selection.main;
+  const insert = `s("${name}")`;
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert },
+    selection: { anchor: sel.from + insert.length },
+  });
+  view.focus();
+}
+
+/**
+ * Try a reference panel example: replace the editor buffer with the
+ * given code and evaluate it. If the buffer differs from the loaded
+ * pattern (i.e. has unsaved edits), confirm via the modal system before
+ * destroying the user's work.
+ */
+async function tryReferenceExample(code) {
+  const loaded = patterns[currentName];
+  const isDirty = loaded == null || editor.code !== loaded;
+  if (isDirty) {
+    const ok = await confirm({
+      title: "Replace current buffer with example?",
+      message: "Unsaved changes will be lost.",
+      confirmLabel: "Replace",
+      cancelLabel: "Keep editing",
+      destructive: true,
+    });
+    if (!ok) return;
+  }
+  editor.setCode(code);
+  try {
+    await editor.evaluate();
+  } catch (err) {
+    console.warn("[strasbeat/reference-panel] try evaluate failed:", err);
+  }
+}
+
+/**
+ * Insert a function-call template at the editor cursor, placing the
+ * caret between the parens. Same dispatch shape as insertSoundName but
+ * dumber: no context detection, no replacement of existing content.
+ */
+function insertFunctionTemplate(name, template) {
+  const view = editor.editor;
+  if (!view) return;
+  const { state } = view;
+  const sel = state.selection.main;
+  const cursorOffset = template.indexOf("(") + 1; // between the parens
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert: template },
+    selection: { anchor: sel.from + cursorOffset },
+  });
+  view.focus();
+}
 
 // ─── Collapsible piano roll ──────────────────────────────────────────────
 // Click the transport's roll-toggle button to collapse/expand. The shell

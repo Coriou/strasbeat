@@ -1,34 +1,36 @@
 /*
  * Shell grid — see design/SYSTEM.md §3.
- *   ┌────────────────────────────────────────────┐
- *   │ topbar (full)                              │  --top-bar-h
- *   ├──────┬─────────────────────────────────────┤
- *   │ rail │ editor                              │  1fr
- *   ├──────┴─────────────────────────────────────┤
- *   │ transport (full)                           │  --transport-h
- *   ├────────────────────────────────────────────┤
- *   │ roll (full, collapsible via --roll-h)      │  var(--roll-h)
- *   └────────────────────────────────────────────┘
+ *   ┌──────────────────────────────────────────────────────┐
+ *   │ topbar (full)                                        │  --top-bar-h
+ *   ├──────┬───────────────────────────────────┬───────────┤
+ *   │ rail │ editor                            │ right-rail│  1fr
+ *   ├──────┴───────────────────────────────────┴───────────┤
+ *   │ transport (full)                                     │  --transport-h
+ *   ├──────────────────────────────────────────────────────┤
+ *   │ roll (full, collapsible via --roll-h)                │  var(--roll-h)
+ *   └──────────────────────────────────────────────────────┘
  *
- * The right-rail column is intentionally absent in v1; the layout is
- * `--left-rail-w 1fr` which is trivially extensible to
- * `--left-rail-w 1fr auto` when intellisense / hover docs land.
+ * --right-rail-w defaults to the collapsed strip width (just the tab bar)
+ * and is grown to the user's chosen panel width by JS when expanded. See
+ * src/ui/right-rail.js + design/work/08-feature-parity-and-beyond.md.
  */
 
 .shell {
   display: grid;
-  grid-template-columns: var(--left-rail-w) 1fr;
+  grid-template-columns: var(--left-rail-w) 1fr var(--right-rail-w);
   grid-template-rows: var(--top-bar-h) 1fr var(--transport-h) var(--roll-h);
   grid-template-areas:
-    "topbar    topbar"
-    "rail      editor"
-    "transport transport"
-    "roll      roll";
+    "topbar    topbar  topbar"
+    "rail      editor  right-rail"
+    "transport transport transport"
+    "roll      roll    roll";
   height: 100vh;
   width: 100vw;
   overflow: hidden;
-  /* Animate roll collapse via grid-template-rows. */
-  transition: grid-template-rows var(--t-panel);
+  /* Animate roll collapse via grid-template-rows and right-rail expand
+     via grid-template-columns. */
+  transition: grid-template-rows var(--t-panel),
+              grid-template-columns var(--t-panel);
 }
 
 /* Collapsed state — toggled by JS on the body or shell. */
@@ -39,12 +41,14 @@
 .top-bar    { grid-area: topbar; }
 .left-rail  { grid-area: rail; }
 .editor-pane{ grid-area: editor; }
+.right-rail { grid-area: right-rail; }
 .transport  { grid-area: transport; }
 .roll-pane  { grid-area: roll; }
 
 /* Adjacent panel seams — sharp, flush, 1px hairlines. */
 .top-bar    { border-bottom: 1px solid var(--border); }
 .left-rail  { border-right:  1px solid var(--border); }
+.right-rail { border-left:   1px solid var(--border); }
 .transport  { border-top:    1px solid var(--border); border-bottom: 1px solid var(--border); }
 .roll-pane  { border-top:    1px solid var(--border-soft); }
 
@@ -52,7 +56,8 @@
 .top-bar,
 .transport,
 .roll-pane,
-.left-rail {
+.left-rail,
+.right-rail {
   background: var(--surface-1);
   /* Defensive: panels never grow past their grid cell. */
   min-width: 0;

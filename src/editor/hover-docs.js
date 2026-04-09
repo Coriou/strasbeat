@@ -21,9 +21,12 @@ function esc(s) {
 /**
  * Build the DOM for a hover tooltip.
  * @param {import('./strudel-docs.json')[string]} entry
+ * @param {string} name — the function name (needed for the deep link)
+ * @param {((name: string) => void) | null} onOpenReference — when provided,
+ *        appends a "→ Reference" link that calls this callback with `name`
  * @returns {HTMLElement}
  */
-function renderTooltip(entry) {
+function renderTooltip(entry, name, onOpenReference) {
   const el = document.createElement("div");
   el.className = "hover-docs";
 
@@ -74,45 +77,87 @@ function renderTooltip(entry) {
     el.appendChild(exSection);
   }
 
+  // Deep link to the API reference panel. Wired by main.js so the
+  // hover-docs module stays unaware of right-rail / panel internals.
+  // Mousedown (not click) so the link fires before the editor can
+  // re-focus and dismiss the tooltip.
+  if (typeof onOpenReference === "function") {
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "hover-docs-ref-link";
+    link.textContent = "→ Reference";
+    link.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        onOpenReference(name);
+      } catch (err) {
+        console.warn("[hover-docs] onOpenReference failed:", err);
+      }
+    });
+    el.appendChild(link);
+  }
+
   return el;
 }
 
 /**
- * CM6 hoverTooltip source. Fires on Identifier nodes that match a
- * known Strudel function name.
+ * Build a CM6 hoverTooltip source for Strudel functions. Fires on
+ * Identifier nodes that match a known function name in `docs`. The
+ * `onOpenReference` callback (if provided) is plumbed into each rendered
+ * tooltip so the "→ Reference" link can deep-link into the API reference
+ * panel — see src/ui/reference-panel.js and main.js's wiring.
  */
-function strudelHover(view, pos, side) {
-  const tree = syntaxTree(view.state);
-  const node = tree.resolveInner(pos, side);
+function makeStrudelHover(onOpenReference) {
+  return function strudelHover(view, pos, side) {
+    const tree = syntaxTree(view.state);
+    const node = tree.resolveInner(pos, side);
 
-  // Only fire on identifier-like nodes
-  const name = node.name;
-  if (
-    name !== "VariableName" &&
-    name !== "PropertyName" &&
-    name !== "Identifier" &&
-    name !== "PropertyDefinition"
-  ) {
-    return null;
-  }
+    // Only fire on identifier-like nodes
+    const nodeName = node.name;
+    if (
+      nodeName !== "VariableName" &&
+      nodeName !== "PropertyName" &&
+      nodeName !== "Identifier" &&
+      nodeName !== "PropertyDefinition"
+    ) {
+      return null;
+    }
 
-  const text = view.state.sliceDoc(node.from, node.to);
-  const entry = docs[text];
-  if (!entry) return null;
+    const text = view.state.sliceDoc(node.from, node.to);
+    const entry = docs[text];
+    if (!entry) return null;
 
-  return {
-    pos: node.from,
-    end: node.to,
-    above: true,
-    create() {
-      const dom = renderTooltip(entry);
-      return { dom };
-    },
+    return {
+      pos: node.from,
+      end: node.to,
+      above: true,
+      create() {
+        const dom = renderTooltip(entry, text, onOpenReference);
+        return { dom };
+      },
+    };
   };
 }
 
-/** CM6 extension: hover-docs for Strudel functions. */
-export const hoverDocs = hoverTooltip(strudelHover, {
-  hideOnChange: true,
-  hoverTime: 350,
-});
+/**
+ * CM6 extension factory: hover-docs for Strudel functions.
+ *
+ *   editor.dispatch({
+ *     effects: StateEffect.appendConfig.of([
+ *       hoverDocs({ onOpenReference: (name) => referencePanel.scrollTo(name) }),
+ *     ]),
+ *   });
+ *
+ * `onOpenReference` is optional — when omitted the tooltip omits the
+ * deep-link button entirely so it stays callable from places that
+ * haven't wired the reference panel yet.
+ *
+ * @param {{ onOpenReference?: (name: string) => void }} [opts]
+ */
+export function hoverDocs(opts = {}) {
+  return hoverTooltip(makeStrudelHover(opts.onOpenReference ?? null), {
+    hideOnChange: true,
+    hoverTime: 350,
+  });
+}

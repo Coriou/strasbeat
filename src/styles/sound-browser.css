@@ -1,0 +1,266 @@
+/* Sound browser — first panel registered with the right rail. See
+   src/ui/sound-browser.js and design/work/08-feature-parity-and-beyond.md. */
+
+.sound-browser {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Header / pills are flush with the rail; the list owns the scroll. */
+}
+
+/* ─── Header (search) ────────────────────────────────────────────────── */
+
+.sound-browser__header {
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+
+.sound-browser__search {
+  position: relative;
+}
+.sound-browser__search-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-2) 0 28px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--t-hover), background var(--t-hover);
+}
+.sound-browser__search-input::placeholder {
+  color: var(--text-dim);
+}
+.sound-browser__search-input:focus {
+  border-color: var(--accent);
+}
+.sound-browser__search-icon {
+  position: absolute;
+  left: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.sound-browser__search-icon svg { width: 14px; height: 14px; }
+
+/* ─── Category pills ────────────────────────────────────────────────── */
+
+.sound-browser__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.sound-browser__pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-2);
+  background: var(--surface-2);
+  color: var(--text-mut);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-hover), border-color var(--t-hover), color var(--t-hover);
+}
+.sound-browser__pill:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.sound-browser__pill.is-active {
+  background: var(--accent-wash);
+  color: var(--text);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.sound-browser__pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ─── Scrollable list ───────────────────────────────────────────────── */
+
+.sound-browser__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2) var(--space-3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+.sound-browser__list::-webkit-scrollbar { width: 6px; }
+.sound-browser__list::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 3px;
+}
+
+.sound-browser__empty {
+  padding: var(--space-4) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* ─── Kit groups ────────────────────────────────────────────────────── */
+
+.sound-browser__group {
+  margin-bottom: var(--space-2);
+}
+
+.sound-browser__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--text-mut);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--t-hover), color var(--t-hover);
+}
+.sound-browser__group-head:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.sound-browser__group-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.sound-browser__group-chev {
+  display: inline-flex;
+  color: var(--text-dim);
+  transition: transform var(--t-hover);
+}
+.sound-browser__group-chev svg { width: 12px; height: 12px; }
+
+.sound-browser__group.is-collapsed .sound-browser__group-chev {
+  transform: rotate(-90deg);
+}
+.sound-browser__group.is-collapsed .sound-browser__group-items {
+  display: none;
+}
+
+.sound-browser__group-label {
+  flex: 1 1 auto;
+  text-align: left;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.sound-browser__group-meta {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.sound-browser__group-items {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+}
+
+/* ─── Sound items ───────────────────────────────────────────────────── */
+
+.sound-browser__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 24px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-mut);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--t-hover), color var(--t-hover);
+  outline: none;
+}
+.sound-browser__item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.sound-browser__item.is-active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.sound-browser__item.is-active:focus-visible,
+.sound-browser__item:focus-visible {
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.sound-browser__item.is-previewing {
+  background: var(--accent-wash);
+  color: var(--text);
+}
+
+/* "In use" indicator — a tiny accent dot tucked against the leading
+   edge. Quiet enough not to compete with active/preview state but always
+   visible at a glance. */
+.sound-browser__item.is-in-use {
+  color: var(--text);
+}
+.sound-browser__item.is-in-use::before {
+  content: "";
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-wash);
+}
+
+.sound-browser__item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sound-browser__item-match {
+  color: var(--accent-hi);
+  font-weight: 600;
+}
+
+.sound-browser__item-meta {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Footer count line ─────────────────────────────────────────────── */
+
+.sound-browser__count {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

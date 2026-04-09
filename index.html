@@ -22,6 +22,10 @@
       Existing IDs (editor, roll, play, stop, save, export-wav, share,
       preset-picker, capture, midi-status, status) are preserved so the
       wiring section in src/main.js stays minimal.
+
+      The right rail is a tabbed panel host — see src/ui/right-rail.js and
+      design/work/08-feature-parity-and-beyond.md. Phase 1 lights up its
+      first panel (sound browser).
     -->
     <div class="shell">
       <header class="top-bar">
@@ -59,6 +63,16 @@
       <main class="editor-pane">
         <div id="editor" class="editor"></div>
       </main>
+
+      <aside class="right-rail" id="right-rail" data-collapsed="true">
+        <div class="right-rail__resize" id="right-rail-resize" title="Drag to resize, double-click to reset" aria-hidden="true"></div>
+        <nav class="right-rail__tabs" id="right-rail-tabs" role="tablist" aria-orientation="vertical" aria-label="Right rail tabs">
+          <!-- src/ui/right-rail.js fills this with 36×36 tab buttons. -->
+        </nav>
+        <div class="right-rail__panel" id="right-rail-panel" role="tabpanel">
+          <!-- The active panel's create(container) renders into here. -->
+        </div>
+      </aside>
 
       <footer class="transport" id="transport">
         <div class="transport__group transport__group--left">
