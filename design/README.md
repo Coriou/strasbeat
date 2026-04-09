@@ -42,7 +42,13 @@ on earlier ones:
 5. **`work/05-piano-roll.md`** — replace the existing 180px canvas with
    a real piano roll, in the design-system style. Depends on `01-shell.md`
    being landed (it lives in the new bottom panel).
-6. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
+6. **`work/07-chord-progression.md`** — `progression("ii V I")` runtime
+   helper: a one-line API on top of Strudel's existing `.voicing()` for
+   sketching tunes from chord charts. Phased; Phase 1 (absolute chord
+   symbols + rhythm presets) is small and shippable on its own.
+   **Not a design-pass feature** — runtime only, touches `evalScope` in
+   `main.js` minimally and additively. Independent of 1–5.
+7. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
    multi-track DAW). **Not actionable yet** — read for context only when
    working on the actionable specs above, so you don't paint us into a
    corner.
