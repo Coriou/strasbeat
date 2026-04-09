@@ -1,0 +1,194 @@
+/* Transport bar — see design/SYSTEM.md §3, design/work/01-shell.md. */
+
+.transport {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  height: var(--transport-h);
+}
+
+.transport__group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.transport__group--left {
+  justify-self: start;
+}
+.transport__group--center {
+  justify-self: center;
+  gap: var(--space-3);
+}
+.transport__group--right {
+  justify-self: end;
+}
+
+.transport .btn--icon {
+  width: 24px;
+  height: 24px;
+  color: var(--text-mut);
+}
+.transport .btn--icon:hover {
+  color: var(--text);
+}
+
+.transport__sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 var(--space-1);
+}
+
+/* ─── Capture button — recording state ─── */
+
+.btn.capture {
+  position: relative;
+  color: var(--text-mut);
+}
+.btn.capture[aria-pressed="true"],
+.btn.capture.recording {
+  color: var(--rec);
+  border-color: var(--rec);
+  animation: capture-pulse 1.2s ease-in-out infinite;
+}
+.capture__count {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  display: none;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  background: var(--rec);
+  color: var(--text);
+  border-radius: 7px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.btn.capture[aria-pressed="true"] .capture__count,
+.btn.capture.recording .capture__count {
+  display: inline-block;
+}
+
+@keyframes capture-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.65 0.22 25 / 0.45); }
+  50%      { box-shadow: 0 0 0 4px oklch(0.65 0.22 25 / 0); }
+}
+
+/* ─── Preset picker — temporarily allowed as a native <select> ─── */
+
+.preset-picker {
+  height: 24px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 0 var(--space-2);
+  cursor: pointer;
+}
+.preset-picker:hover { border-color: var(--border); }
+.preset-picker:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ─── Centred readouts (BPM, cycle, playhead) ─── */
+
+.transport__readout {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-mut);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+.transport__readout--bpm {
+  color: var(--text);
+  font-weight: 600;
+}
+.transport__readout--cycle {
+  color: var(--text-mut);
+}
+
+.transport__playhead {
+  position: relative;
+  width: 140px;
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: visible;
+}
+.transport__playhead-dot {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-left: -4px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: var(--shadow-low);
+  transform: translateX(0);
+  transition: opacity var(--t-hover);
+}
+.transport__playhead--idle .transport__playhead-dot {
+  opacity: 0.3;
+}
+
+/* ─── Right-side status text + MIDI pill ─── */
+
+.transport__status {
+  display: inline-block;
+  max-width: 56ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--text-mut);
+  font-family: var(--font-mono);
+}
+
+.transport__pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-family: var(--font-mono);
+  color: var(--text-mut);
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  white-space: nowrap;
+  user-select: none;
+}
+.transport__pill--midi.is-ok {
+  color: var(--ok);
+  border-color: oklch(0.78 0.16 150 / 0.4);
+}
+.transport__pill--midi.is-err {
+  color: var(--rec);
+  border-color: oklch(0.65 0.22 25 / 0.4);
+}
+
+/* Narrow viewport — drop the playhead first, then the cycle readout. */
+@media (max-width: 1100px) {
+  .transport__playhead { width: 80px; }
+  .transport__status { max-width: 32ch; }
+}
+@media (max-width: 900px) {
+  .transport__playhead { display: none; }
+}

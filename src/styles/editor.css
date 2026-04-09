@@ -1,0 +1,38 @@
+/*
+ * Editor pane styling. The Strudel editor is a CodeMirror 6 instance
+ * mounted into #editor by main.js; we control the wrapping pane background
+ * and the .cm-editor sizing here. Theme colors come from Strudel's own
+ * theme extension.
+ */
+
+.editor {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--surface-0);
+  overflow: hidden;
+}
+
+.editor .cm-editor {
+  height: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--code-base);
+  line-height: 1.55;
+}
+
+.editor .cm-scroller {
+  font-family: var(--font-mono);
+  padding: var(--space-3) 0;
+}
+
+.editor .cm-content {
+  font-family: var(--font-mono);
+}
+
+.editor .cm-gutters {
+  background: var(--surface-0);
+  border-right: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}

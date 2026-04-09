@@ -1,0 +1,80 @@
+/* Top bar — see design/SYSTEM.md §3 and design/work/01-shell.md. */
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  height: var(--top-bar-h);
+}
+
+.top-bar__brand {
+  display: flex;
+  align-items: center;
+}
+
+.brand-mark {
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  user-select: none;
+}
+/* The "stras" prefix picks up the accent; "beat" stays in --text. */
+.brand-mark__accent {
+  color: var(--accent);
+}
+
+/* Pattern menu — clickable wordmark of the current pattern name.
+   Clicking it focuses the left-rail search input. */
+.pattern-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: transparent;
+  color: var(--text-mut);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-hover), border-color var(--t-hover), color var(--t-hover);
+}
+.pattern-menu:hover {
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--text);
+}
+.pattern-menu:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pattern-menu__name {
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pattern-menu__chevron {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid var(--text-mut);
+  border-bottom: 1.5px solid var(--text-mut);
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.top-bar__spacer {
+  flex: 1 1 auto;
+}
+
+.top-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}

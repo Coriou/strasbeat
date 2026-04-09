@@ -1,0 +1,140 @@
+/* Left rail — patterns library. See design/SYSTEM.md §3, design/work/01-shell.md. */
+
+.left-rail {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.left-rail__section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.left-rail__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  gap: var(--space-2);
+}
+
+.left-rail__title {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.left-rail__plus {
+  /* Reuses .btn--icon styling, set in shell.css. Just nudge the size. */
+  width: 22px;
+  height: 22px;
+  color: var(--text-mut);
+}
+.left-rail__plus:hover { color: var(--text); }
+.left-rail__plus svg { width: 14px; height: 14px; }
+
+.left-rail__search {
+  position: relative;
+  margin: 0 var(--space-3) var(--space-2);
+}
+.left-rail__search-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-2) 0 28px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color var(--t-hover), background var(--t-hover);
+}
+.left-rail__search-input::placeholder {
+  color: var(--text-dim);
+}
+.left-rail__search-input:focus {
+  border-color: var(--accent);
+  background: var(--surface-2);
+}
+.left-rail__search-icon {
+  position: absolute;
+  left: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.left-rail__search-icon svg { width: 14px; height: 14px; }
+
+.left-rail__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2) var(--space-4);
+  /* Slim, restrained scrollbar. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+.left-rail__list::-webkit-scrollbar { width: 6px; }
+.left-rail__list::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 3px; }
+
+.left-rail__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--text-mut);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--t-hover), color var(--t-hover);
+}
+.left-rail__item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.left-rail__item.is-active {
+  background: var(--accent-wash);
+  color: var(--text);
+  font-weight: 600;
+}
+.left-rail__item.is-active::before {
+  content: "";
+  flex: 0 0 2px;
+  align-self: stretch;
+  margin-right: var(--space-2);
+  background: var(--accent);
+  border-radius: 1px;
+}
+.left-rail__item-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.left-rail__item-match {
+  color: var(--accent-hi);
+  font-weight: 600;
+}
+
+.left-rail__empty {
+  padding: var(--space-3) var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  text-align: center;
+}

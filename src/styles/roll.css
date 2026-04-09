@@ -1,0 +1,55 @@
+/*
+ * Roll pane — collapsible bottom panel.
+ * For this task the canvas itself is unchanged (#roll); replacing the
+ * renderer is a separate spec (design/work/05-piano-roll.md).
+ */
+
+.roll-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.roll-pane__divider {
+  height: 6px;
+  flex: 0 0 6px;
+  background: transparent;
+  cursor: ns-resize;
+  position: relative;
+}
+.roll-pane__divider::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 32px;
+  height: 2px;
+  margin-left: -16px;
+  margin-top: -1px;
+  background: var(--border);
+  border-radius: 1px;
+  transition: background var(--t-hover);
+}
+.roll-pane__divider:hover::after {
+  background: var(--text-dim);
+}
+
+.roll-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Hide the canvas content cleanly when the shell is collapsed. */
+.shell--roll-collapsed .roll-pane {
+  border-top-color: var(--border);
+}
+.shell--roll-collapsed .roll-canvas {
+  display: none;
+}
+.shell--roll-collapsed .roll-pane__divider {
+  cursor: pointer;
+}

@@ -1,142 +1,28 @@
-:root {
-  --bg: #14151a;
-  --bg-soft: #1c1e26;
-  --fg: #e6e7ea;
-  --muted: #8b8e99;
-  --accent: #6fc3df;
-  --border: #2a2d36;
-}
+/*
+ * strasbeat style entry point.
+ *
+ * Imports the design-system tokens (src/styles/tokens.css), self-hosted
+ * fonts (Geist Sans + Geist Mono via @fontsource-variable), and the
+ * per-region modules under src/styles/. See design/SYSTEM.md for the
+ * source of truth on visual & interaction design.
+ *
+ * Adding a new shell region? Drop a new src/styles/<region>.css and
+ * @import it from here. Don't write big blocks of CSS in this file
+ * directly — keep it as an index.
+ */
 
-* {
-  box-sizing: border-box;
-}
+/* Self-hosted fonts (Geist family — see design/SYSTEM.md §4) */
+@import '@fontsource-variable/geist/index.css';
+@import '@fontsource-variable/geist-mono/index.css';
 
-html,
-body {
-  margin: 0;
-  height: 100%;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 14px;
-}
+/* Tokens first — every other module references them. */
+@import './styles/tokens.css';
+@import './styles/base.css';
 
-body {
-  display: grid;
-  grid-template-rows: 44px 1fr;
-}
-
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 14px;
-  background: var(--bg-soft);
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--accent);
-}
-
-.controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.bar button,
-.bar select {
-  background: transparent;
-  color: var(--fg);
-  border: 1px solid var(--border);
-  padding: 5px 10px;
-  border-radius: 4px;
-  font: inherit;
-  cursor: pointer;
-}
-
-.bar button:hover,
-.bar select:hover {
-  border-color: var(--accent);
-}
-
-.bar button:disabled {
-  opacity: 0.5;
-  cursor: progress;
-  border-color: var(--border);
-}
-
-/* Dev-only chrome (e.g. the disk-backed save button). Hidden by default so
-   prod has zero flash; main.js sets `dev-mode` on <body> in dev to reveal. */
-.dev-only {
-  display: none;
-}
-.dev-mode .dev-only {
-  display: revert;
-}
-
-.midi-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.sep {
-  color: var(--border);
-  padding: 0 4px;
-}
-
-.status {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 32ch;
-}
-
-.status.midi {
-  margin-left: auto;
-}
-
-#status {
-  max-width: 40ch;
-}
-
-#capture.recording {
-  color: #ff5b6b;
-  border-color: #ff5b6b;
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 91, 107, 0.45); }
-  50%      { box-shadow: 0 0 0 4px rgba(255, 91, 107, 0); }
-}
-
-main {
-  display: grid;
-  grid-template-rows: 1fr 180px;
-  min-height: 0;
-}
-
-.editor {
-  overflow: auto;
-  background: var(--bg);
-}
-
-.editor .cm-editor {
-  height: 100%;
-  font-size: 16px;
-}
-
-#roll {
-  width: 100%;
-  height: 180px;
-  background: var(--bg-soft);
-  border-top: 1px solid var(--border);
-  display: block;
-}
+/* Shell + per-region styles. */
+@import './styles/shell.css';
+@import './styles/top-bar.css';
+@import './styles/left-rail.css';
+@import './styles/transport.css';
+@import './styles/roll.css';
+@import './styles/editor.css';

@@ -1,0 +1,42 @@
+/* Resets and root layout primitives. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--surface-0);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--lh-base);
+  font-weight: 500;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Geist stylistic sets — slightly tighter feel; tweak to taste. */
+  font-feature-settings: "ss01", "ss03", "cv11";
+}
+
+body {
+  overflow: hidden;
+}
+
+/* Dev-only chrome (e.g. the disk-backed save button, the new pattern "+"
+   button). Hidden by default so prod has zero flash; main.js sets `dev-mode`
+   on <body> in dev to reveal. */
+.dev-only {
+  display: none !important;
+}
+.dev-mode .dev-only {
+  display: revert !important;
+}
+.dev-mode .dev-only.btn {
+  display: inline-flex !important;
+}

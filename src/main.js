@@ -12,6 +12,9 @@ import * as strudelMini from '@strudel/mini';
 import * as strudelTonal from '@strudel/tonal';
 import * as strudelWebaudio from '@strudel/webaudio';
 import { MidiBridge, presets as midiPresets } from './midi-bridge.js';
+import { hydrateIcons } from './ui/icons.js';
+import { mount as mountLeftRail } from './ui/left-rail.js';
+import { mountTransport } from './ui/transport.js';
 
 const { evalScope, controls } = strudelCore;
 const { drawPianoroll } = strudelDraw;
@@ -43,9 +46,12 @@ for (const [filePath, mod] of Object.entries(patternModules)) {
 const patternNames = Object.keys(patterns).sort();
 
 // ─── DOM refs ────────────────────────────────────────────────────────────
+// Existing IDs preserved so the off-limits prebake / WAV / share sections
+// can keep writing to `status` etc. without modification (see SYSTEM.md
+// §11). New shell elements (top-bar pattern menu, settings, roll toggle,
+// left-rail container) are queried alongside.
 const editorRoot = document.getElementById('editor');
 const canvas = document.getElementById('roll');
-const picker = document.getElementById('pattern-picker');
 const status = document.getElementById('status');
 const playBtn = document.getElementById('play');
 const stopBtn = document.getElementById('stop');
@@ -54,7 +60,20 @@ const exportBtn = document.getElementById('export-wav');
 const shareBtn = document.getElementById('share');
 const presetPicker = document.getElementById('preset-picker');
 const captureBtn = document.getElementById('capture');
-const midiStatus = document.getElementById('midi-status');
+
+// New shell refs
+const shellEl = document.querySelector('.shell');
+const leftRailContainer = document.getElementById('left-rail');
+const patternMenuBtn = document.getElementById('pattern-menu');
+const patternMenuName = document.getElementById('pattern-menu-name');
+const settingsBtn = document.getElementById('settings');
+const rollToggleBtn = document.getElementById('roll-toggle');
+const rollDivider = document.getElementById('roll-divider');
+
+// Expand <span data-icon="..."> placeholders into Lucide SVGs before the
+// rest of the wiring runs — every later attachShell handler can rely on
+// the icons already being in the DOM.
+hydrateIcons(document);
 
 // Toggle dev-only chrome (e.g. the disk-backed save button) via a body
 // class. CSS hides .dev-only by default and reveals it when .dev-mode is
@@ -193,32 +212,149 @@ editor.updateSettings({
   isTabIndentationEnabled: true,
 });
 
-// ─── Pattern picker ──────────────────────────────────────────────────────
-function rebuildPicker() {
-  picker.innerHTML = '';
-  for (const name of patternNames) {
-    const opt = document.createElement('option');
-    opt.value = name;
-    opt.textContent = name;
-    picker.appendChild(opt);
-  }
-  if (patternNames.includes(currentName)) picker.value = currentName;
-}
-rebuildPicker();
-if (shared) {
-  // The shared name isn't a real /patterns file — leave the dropdown blank
-  // so the UI doesn't pretend it's pointing at one.
-  picker.selectedIndex = -1;
-}
-
-picker.addEventListener('change', () => {
-  currentName = picker.value;
-  editor.setCode(patterns[currentName]);
-  status.textContent = `loaded "${currentName}" — press play to hear it`;
+// ─── Left rail (patterns library) ────────────────────────────────────────
+// Replaces the old <select id="pattern-picker"> with a custom component
+// that lives in the left rail and grows naturally to host other
+// collections later (instruments, samples, captured phrases). See
+// design/SYSTEM.md §3 and design/work/01-shell.md.
+const leftRail = mountLeftRail({
+  container: leftRailContainer,
+  patterns,
+  currentName: patternNames.includes(currentName) ? currentName : null,
+  devMode: import.meta.env.DEV,
+  onSelect(name) {
+    setCurrentName(name);
+    editor.setCode(patterns[name]);
+    transport.setStatus(`loaded "${name}" — press play to hear it`);
+  },
+  onCreate() {
+    if (import.meta.env.DEV) handleNewPatternClick();
+  },
 });
 
+// ─── Transport bar ───────────────────────────────────────────────────────
+// Owns the cps/bpm + cycle + playhead readouts and the status / midi pill
+// text. The play / stop / capture / preset-picker buttons live in the
+// static HTML so existing handlers below attach by ID without going
+// through the transport component.
+const transport = mountTransport({
+  getScheduler: () => editor?.repl?.scheduler ?? null,
+});
+
+// Single source of truth for "what pattern is the editor showing right
+// now". Keeps the top-bar wordmark, the left rail's active highlight, and
+// the `currentName` variable in sync. Existing call sites that mutated
+// `currentName` directly are updated to call this helper.
+function setCurrentName(name) {
+  currentName = name;
+  patternMenuName.textContent = name || 'untitled';
+  if (name && name in patterns) leftRail.setCurrent(name);
+  else leftRail.clearCurrent();
+}
+setCurrentName(currentName);
+
+// ─── Top bar wiring ──────────────────────────────────────────────────────
+// Clicking the pattern wordmark focuses the left-rail search input —
+// gives the user a one-click path from "what am I editing" to "what else
+// is in the library". Settings is a placeholder for v1; the spec
+// (01-shell.md) explicitly allows a no-op icon button.
+patternMenuBtn.addEventListener('click', () => leftRail.focusSearch());
+settingsBtn.addEventListener('click', () => {
+  transport.setStatus('settings drawer is coming in v2 (design/work)');
+});
+
+// ─── Collapsible piano roll ──────────────────────────────────────────────
+// Click the transport's roll-toggle button to collapse/expand. The shell
+// grid animates `--roll-h` between 0 and the current expanded value, so
+// the editor reclaims the freed vertical space.
+let rollCollapsed = false;
+let rollExpandedPx = 180; // matches tokens.css default --roll-h
+rollToggleBtn.addEventListener('click', toggleRoll);
+function toggleRoll() {
+  rollCollapsed = !rollCollapsed;
+  shellEl.classList.toggle('shell--roll-collapsed', rollCollapsed);
+  rollToggleBtn.setAttribute('aria-expanded', String(!rollCollapsed));
+  if (!rollCollapsed) {
+    shellEl.style.setProperty('--roll-h', `${rollExpandedPx}px`);
+  }
+  // Keep the canvas backing-store sized to its new visible area.
+  requestAnimationFrame(resizeCanvas);
+}
+
+// Drag the divider to resize the roll. Click on a collapsed divider
+// expands. Tracks pointer events directly so it works on touch and
+// trackpad without extra plumbing.
+let dragStartY = null;
+let dragStartHeight = null;
+const ROLL_MIN_PX = 80;
+const ROLL_MAX_PX = 360;
+rollDivider.addEventListener('pointerdown', (e) => {
+  if (rollCollapsed) {
+    toggleRoll();
+    return;
+  }
+  dragStartY = e.clientY;
+  dragStartHeight = rollExpandedPx;
+  rollDivider.setPointerCapture(e.pointerId);
+  e.preventDefault();
+  document.body.style.cursor = 'ns-resize';
+});
+rollDivider.addEventListener('pointermove', (e) => {
+  if (dragStartY == null) return;
+  const dy = dragStartY - e.clientY; // dragging up = bigger roll
+  const h = Math.min(ROLL_MAX_PX, Math.max(ROLL_MIN_PX, dragStartHeight + dy));
+  rollExpandedPx = h;
+  shellEl.style.setProperty('--roll-h', `${h}px`);
+});
+function endRollDrag(e) {
+  if (dragStartY == null) return;
+  dragStartY = null;
+  document.body.style.cursor = '';
+  if (e?.pointerId != null && rollDivider.hasPointerCapture?.(e.pointerId)) {
+    rollDivider.releasePointerCapture(e.pointerId);
+  }
+  requestAnimationFrame(resizeCanvas);
+}
+rollDivider.addEventListener('pointerup', endRollDrag);
+rollDivider.addEventListener('pointercancel', endRollDrag);
+
+// ─── New pattern ("+") button — dev only ─────────────────────────────────
+// Reuses the existing /api/save endpoint with a tiny template body so the
+// "+" affordance is a UI shape change, not a new server pipe. HMR picks
+// up the new file and the page reloads.
+async function handleNewPatternClick() {
+  // TODO: replace window.prompt with an in-app modal — see SYSTEM.md §2.7.
+  const name = window.prompt(
+    'New pattern name (letters/numbers/-_):',
+    `untitled-${Date.now().toString(36)}`,
+  );
+  if (!name) return;
+  if (!/^[a-z0-9_-]+$/i.test(name)) {
+    transport.setStatus('invalid name — use only letters, numbers, - and _');
+    return;
+  }
+  if (name in patterns) {
+    transport.setStatus(`"${name}" already exists — pick another name`);
+    return;
+  }
+  const code = `// ${name}\nsetcps(120/60/4)\n\nsound("bd ~ sd ~")\n`;
+  const res = await fetch('/api/save', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, code }),
+  });
+  if (!res.ok) {
+    transport.setStatus(`save failed: ${await res.text()}`);
+    return;
+  }
+  transport.setStatus(`created "${name}" — HMR will reload`);
+}
+
 // ─── Transport ───────────────────────────────────────────────────────────
-playBtn.addEventListener('click', () => editor.evaluate());
+playBtn.addEventListener('click', async () => {
+  await editor.evaluate();
+  transport.kick(); // promote the readout loop to rAF immediately
+});
 stopBtn.addEventListener('click', () => editor.stop());
 
 // ─── Save current editor → patterns/<name>.js ────────────────────────────
@@ -248,7 +384,7 @@ if (import.meta.env.DEV) {
       return;
     }
     const { path } = await res.json();
-    currentName = name;
+    setCurrentName(name);
     status.textContent = `saved → ${path}`;
     // Vite HMR will pick up the new file and re-fire the glob below.
   });
@@ -408,8 +544,9 @@ exportBtn.addEventListener('click', async () => {
   }
 
   const filename = currentName || 'untitled';
+  const exportLabel = exportBtn.querySelector('.btn__label');
   exportBtn.disabled = true;
-  exportBtn.textContent = '⤓ rendering…';
+  if (exportLabel) exportLabel.textContent = 'rendering…';
   status.textContent = `rendering ${cycles} cycle${cycles === 1 ? '' : 's'} → ${filename}.wav`;
 
   // Surface per-hap errors that superdough's errorLogger normally swallows.
@@ -461,7 +598,7 @@ exportBtn.addEventListener('click', async () => {
       console.error('[strasbeat] failed to restore audio after export:', err);
     }
     exportBtn.disabled = false;
-    exportBtn.textContent = '⤓ wav';
+    if (exportLabel) exportLabel.textContent = 'wav';
   }
 });
 
@@ -490,14 +627,13 @@ presetPicker.value = 'epiano';
 
 const midi = new MidiBridge({
   getPreset: () => presetPicker.value,
-  onStatus: ({ ok, msg }) => {
-    midiStatus.textContent = msg;
-    midiStatus.style.color = ok ? '' : '#ff5b6b';
-  },
+  // Status / capture-count callbacks route through the transport bar
+  // component so the styling is in CSS (no hard-coded recording color) and
+  // the capture button keeps its icon SVG instead of having textContent
+  // overwritten.
+  onStatus: (s) => transport.setMidiStatus(s),
   onCaptureChange: (n) => {
-    if (midi.isCaptureEnabled()) {
-      captureBtn.textContent = `● recording · ${n}`;
-    }
+    if (midi.isCaptureEnabled()) transport.setCaptureState({ recording: true, count: n });
   },
 });
 midi.start();
@@ -505,29 +641,27 @@ midi.start();
 captureBtn.addEventListener('click', async () => {
   if (!midi.isCaptureEnabled()) {
     midi.setCaptureEnabled(true);
-    captureBtn.textContent = '● recording · 0';
-    captureBtn.classList.add('recording');
-    status.textContent = 'capturing MIDI · play something · click again to save';
+    transport.setCaptureState({ recording: true, count: 0 });
+    transport.setStatus('capturing MIDI · play something · click again to save');
     return;
   }
   // stop + save
   midi.setCaptureEnabled(false);
-  captureBtn.textContent = '● capture';
-  captureBtn.classList.remove('recording');
+  transport.setCaptureState({ recording: false });
   const code = midi.buildPatternFromCapture();
   if (!code) {
-    status.textContent = 'capture stopped — no notes recorded';
+    transport.setStatus('capture stopped — no notes recorded');
     return;
   }
   if (import.meta.env.PROD) {
     // No filesystem in prod — drop the captured phrase into the editor
     // and let the user share it via the share button.
     editor.setCode(code);
-    currentName = 'captured';
-    picker.selectedIndex = -1;
-    status.textContent = 'captured phrase loaded · ↗ share to send it';
+    setCurrentName('captured');
+    transport.setStatus('captured phrase loaded · share to send it');
     return;
   }
+  // TODO: replace window.prompt with an in-app modal — see SYSTEM.md §2.7.
   const stamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
   const suggestion = `captured-${stamp}`;
   const name = window.prompt(
@@ -535,11 +669,11 @@ captureBtn.addEventListener('click', async () => {
     suggestion,
   );
   if (!name) {
-    status.textContent = 'capture discarded';
+    transport.setStatus('capture discarded');
     return;
   }
   if (!/^[a-z0-9_-]+$/i.test(name)) {
-    status.textContent = 'invalid name — use only letters, numbers, - and _';
+    transport.setStatus('invalid name — use only letters, numbers, - and _');
     return;
   }
   const res = await fetch('/api/save', {
@@ -548,11 +682,11 @@ captureBtn.addEventListener('click', async () => {
     body: JSON.stringify({ name, code }),
   });
   if (!res.ok) {
-    status.textContent = `save failed: ${await res.text()}`;
+    transport.setStatus(`save failed: ${await res.text()}`);
     return;
   }
   const { path } = await res.json();
-  status.textContent = `captured phrase → ${path} (HMR will reload)`;
+  transport.setStatus(`captured phrase → ${path} (HMR will reload)`);
 });
 
 // ─── Console helpers ─────────────────────────────────────────────────────

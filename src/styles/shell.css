@@ -1,0 +1,140 @@
+/*
+ * Shell grid — see design/SYSTEM.md §3.
+ *   ┌────────────────────────────────────────────┐
+ *   │ topbar (full)                              │  --top-bar-h
+ *   ├──────┬─────────────────────────────────────┤
+ *   │ rail │ editor                              │  1fr
+ *   ├──────┴─────────────────────────────────────┤
+ *   │ transport (full)                           │  --transport-h
+ *   ├────────────────────────────────────────────┤
+ *   │ roll (full, collapsible via --roll-h)      │  var(--roll-h)
+ *   └────────────────────────────────────────────┘
+ *
+ * The right-rail column is intentionally absent in v1; the layout is
+ * `--left-rail-w 1fr` which is trivially extensible to
+ * `--left-rail-w 1fr auto` when intellisense / hover docs land.
+ */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--left-rail-w) 1fr;
+  grid-template-rows: var(--top-bar-h) 1fr var(--transport-h) var(--roll-h);
+  grid-template-areas:
+    "topbar    topbar"
+    "rail      editor"
+    "transport transport"
+    "roll      roll";
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  /* Animate roll collapse via grid-template-rows. */
+  transition: grid-template-rows var(--t-panel);
+}
+
+/* Collapsed state — toggled by JS on the body or shell. */
+.shell.shell--roll-collapsed {
+  --roll-h: 0px;
+}
+
+.top-bar    { grid-area: topbar; }
+.left-rail  { grid-area: rail; }
+.editor-pane{ grid-area: editor; }
+.transport  { grid-area: transport; }
+.roll-pane  { grid-area: roll; }
+
+/* Adjacent panel seams — sharp, flush, 1px hairlines. */
+.top-bar    { border-bottom: 1px solid var(--border); }
+.left-rail  { border-right:  1px solid var(--border); }
+.transport  { border-top:    1px solid var(--border); border-bottom: 1px solid var(--border); }
+.roll-pane  { border-top:    1px solid var(--border-soft); }
+
+/* All panels share the same elevated-by-darkness vocabulary. */
+.top-bar,
+.transport,
+.roll-pane,
+.left-rail {
+  background: var(--surface-1);
+  /* Defensive: panels never grow past their grid cell. */
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-pane {
+  background: var(--surface-0);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── Buttons (shared vocabulary across the shell) ─── */
+
+.btn {
+  --btn-bg: transparent;
+  --btn-fg: var(--text);
+  --btn-bd: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  height: 28px;
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border: 1px solid var(--btn-bd);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--t-hover), border-color var(--t-hover), color var(--t-hover), box-shadow var(--t-hover);
+}
+
+.btn:hover {
+  --btn-bg: var(--surface-3);
+  --btn-bd: var(--border);
+}
+
+.btn:active {
+  --btn-bg: var(--surface-2);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+  background: var(--btn-bg);
+}
+
+.btn--ghost {
+  --btn-bg: transparent;
+  --btn-bd: transparent;
+}
+
+.btn--icon {
+  width: 28px;
+  padding: 0;
+  gap: 0;
+}
+
+.btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+}
+.btn__icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+}
+.transport .btn__icon svg { width: 14px; height: 14px; }
+
+.btn__label {
+  font-size: var(--text-sm);
+  letter-spacing: 0.01em;
+}

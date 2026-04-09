@@ -7,28 +7,101 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <header class="bar">
-      <span class="brand">strasbeat</span>
-      <div class="controls">
-        <select id="pattern-picker" title="Load a pattern from /patterns"></select>
-        <button id="play" title="Play (Ctrl/Cmd+Enter in editor)">▶ play</button>
-        <button id="stop" title="Stop (Ctrl/Cmd+. in editor)">■ stop</button>
-        <button id="save" class="dev-only" title="Save current editor contents to /patterns (dev only)">⤓ save</button>
-        <button id="export-wav" title="Render the current pattern offline to a WAV file">⤓ wav</button>
-        <button id="share" title="Copy a shareable URL of the current editor contents to your clipboard">↗ share</button>
-      </div>
-      <div class="midi-controls" title="MIDI keyboard input">
-        <span class="sep">·</span>
-        <select id="preset-picker" title="Sound used when you play MIDI keys"></select>
-        <button id="capture" title="Toggle live capture — when on, played notes are recorded; click again to save as a pattern">● capture</button>
-      </div>
-      <span id="midi-status" class="status midi">midi: off</span>
-      <span id="status" class="status">loading…</span>
-    </header>
-    <main>
-      <div id="editor" class="editor"></div>
-      <canvas id="roll" width="800" height="180"></canvas>
-    </main>
+    <!--
+      Shell layout (see design/SYSTEM.md §3 and design/work/01-shell.md):
+        ┌──────────────────────────────────────────────────────────┐
+        │ top bar                                                  │  40px
+        ├──────┬─────────────────────────────────────────┬─────────┤
+        │ left │             editor (canvas)             │ right   │
+        │ rail │                                         │ rail    │
+        ├──────┴─────────────────────────────────────────┴─────────┤
+        │ transport bar                                            │  32px
+        ├──────────────────────────────────────────────────────────┤
+        │ piano roll (collapsible)                                 │  ~160px
+        └──────────────────────────────────────────────────────────┘
+      Existing IDs (editor, roll, play, stop, save, export-wav, share,
+      preset-picker, capture, midi-status, status) are preserved so the
+      wiring section in src/main.js stays minimal.
+    -->
+    <div class="shell">
+      <header class="top-bar">
+        <div class="top-bar__brand">
+          <span class="brand-mark"><span class="brand-mark__accent">stras</span>beat</span>
+        </div>
+        <button id="pattern-menu" class="pattern-menu" type="button" title="Open the patterns library">
+          <span id="pattern-menu-name" class="pattern-menu__name">…</span>
+          <span class="pattern-menu__chevron" aria-hidden="true"></span>
+        </button>
+        <div class="top-bar__spacer"></div>
+        <div class="top-bar__actions">
+          <button id="save" class="btn btn--ghost dev-only" type="button" title="Save current editor contents to /patterns (dev only)">
+            <span class="btn__icon" data-icon="save"></span>
+            <span class="btn__label">save</span>
+          </button>
+          <button id="export-wav" class="btn btn--ghost" type="button" title="Render the current pattern offline to a WAV file">
+            <span class="btn__icon" data-icon="download"></span>
+            <span class="btn__label">wav</span>
+          </button>
+          <button id="share" class="btn btn--ghost" type="button" title="Copy a shareable URL of the current editor contents to your clipboard">
+            <span class="btn__icon" data-icon="share"></span>
+            <span class="btn__label">share</span>
+          </button>
+          <button id="settings" class="btn btn--icon" type="button" title="Settings (coming soon)" aria-label="Settings">
+            <span class="btn__icon" data-icon="settings"></span>
+          </button>
+        </div>
+      </header>
+
+      <aside class="left-rail" id="left-rail">
+        <!-- src/ui/left-rail.js mounts here. Replaces the old <select id="pattern-picker">. -->
+      </aside>
+
+      <main class="editor-pane">
+        <div id="editor" class="editor"></div>
+      </main>
+
+      <footer class="transport" id="transport">
+        <div class="transport__group transport__group--left">
+          <button id="play" class="btn btn--icon" type="button" title="Play (Ctrl/Cmd+Enter in editor)" aria-label="Play">
+            <span class="btn__icon" data-icon="play"></span>
+          </button>
+          <button id="stop" class="btn btn--icon" type="button" title="Stop (Ctrl/Cmd+. in editor)" aria-label="Stop">
+            <span class="btn__icon" data-icon="square"></span>
+          </button>
+          <span class="transport__sep" aria-hidden="true"></span>
+          <button id="capture" class="btn btn--icon capture" type="button" title="Toggle live MIDI capture — click again to save the captured phrase" aria-label="Capture">
+            <span class="btn__icon" data-icon="disc"></span>
+            <span id="capture-count" class="capture__count"></span>
+          </button>
+          <!--
+            Preset picker is allowed to remain a native <select> for this task.
+            Replacing it cleanly is a small follow-up — see 01-shell.md "out of scope".
+          -->
+          <select id="preset-picker" class="preset-picker" title="Sound used when you play MIDI keys"></select>
+        </div>
+
+        <div class="transport__group transport__group--center">
+          <span id="bpm-readout" class="transport__readout transport__readout--bpm" title="Tempo (assuming 4 beats / cycle)">– bpm</span>
+          <span id="cycle-readout" class="transport__readout transport__readout--cycle" title="Current cycle position">cyc –</span>
+          <div class="transport__playhead" aria-hidden="true">
+            <div id="playhead-dot" class="transport__playhead-dot"></div>
+          </div>
+        </div>
+
+        <div class="transport__group transport__group--right">
+          <span id="status" class="transport__status">loading…</span>
+          <span id="midi-status" class="transport__pill transport__pill--midi" title="MIDI input status">midi: off</span>
+          <button id="roll-toggle" class="btn btn--icon" type="button" title="Toggle piano roll" aria-label="Toggle piano roll" aria-expanded="true" aria-controls="roll-pane">
+            <span class="btn__icon" data-icon="chevrons-down-up"></span>
+          </button>
+        </div>
+      </footer>
+
+      <section class="roll-pane" id="roll-pane">
+        <div class="roll-pane__divider" id="roll-divider" title="Drag to resize, click to collapse"></div>
+        <canvas id="roll" class="roll-canvas" width="800" height="180"></canvas>
+      </section>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
