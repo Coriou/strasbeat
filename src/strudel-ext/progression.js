@@ -1,9 +1,14 @@
 // Sugar over the canonical chord().dict().voicing().arp().s() chain so a
 // pattern file can sketch a tune from any chord chart in one line:
 //
-//   $: progression("Cm7 F7 Bb^7 Eb^7")
-//   $: progression("Cm7 F7 Bb^7 Eb^7", { rhythm: "arp-up" })
-//   $: progression("Cm7 F7 Bb^7", { bass: true })
+//   $: progression('Cm7 F7 Bb^7 Eb^7')
+//   $: progression('Cm7 F7 Bb^7 Eb^7', { rhythm: 'arp-up' })
+//   $: progression('Cm7 F7 Bb^7', { bass: true })
+//
+// IMPORTANT: use single quotes for the chord string in pattern files.
+// Strudel's transpiler rewrites every double-quoted string literal into a
+// mini(...) call before evaluation, so progression("Cm7 F7") would receive
+// a Pattern instead of a string and silently return silence.
 //
 // Voice leading, voicing dictionaries, and chord parsing all stay delegated
 // to @strudel/tonal — this module owns nothing musical, only the choice of
@@ -82,30 +87,44 @@ const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
  * supplied, returns silence and warns — guessing a key would be worse
  * than failing audibly.
  *
- * @param {string} chords whitespace-separated chord symbols OR Roman numerals
+ * @param {string} chords whitespace-separated chord symbols OR Roman numerals. Use single quotes in pattern files — double-quoted strings are rewritten to mini-notation by Strudel's transpiler.
  * @param {object} [options]
- * @param {string} [options.sound="gm_epiano1"] sound name (verify with `strasbeat.hasSound`)
- * @param {string} [options.dict="ireal"] voicing dictionary name
- * @param {string} [options.rhythm="block"] rhythm preset name OR a raw mini-notation arp string
+ * @param {string} [options.sound='gm_epiano1'] sound name (verify with `strasbeat.hasSound`)
+ * @param {string} [options.dict='ireal'] voicing dictionary name
+ * @param {string} [options.rhythm='block'] rhythm preset name OR a raw mini-notation arp string
  * @param {boolean|string} [options.bass=false] layer a bass line on the chord roots; pass a sound name to override `gm_acoustic_bass`
- * @param {string} [options.style] style preset that bundles sound + dict + rhythm + FX. Built-in styles: `jazz-comp`, `pop-pad`, `lo-fi`, `folk-strum`, `piano-bare`. Explicit options always override the style — `{ style: "jazz-comp", sound: "gm_piano" }` is "jazz comp on a real piano".
- * @param {string} [options.key] required when `chords` is in Roman-numeral form. Major (`"C"`, `"G"`, `"Bb"`) or minor (`"Am"`, `"Cm"`).
+ * @param {string} [options.style] style preset that bundles sound + dict + rhythm + FX. Built-in styles: `jazz-comp`, `pop-pad`, `lo-fi`, `folk-strum`, `piano-bare`. Explicit options always override the style — `{ style: 'jazz-comp', sound: 'gm_piano' }` is "jazz comp on a real piano".
+ * @param {string} [options.key] required when `chords` is in Roman-numeral form. Major (`'C'`, `'G'`, `'Bb'`) or minor (`'Am'`, `'Cm'`).
  * @returns {Pattern}
  *
  * @example
- * progression("Cm7 F7 Bb^7 Eb^7")
+ * progression('Cm7 F7 Bb^7 Eb^7')
  * @example
- * progression("ii V I", { key: "C" })
+ * progression('ii V I', { key: 'C' })
  * @example
- * progression("ii7 V7 I^7", { key: "F", style: "jazz-comp" })
+ * progression('ii7 V7 I^7', { key: 'F', style: 'jazz-comp' })
  * @example
- * progression("i iv v", { key: "Am", bass: true })
+ * progression('i iv v', { key: 'Am', bass: true })
  * @example
- * progression("Cm7 F7 Bb^7", { style: "jazz-comp" })
+ * progression('Cm7 F7 Bb^7', { style: 'jazz-comp' })
  * @example
- * progression("C G Am F", { style: "folk-strum", bass: true })
+ * progression('C G Am F', { style: 'folk-strum', bass: true })
  */
 export function progression(chords, options = {}) {
+  // Defense-in-depth: Strudel's transpiler (plugin-mini.mjs) rewrites every
+  // double-quoted string literal in a pattern file into a mini(...) call,
+  // so `progression("Cm7 F7")` lands here with a Pattern, not a string —
+  // the rest of the function would then return silence with no signal as
+  // to why. Detect that case and tell the user exactly what to do.
+  // The `_Pattern === true` marker is the canonical cross-module Pattern
+  // detector (see strudel-source/packages/core/pattern.mjs:54).
+  if (chords?._Pattern === true) {
+    console.warn(
+      "[strasbeat] progression() received a Pattern instead of a string — this usually means the chord string was double-quoted (\"...\") and Strudel's transpiler converted it to mini-notation. Use single quotes: progression('Cm7 F7 Bb^7')",
+    );
+    return silence;
+  }
+
   // Empty input → return silence loudly. Patterns are re-evaluated live and
   // a thrown error would stop the scheduler entirely (CLAUDE.md "surface
   // silent failures loudly").

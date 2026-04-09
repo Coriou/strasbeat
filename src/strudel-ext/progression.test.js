@@ -8,6 +8,7 @@ import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { Pattern, silence } from "@strudel/core";
+import { mini } from "@strudel/mini";
 import { progression, RHYTHMS, STYLES } from "./progression.js";
 
 // Capture console.warn so we can assert on the [strasbeat] warnings without
@@ -225,6 +226,25 @@ describe("progression() — empty / invalid input", () => {
     const pat = progression(undefined);
     assert.equal(pat, silence);
     assert.ok(warnings.length > 0);
+  });
+
+  test("Pattern input returns silence and warns about double quotes", () => {
+    // Reproduces the browser-only failure mode: Strudel's transpiler rewrites
+    // double-quoted string literals in pattern files into mini(...) calls,
+    // so progression() ends up receiving a Pattern instead of a string. The
+    // warning has to name the fix (single quotes) so the failure is
+    // diagnosable from the console.
+    const pat = progression(mini("Cm7 F7"));
+    assert.equal(pat, silence);
+    assert.ok(
+      warnings.some(
+        (w) =>
+          w.includes("[strasbeat]") &&
+          w.includes("Pattern") &&
+          w.includes("single quotes"),
+      ),
+      `expected a [strasbeat] Pattern-input warning naming single quotes, got: ${JSON.stringify(warnings)}`,
+    );
   });
 });
 
