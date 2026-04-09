@@ -139,10 +139,113 @@ strasbeat.countSounds()         // total registered sounds (~1000+)
 ## Music theory helpers
 
 ```js
-note("0 2 4 5").scale("C:minor")          // scale degrees → notes
-"<Cm9 Fm9 Bb^7>".voicings('lefthand').note() // chord symbols → voicings
+note("0 2 4 5").scale("C:minor")              // scale degrees → notes
+"<Cm9 Fm9 Bb^7>".voicing()                    // chord symbols → voicings (singular!)
 n("0 2 4 7").scale("C4:minor:pentatonic")
 ```
+
+## Strasbeat extensions
+
+These are runtime helpers that **strasbeat ships on top of Strudel** —
+they live in `src/strudel-ext/` and are wired into Strudel's `evalScope`
+in `src/main.js`, so they're callable from any pattern file as if they
+were built-in. None of these exist in upstream Strudel; you won't find
+them at <https://strudel.cc/learn/>.
+
+### `progression()` — one-line chord progressions
+
+```js
+$: progression('Cm7 F7 Bb^7 Eb^7')
+$: progression('Cm7 F7 Bb^7 Eb^7', { rhythm: 'arp-up' })
+$: progression('ii V I', { key: 'C', style: 'jazz-comp' })
+$: progression('C G Am F', { style: 'folk-strum', bass: true })
+```
+
+The chord string is a whitespace-separated list of either **absolute
+chord symbols** (`Cm7 F7 Bb^7 Eb^7`) or **Roman numerals** (`ii V I`,
+when `options.key` is supplied). Strudel's voicing dictionaries do the
+musical work — `progression()` only owns the defaults, the rhythm
+preset table, and the style merge.
+
+> **Single-quote rule**: chord strings *must* be single-quoted. Strudel's
+> transpiler rewrites every double-quoted literal into a `mini(...)` call,
+> so `progression("Cm7 F7")` would silently land inside the function as a
+> Pattern instead of a string. The same rule applies to option string
+> values like `{ rhythm: 'arp-up' }`. The function detects the failure
+> mode and warns, but it's cleaner to just type `'`.
+
+#### Options
+
+| key       | type            | default        | what it does                                                                          |
+| --------- | --------------- | -------------- | ------------------------------------------------------------------------------------- |
+| `sound`   | string          | `gm_epiano1`   | sound name (verify with `strasbeat.hasSound`)                                          |
+| `dict`    | string          | `ireal`        | voicing dictionary: `ireal`, `lefthand`, `triads`, `guidetones`, `legacy`              |
+| `rhythm`  | string          | `block`        | rhythm preset name OR a raw mini-notation arp string                                   |
+| `bass`    | bool \| string  | `false`        | layer a bass line on chord roots; pass a sound name to override `gm_acoustic_bass`     |
+| `style`   | string          | —              | bundle of sound + dict + rhythm + FX (see styles below)                                |
+| `key`     | string          | —              | required for Roman-numeral input. Major (`'C'`, `'G'`, `'Bb'`) or minor (`'Am'`)       |
+
+#### Rhythm presets
+
+| name       | feel                                              |
+| ---------- | ------------------------------------------------- |
+| `block`    | full chord held across the whole cycle (default)  |
+| `strum`    | 4 ascending sweeps per cycle                      |
+| `comp`     | jazz off-beat comp (stabs on the "and" of 2 & 4)  |
+| `arp-up`   | ascending single-note arpeggio                    |
+| `arp-down` | descending single-note arpeggio                   |
+| `alberti`  | classical Alberti pattern (root–top–middle–top)   |
+
+Pass any unrecognised string containing whitespace, brackets, commas, or
+rests (e.g. `'0 [0,2] 1'`) and it's forwarded verbatim to `.arp()` as
+the escape hatch.
+
+#### Style presets
+
+| name         | sound                       | dict      | rhythm   | fx                              |
+| ------------ | --------------------------- | --------- | -------- | ------------------------------- |
+| `jazz-comp`  | `gm_epiano1`                | `ireal`   | `comp`   | `room: 0.4, gain: 0.65`         |
+| `pop-pad`    | `gm_pad_warm`               | `ireal`   | `block`  | `room: 0.6, attack: 0.4`        |
+| `lo-fi`      | `gm_epiano1`                | `lefthand`| `arp-up` | `room: 0.5, lpf: 1500`          |
+| `folk-strum` | `gm_acoustic_guitar_nylon`  | `triads`  | `strum`  | `room: 0.2`                     |
+| `piano-bare` | `gm_piano`                  | `ireal`   | `block`  | `room: 0.3`                     |
+
+Explicit options always override style fields:
+`progression('Cm7 F7', { style: 'jazz-comp', sound: 'gm_piano' })` is
+"jazz comp on a real piano".
+
+#### Roman numerals
+
+```js
+progression('ii V I', { key: 'C' })          // → Dm G C
+progression('I V vi IV', { key: 'G' })       // → G D Em C
+progression('i iv v', { key: 'Am' })         // → Am Dm Em (natural minor)
+progression('I bIII IV', { key: 'C' })       // → C Eb F
+progression('vii°7', { key: 'C' })           // → Bo7 (° → o for Strudel)
+progression('ii7 V7 I^7', { key: 'F' })      // → Gm7 C7 F^7
+```
+
+- **Uppercase** numeral → major triad. **Lowercase** → minor triad.
+- **Accidentals** on the numeral (`bIII`, `#iv`) lower / raise the root
+  chromatically.
+- **Extensions** stick to the numeral: `ii7` → `Dm7`, `V7` → `G7`,
+  `I^7` → `C^7`.
+- **Diminished** `°` is rewritten to `o` (`vii°` → `Bo`).
+- **Minor keys** use natural minor (Aeolian) — no harmonic / melodic
+  variants.
+- Mixing Roman and absolute tokens in the same call is **not**
+  supported. The first token decides; if any later token fails to
+  resolve in Roman mode, the whole call returns silence with a
+  `[strasbeat]` warning.
+- Missing `key` with Roman input → silence + warning. Guessing a key
+  would be worse than failing audibly.
+
+#### Live demo
+
+`patterns/06-progression-demo.js` shows the helper in action — chords +
+arpeggio + bass + drums in 30 lines. Source for the helper itself is in
+`src/strudel-ext/progression.js`; the spec (Phase 1–3) is in
+`design/work/07-chord-progression.md`.
 
 ## Keyboard shortcuts (in the editor)
 

@@ -43,7 +43,9 @@ the editor).
 `index.html` → `src/main.js` boots a `StrudelMirror` (from
 `@strudel/codemirror`) into `#editor`, auto-discovers `patterns/*.js` via
 `import.meta.glob`, wires the toolbar (play / stop / save / export wav /
-capture / preset picker), prebakes sample banks, mounts the MIDI bridge.
+capture / preset picker), prebakes sample banks, mounts the MIDI bridge,
+and registers `src/strudel-ext/` into Strudel's `evalScope()` so its
+helpers (`progression()`, …) become globals inside pattern code.
 
 The shell is a design-system layout (top bar with brand + pattern menu +
 share/settings, left rail patterns library, editor canvas, transport bar
@@ -52,7 +54,10 @@ bottom) and the editor is extended with a Prettier-based formatter, a
 VSCode-style keymap, a Figma-style numeric drag-to-scrub, an autocomplete
 chain (sounds / banks / chords / scales / modes / functions /
 mini-notation), hover docs, and a signature hint pill — all CodeMirror 6
-extensions layered on top of `StrudelMirror`.
+extensions layered on top of `StrudelMirror`. Browser prompts are
+replaced by an in-app `modal.js`, and a settings popover
+(`settings-drawer.js`) hosts an OKLCH accent picker persisted to
+localStorage.
 
 `vite.config.js` ships a tiny middleware at `POST /api/save` that writes the
 editor buffer to `patterns/<name>.js` so the browser-side ⤓ save button has a
@@ -62,6 +67,9 @@ to work around missing CORS headers on Strudel's sample manifests.
 `src/midi-bridge.js` listens on Web MIDI directly, routes noteons through
 `superdough()` (the same one-shot audio entry point Strudel's pattern engine
 uses), and supports a "capture phrase → save as pattern file" workflow.
+
+`src/strudel-ext/` is the home for runtime helpers strasbeat layers on
+top of Strudel's pattern language. See the dedicated section below.
 
 `patterns/*.js` are the user's compositions — see "Pattern file contract".
 
@@ -83,10 +91,17 @@ strasbeat/
 │   │   ├── mini-notation-tokens.js  # tokeniser for mini-notation strings
 │   │   └── completions/    # sound, bank, chord, scale, mode, function, mini-notation
 │   ├── ui/
-│   │   ├── left-rail.js    # patterns library (search, keyboard nav)
-│   │   ├── transport.js    # BPM, cycle, playhead readouts, status, MIDI pill
-│   │   ├── piano-roll.js   # Canvas2D renderer (per-layer color, click-to-locate)
-│   │   └── icons.js        # Lucide icon wrapper + hydration
+│   │   ├── left-rail.js        # patterns library (search, keyboard nav)
+│   │   ├── transport.js        # BPM, cycle, playhead readouts, status, MIDI pill
+│   │   ├── piano-roll.js       # Canvas2D renderer (per-layer color, click-to-locate)
+│   │   ├── modal.js            # in-app prompt replacement (focus-trapped)
+│   │   ├── settings-drawer.js  # OKLCH accent picker, persisted to localStorage
+│   │   └── icons.js            # Lucide icon wrapper + hydration
+│   ├── strudel-ext/        # runtime helpers wired into Strudel's evalScope()
+│   │   ├── index.js            # barrel — anything exported here becomes a global in patterns
+│   │   ├── progression.js      # progression() helper (chords + voicing + rhythm + style)
+│   │   ├── styles.js           # style presets (jazz-comp, pop-pad, lo-fi, folk-strum, piano-bare)
+│   │   └── roman.js            # Roman-numeral → absolute chord parser (used by progression())
 │   └── styles/             # design-system CSS (base, editor, shell, tokens, etc.)
 ├── patterns/               # *.js — each one default-exports a Strudel string
 ├── scripts/
@@ -96,10 +111,11 @@ strasbeat/
 │   ├── README.md           # how to use the design specs
 │   ├── SYSTEM.md           # design system (type, color, spacing, layout)
 │   ├── PATTERN-STYLE.md    # modern Strudel pattern idioms
-│   └── work/               # task specs (01-shell through 06-future)
+│   └── work/               # task specs (01-shell through 07-chord-progression)
 ├── vite.config.js          # /api/save middleware + strudel.cc proxy
 ├── vercel.json             # production deployment config
-├── STRUDEL.md              # mini-notation cheatsheet
+├── README.md               # user-facing front door
+├── STRUDEL.md              # mini-notation cheatsheet (incl. progression() reference)
 ├── strudel-source/         # full upstream repo, READ-ONLY reference, gitignored
 └── CLAUDE.md               # you are here
 ```
@@ -109,6 +125,46 @@ strasbeat/
 When you need to understand a Strudel function's behavior, read its source
 under `strudel-source/packages/<pkg>/`. Don't ever modify files there as
 part of strasbeat work — patches belong upstream.
+
+## Custom Strudel extensions (`src/strudel-ext/`)
+
+This directory holds the runtime helpers strasbeat layers on top of
+Strudel's pattern language. The mechanism is dead simple:
+`src/main.js:188` passes `strudelExt` (a namespace import of
+`src/strudel-ext/index.js`) as one of the arguments to `evalScope()`,
+the same call that wires `@strudel/core`, `@strudel/mini`,
+`@strudel/tonal`, etc. So everything re-exported from
+`src/strudel-ext/index.js` becomes a global inside pattern code with no
+extra import — exactly like `note`, `s`, `chord`.
+
+To add a new helper: drop a file under `src/strudel-ext/`, re-export it
+from `index.js`, and it's available in every pattern file on next reload.
+Anything you put here is *strasbeat-specific* — it doesn't exist in
+upstream Strudel and won't show up in `strudel.cc/learn/`. Reflect that
+in the docs (STRUDEL.md "Strasbeat extensions" section, README "What
+strasbeat adds on top of Strudel").
+
+Current helpers:
+
+- **`progression(chords, options?)`** — one-line chord progressions.
+  Wraps `chord().dict().voicing().arp().s()` from `@strudel/tonal`.
+  - Six rhythm presets (`block`, `strum`, `comp`, `arp-up`, `arp-down`,
+    `alberti`) plus a raw mini-notation escape hatch.
+  - Five style presets in `styles.js` (`jazz-comp`, `pop-pad`, `lo-fi`,
+    `folk-strum`, `piano-bare`) bundling sound + dict + rhythm + FX.
+  - Optional bass layer via `bass: true` or a custom sound name.
+  - Roman-numeral input (`'ii V I'`) when `options.key` is supplied,
+    parsed by `roman.js` (natural minor for minor keys; accidentals,
+    extensions, diminished, augmented all supported).
+  - Source: `src/strudel-ext/progression.js`. Demo:
+    `patterns/06-progression-demo.js`. Spec:
+    `design/work/07-chord-progression.md`. Tests:
+    `progression.test.js` and `roman.test.js`.
+
+The dispatch is delegated where possible: chord parsing and voicing
+dictionaries belong to `@strudel/tonal`; this module owns only the
+defaults, the rhythm preset table, the style merge precedence, and the
+Roman-numeral string math. Don't reinvent music theory in here.
 
 ## Pattern file contract
 
@@ -188,6 +244,34 @@ is fully settled). That avoids the leak entirely.
 If `renderPatternToBuffer` ever produces silent output again, the cause is
 almost always that the controller was constructed too eagerly somewhere new.
 Check for that first before chasing other hypotheses.
+
+### `progression()` and the single-quote rule
+
+Strudel's transpiler (`strudel-source/packages/transpiler/plugin-mini.mjs`)
+rewrites **every double-quoted string literal** in a pattern file into a
+`mini(...)` call before evaluation. That's the right behavior for
+`s("bd sd")`, but it silently breaks any helper that expects an actual
+JS string — `progression("Cm7 F7")` lands inside `progression()` as a
+Pattern, not a string, and the typical guard returns silence.
+
+**The fix is single quotes everywhere `progression()` is called**:
+
+```js
+progression('Cm7 F7 Bb^7', { rhythm: 'arp-up', bass: true })
+```
+
+Both the chord argument *and* the option string values must be
+single-quoted — the transpiler rewrites string literals regardless of
+position in the AST. The drum line in the same file
+(`s("bd*2, ~ sd:1, hh*8")`) still uses double quotes, because the
+transpiler rewrite is *correct* for `s(...)` — it's mini-notation.
+
+`progression()` itself has a defense-in-depth `_Pattern === true`
+detector at the top of the function that warns to the console with the
+actionable fix, so the failure is at least diagnosable. But the clean
+solution is to just type `'`. Same rule applies to any new helper added
+to `src/strudel-ext/` that takes a literal string argument: document it
+explicitly and add a Pattern-input guard.
 
 ### MIDI bridge uses trigger-and-decay (no noteoff)
 
