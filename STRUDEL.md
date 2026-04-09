@@ -14,6 +14,9 @@ in cycles-per-second:
 setcps(120 / 60 / 4)   // 120 BPM, 4 beats per cycle = 0.5 cps
 ```
 
+> **Style:** for pattern formatting rules, API choices, and do/don't lists,
+> see `design/PATTERN-STYLE.md`.
+
 ## Mini-notation (the strings)
 
 Inside `s("…")`, `n("…")`, `note("…")`:

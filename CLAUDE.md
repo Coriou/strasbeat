@@ -220,6 +220,10 @@ license. For private/local use there's no obligation.
   bug. When adding a feature, add the feature. Don't sneak in refactors,
   type annotations, or "while I'm here" cleanups. The user iterates fast
   and big diffs make A/B harder.
+- **Read `design/PATTERN-STYLE.md` before writing or editing any pattern
+  file.** It codifies modern Strudel idioms (`setcpm` over `setcps`, `$:`
+  over `stack()`, `.voicing()` over `.voicings()`, note names not MIDI
+  numbers, signal modulation, effect chain formatting).
 
 ## Console helpers
 
