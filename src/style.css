@@ -12,18 +12,19 @@
  */
 
 /* Self-hosted fonts (Geist family — see design/SYSTEM.md §4) */
-@import '@fontsource-variable/geist/index.css';
-@import '@fontsource-variable/geist-mono/index.css';
+@import "@fontsource-variable/geist/index.css";
+@import "@fontsource-variable/geist-mono/index.css";
 
 /* Tokens first — every other module references them. */
-@import './styles/tokens.css';
-@import './styles/base.css';
+@import "./styles/tokens.css";
+@import "./styles/base.css";
 
 /* Shell + per-region styles. */
-@import './styles/shell.css';
-@import './styles/top-bar.css';
-@import './styles/left-rail.css';
-@import './styles/transport.css';
-@import './styles/roll.css';
-@import './styles/editor.css';
-@import './styles/scrubber.css';
+@import "./styles/shell.css";
+@import "./styles/top-bar.css";
+@import "./styles/left-rail.css";
+@import "./styles/transport.css";
+@import "./styles/roll.css";
+@import "./styles/editor.css";
+@import "./styles/autocomplete.css";
+@import "./styles/scrubber.css";

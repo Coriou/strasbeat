@@ -1,0 +1,259 @@
+/*
+ * Autocomplete & completion-info styling.
+ *
+ * Targets:
+ * - .cm-tooltip-autocomplete        — the completion dropdown
+ * - .cm-completionInfo              — the docs panel for the selected item
+ * - .autocomplete-info-*            — Strudel's custom info panel internals
+ * - .cm-completionMatchedText       — matched characters in the list
+ *
+ * Design-system tokens from tokens.css (see design/SYSTEM.md §5–§9).
+ */
+
+/* ─── Completion dropdown ─────────────────────────────────────────────── */
+
+.cm-tooltip-autocomplete {
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-pop) !important;
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  line-height: var(--lh-sm);
+  overflow: hidden;
+}
+
+.cm-tooltip-autocomplete > ul {
+  max-height: 300px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+.cm-tooltip-autocomplete > ul > li {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text);
+}
+
+.cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-wash) !important;
+  color: var(--text) !important;
+}
+
+/* ─── Matched characters ──────────────────────────────────────────────── */
+
+.cm-completionMatchedText {
+  color: var(--accent) !important;
+  text-decoration: none !important;
+  font-weight: 600;
+}
+
+/* ─── Completion info panel (Strudel docs tooltip) ────────────────────── */
+
+.cm-completionInfo {
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-pop) !important;
+  max-width: 320px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: var(--space-3);
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+/* Strudel's custom info container */
+.autocomplete-info-container {
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.autocomplete-info-tooltip {
+  /* reset any upstream padding/background */
+  background: transparent;
+  padding: 0;
+}
+
+.autocomplete-info-function-name {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  line-height: var(--lh-md);
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+.autocomplete-info-function-description {
+  color: var(--text-mut);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  margin-bottom: var(--space-2);
+}
+
+.autocomplete-info-params-section {
+  margin-bottom: var(--space-2);
+}
+
+.autocomplete-info-params-section dt,
+.autocomplete-info-params-section .param-name {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.autocomplete-info-params-section dd,
+.autocomplete-info-params-section .param-desc {
+  color: var(--text-mut);
+  font-size: var(--text-sm);
+  margin-left: var(--space-2);
+}
+
+.autocomplete-info-examples-section {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-2);
+}
+
+/* ─── Hover docs tooltip (Phase 2) ────────────────────────────────────── */
+
+.hover-docs {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-3);
+  max-width: 400px;
+  max-height: 360px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+.hover-docs-sig {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  line-height: var(--lh-md);
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+.hover-docs-desc {
+  color: var(--text-mut);
+  margin-bottom: var(--space-2);
+}
+
+.hover-docs-params {
+  margin-bottom: var(--space-2);
+}
+
+.hover-docs-param {
+  padding: 1px 0;
+}
+
+.hover-docs-param-name {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.hover-docs-param-type {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  color: var(--text-dim);
+  margin-left: var(--space-1);
+}
+
+.hover-docs-param-type::before {
+  content: ": ";
+}
+
+.hover-docs-param-doc {
+  color: var(--text-mut);
+  font-size: var(--text-sm);
+}
+
+.hover-docs-examples {
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.hover-docs-example {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+  background: var(--surface-1);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  margin: var(--space-1) 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+}
+
+/* ─── Signature hint pill (Phase 2) ───────────────────────────────────── */
+
+.sig-hint {
+  position: absolute;
+  z-index: 100;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: sig-hint-in var(--t-pop-in) both;
+}
+
+.sig-hint-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sig-hint-active-param {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@keyframes sig-hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.autocomplete-info-example-code {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  line-height: var(--lh-md);
+  color: var(--text);
+  background: var(--surface-1);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  display: block;
+  overflow-x: auto;
+  white-space: pre;
+  margin-top: var(--space-1);
+}
