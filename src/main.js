@@ -11,6 +11,7 @@ import * as strudelDraw from "@strudel/draw";
 import * as strudelMini from "@strudel/mini";
 import * as strudelTonal from "@strudel/tonal";
 import * as strudelWebaudio from "@strudel/webaudio";
+import * as strudelExt from "./strudel-ext/index.js";
 import { Prec, StateEffect } from "@codemirror/state";
 import { MidiBridge, presets as midiPresets } from "./midi-bridge.js";
 import { formatExtension } from "./editor/format.js";
@@ -184,6 +185,7 @@ const editor = new StrudelMirror({
       strudelMini,
       strudelTonal,
       strudelWebaudio,
+      strudelExt,
     );
     // Wrap each sample bank load so a single failure (network, CORS,
     // upstream change) doesn't take down the rest of the prebake.
