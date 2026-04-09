@@ -1,0 +1,7 @@
+node_modules
+dist
+.DS_Store
+*.log
+
+# upstream Strudel source kept locally for reference / grep'ing
+strudel-source
