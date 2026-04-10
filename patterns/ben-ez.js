@@ -4,9 +4,15 @@ $: note("b5 c2 c2 b4").s("bossdr55_bd")
 $: note("c2*8").s("hh")
 
 lead: progression('C^ Am7 Dm7 G7', { style: 'jazz-comp', bass: true })
-  .s("gm_lead_2_sawtooth")
+  .s("gm_koto")
   .lpf("2400")
   .gain("1")
+
+leadback: progression('C^ Am7 Dm7 G7', { style: 'jazz-comp', bass: true })
+  .s("gm_english_horn")
+  .lpf("2400")
+  .gain("0.75")
+  .pan(sine.slow(2) * -1)
 
 chorus: progression('C^ Am7 Dm7 G7', { style: 'jazz-comp', bass: true })
   .s("gm_lead_6_voice")
