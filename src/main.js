@@ -24,6 +24,7 @@ import { createConsolePanel } from "./ui/console-panel.js";
 import { createExportPanel } from "./ui/export-panel.js";
 import { createSettingsPanel } from "./ui/settings-panel.js";
 import { renderRoll } from "./ui/piano-roll.js";
+import { mountTrackBar } from "./ui/track-bar.js";
 import { prompt, confirm } from "./ui/modal.js";
 import { applyStoredAccent, applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
 import { createLocalStore } from "./store.js";
@@ -482,6 +483,11 @@ document.addEventListener(
 );
 
 mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
+mountTrackBar({
+  container: document.getElementById('track-bar'),
+  view: editor.editor,
+  onEvaluate: () => editor.evaluate(),
+});
 
 // ─── Transport ───────────────────────────────────────────────────────────
 playBtn.addEventListener("click", async () => {

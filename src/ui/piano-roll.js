@@ -25,27 +25,14 @@
 // (in CSS pixel coords). A single click listener bound on the first call
 // hit-tests against the latest map and dispatches a CM6 selection range
 // to the supplied EditorView, scrolling it into view.
+//
+// Track mute/solo legend is handled by src/ui/track-bar.js — a persistent
+// DOM strip that lives in the shell grid above the roll pane. The canvas no
+// longer draws or hit-tests a legend strip.
 
 import { noteToMidi, freqToMidi, midi2note } from '@strudel/core';
-
-// Ten-step palette of muted, distinguishable hues that read against
-// `--surface-1`. Hand-tuned in OKLCH at uniform L=0.70 / C≈0.13 so no
-// single color screams louder than its neighbours; the rose at the start
-// matches the default `--accent` hue (358) so the primary layer feels
-// continuous with the rest of the chrome. Not derived from `--accent` at
-// runtime: an accent override is one user signature, this palette is ten.
-const PALETTE = [
-  'oklch(0.70 0.16 358)', // rose (default accent hue)
-  'oklch(0.70 0.13 28)',  // coral
-  'oklch(0.70 0.12 58)',  // amber
-  'oklch(0.70 0.12 98)',  // olive
-  'oklch(0.70 0.13 138)', // sage
-  'oklch(0.70 0.13 178)', // teal
-  'oklch(0.70 0.13 218)', // sky
-  'oklch(0.70 0.13 258)', // indigo
-  'oklch(0.70 0.13 298)', // lavender
-  'oklch(0.70 0.13 328)', // mauve
-];
+import { parseLabels } from '../editor/track-labels.js';
+import { PALETTE } from './palette.js';
 
 // strasbeat patterns assume 4 beats / cycle (matches transport.js's
 // BEATS_PER_CYCLE — see the note there for why this is a project-wide
@@ -73,6 +60,9 @@ function ensureState(canvas) {
     s = {
       hits: [],
       view: null,
+      doc: null,
+      code: '',
+      labels: [],
       clickBound: false,
       // First-sight → palette index. Persistent across frames so a layer's
       // color never re-flips when other layers appear or disappear.
@@ -168,6 +158,7 @@ function readTokens(canvas) {
     border:     get('--border', '#4d4d4d'),
     borderSoft: get('--border-soft', '#2e2e2e'),
     accent:     get('--accent', '#cf418d'),
+    text:       get('--text', '#f5f5f5'),
     textDim:    get('--text-dim', '#666'),
     fontSans:   get('--font-sans', 'system-ui, sans-serif'),
     fontMono:   get('--font-mono', 'ui-monospace, monospace'),
@@ -183,12 +174,39 @@ function colorForKey(state, key) {
   return map.get(key);
 }
 
+function syncEditorState(state, view) {
+  if (!view) return;
+  if (state.doc === view.state.doc) return;
+  state.doc = view.state.doc;
+  state.code = view.state.doc.toString();
+  state.labels = parseLabels(state.code);
+}
+
+function findLabelByOffset(labels, offset) {
+  for (const label of labels) {
+    if (offset >= label.blockStart && offset < label.blockEnd) {
+      return label;
+    }
+  }
+  return null;
+}
+
+function getLabelForHap(hap, labels) {
+  // applyPatternTransforms() writes the label id into query-state controls,
+  // but the haps arriving at onDraw do not surface that state, so we map
+  // back to the owning label via source offsets instead.
+  const loc = getFirstLocation(hap);
+  if (!loc) return null;
+  return findLabelByOffset(labels, loc[0]);
+}
+
 export function renderRoll({ haps, time, ctx, drawTime, view }) {
   const canvas = ctx.canvas;
   const state = ensureState(canvas);
   // Refresh the view ref every frame so the click handler always sees the
   // current EditorView (cheap; the click closure reads from `state`).
   state.view = view ?? state.view;
+  syncEditorState(state, state.view);
 
   if (!state.clickBound) {
     bindClick(canvas, state);
@@ -218,9 +236,12 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     return;
   }
 
+  const labels = state.labels;
+
   // Reserve a strip at the bottom for cycle labels and one on the left for
   // row labels. Every x-coord (gridlines, pills, playhead, hit map, cycle
   // labels) flows through `timeToX`, so the note area shifts in lockstep.
+  const noteAreaY = 0;
   const noteAreaH = Math.max(0, h - BOTTOM_LABEL_H);
   const noteAreaX = LEFT_GUTTER_W;
   const noteAreaW = Math.max(0, w - noteAreaX);
@@ -232,7 +253,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   // cycle labels are inside this clip block.
   ctx.save();
   ctx.beginPath();
-  ctx.rect(noteAreaX, 0, noteAreaW, h);
+  ctx.rect(noteAreaX, noteAreaY, noteAreaW, h - noteAreaY);
   ctx.clip();
 
   // ── Gridlines ────────────────────────────────────────────────────────
@@ -250,8 +271,8 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
       // Skip beats that coincide with cycle lines (drawn heavier below).
       if (Math.abs(bt - Math.round(bt)) < 1e-9) continue;
       const x = Math.round(timeToX(bt)) + 0.5;
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, noteAreaH);
+      ctx.moveTo(x, noteAreaY);
+      ctx.lineTo(x, noteAreaY + noteAreaH);
     }
     ctx.stroke();
   }
@@ -262,8 +283,8 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   const firstCycle = Math.ceil(t0);
   for (let c = firstCycle; c <= t1 + 1e-9; c += 1) {
     const x = Math.round(timeToX(c)) + 0.5;
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, noteAreaH);
+    ctx.moveTo(x, noteAreaY);
+    ctx.lineTo(x, noteAreaY + noteAreaH);
   }
   ctx.stroke();
 
@@ -332,7 +353,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     const idx = uniqueValues.indexOf(val);
     // Higher pitch = higher on screen → invert the slot index.
     const slot = (slotCount - 1) - (idx >= 0 ? idx : 0);
-    return (slot / slotCount) * noteAreaH;
+    return noteAreaY + (slot / slotCount) * noteAreaH;
   };
 
   // Reset hit map for this frame.
@@ -354,7 +375,10 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     const y = Math.round(yRaw) + 0.5;
     const pillW = Math.max(2, Math.round(wRaw) - 1);
 
-    const color = colorForKey(state, getGroupKey(hap));
+    const label = getLabelForHap(hap, labels);
+    const color = label
+      ? PALETTE[labels.indexOf(label) % PALETTE.length]
+      : colorForKey(state, getGroupKey(hap));
     const isActive = hap.whole.begin <= time && hap.endClipped > time;
     if (isActive) activeValues.add(val);
     const { velocity = 1, gain = 1 } = hap.value || {};
@@ -383,13 +407,13 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   glow.addColorStop(1, 'transparent');
   ctx.globalAlpha = 0.18;
   ctx.fillStyle = glow;
-  ctx.fillRect(px - 6, 0, 12, noteAreaH);
+  ctx.fillRect(px - 6, noteAreaY, 12, noteAreaH);
   ctx.globalAlpha = 1;
   ctx.strokeStyle = tokens.accent;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(px, 0);
-  ctx.lineTo(px, noteAreaH);
+  ctx.moveTo(px, noteAreaY);
+  ctx.lineTo(px, noteAreaY + noteAreaH);
   ctx.stroke();
 
   ctx.restore();
@@ -431,8 +455,8 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   ctx.lineWidth = 1;
   ctx.globalAlpha = 0.5;
   ctx.beginPath();
-  ctx.moveTo(noteAreaX - 0.5, 0);
-  ctx.lineTo(noteAreaX - 0.5, noteAreaH);
+  ctx.moveTo(noteAreaX - 0.5, noteAreaY);
+  ctx.lineTo(noteAreaX - 0.5, noteAreaY + noteAreaH);
   ctx.stroke();
   ctx.globalAlpha = 1;
 }

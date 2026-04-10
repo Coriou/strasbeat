@@ -1,7 +1,13 @@
 export default `setcps(120 / 60 / 4)
 
-$: note("b5 c2 c2 b4").s("bossdr55_bd")
-$: note("c2*8").s("hh")
+drums: stack(
+  s("bd sd bd sd").bank("akailinn"),
+  s("bd sd bd sd")
+    .bank("akaixr10")
+    .pan(sine.slow(4))
+    .gain("0.25"),
+  s("hh*8"),
+)
 
 lead: progression('C^ Am7 Dm7 G7', { style: 'jazz-comp', bass: true })
   .s("gm_koto")

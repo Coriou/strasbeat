@@ -41,6 +41,31 @@ import {
   selectNextOccurrence,
   selectSelectionMatches,
 } from "@codemirror/search";
+import {
+  labelAtLine,
+  parseLabels,
+  toggleMute,
+  toggleSolo,
+} from "./track-labels.js";
+import { computeNewSelection } from "./format.js";
+
+function toggleLabelAtCursor(view, onEvaluate, toggleLabel, userEvent) {
+  const code = view.state.doc.toString();
+  const oldSelection = view.state.selection;
+  const oldDoc = view.state.doc;
+  const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number;
+  const label = labelAtLine(parseLabels(code), cursorLine);
+  if (!label) return true;
+  const nextCode = toggleLabel(code, label.displayName);
+  if (nextCode === code) return true;
+  view.dispatch({
+    changes: { from: 0, to: code.length, insert: nextCode },
+    selection: computeNewSelection(oldSelection, oldDoc, nextCode),
+    userEvent,
+  });
+  onEvaluate();
+  return true;
+}
 
 /**
  * Build the VSCode-style keymap extension.
@@ -65,6 +90,28 @@ export function createVscodeKeymap({ onEvaluate }) {
         onEvaluate();
         return true;
       },
+    },
+    {
+      key: "Mod-m",
+      preventDefault: true,
+      run: (view) =>
+        toggleLabelAtCursor(
+          view,
+          onEvaluate,
+          toggleMute,
+          "input.track-mute",
+        ),
+    },
+    {
+      key: "Mod-Shift-s",
+      preventDefault: true,
+      run: (view) =>
+        toggleLabelAtCursor(
+          view,
+          onEvaluate,
+          toggleSolo,
+          "input.track-solo",
+        ),
     },
 
     // Multi-cursor / selection

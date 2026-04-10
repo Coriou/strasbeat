@@ -237,7 +237,7 @@ export async function formatBuffer(code) {
 // the spec. Multi-cursor selections are handled too — each range maps
 // independently and we collapse to single cursors (selections inside the
 // formatted region rarely make sense after a reformat anyway).
-function computeNewSelection(oldSelection, oldDoc, formatted) {
+export function computeNewSelection(oldSelection, oldDoc, formatted) {
   const newLines = formatted.split('\n');
   // Pre-compute line start offsets in the new doc for O(1) lookup per range.
   const lineStarts = new Array(newLines.length);

@@ -1,0 +1,72 @@
+/*
+ * Track bar — persistent strip between the transport and the piano roll.
+ * Shows per-track label buttons; collapses when there are no labels.
+ * See src/ui/track-bar.js for the mount and rebuild logic.
+ */
+
+.track-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  height: 24px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+/* Collapse when empty or explicitly hidden — the auto grid row follows. */
+.track-bar:empty,
+.track-bar[hidden] {
+  display: none;
+}
+
+/* One button per labeled track. */
+.track-bar__entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-2);
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  font: 500 var(--text-xs) var(--font-mono);
+  color: var(--text);
+  transition: background var(--t-hover);
+  white-space: nowrap;
+}
+
+.track-bar__entry:hover {
+  background: var(--surface-3);
+}
+
+.track-bar__entry:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Muted: dim the whole button + strikethrough on the label. */
+.track-bar__entry--muted {
+  opacity: 0.35;
+}
+
+.track-bar__entry--muted .track-bar__label {
+  text-decoration: line-through;
+}
+
+/* Soloed: accent underline on the label. */
+.track-bar__entry--soloed .track-bar__label {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+/* Palette dot matching the piano roll layer color. */
+.track-bar__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

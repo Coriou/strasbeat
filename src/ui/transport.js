@@ -1,8 +1,9 @@
 // Transport bar — owns the cps/bpm + cycle + playhead readouts and the
-// status / midi pill text. The play, stop, capture and roll-toggle buttons
-// already live in the static HTML (so main.js can attach the existing
-// handlers without re-querying through this component); transport.js
-// only owns the readouts that need a live data source.
+// status / midi pill text. The play, stop and roll-toggle buttons already
+// live in the static HTML (so main.js can attach the existing handlers
+// without re-querying through this component); transport.js only owns the
+// readouts that need a live data source.
+// Capture/preset controls live in the MIDI bar (src/ui/midi-bar.js).
 //
 // See design/SYSTEM.md §3 and design/work/01-shell.md.
 //
@@ -21,7 +22,7 @@ const BEATS_PER_CYCLE = 4; // see comment above
 /**
  * @param {object} opts
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
- * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean, msg: string}) => void, setCaptureState: (s: {recording: boolean, count?: number}) => void, dispose: () => void }}
+ * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean, msg: string}) => void, dispose: () => void }}
  */
 export function mountTransport({ getScheduler }) {
   const bpmEl = mustEl("bpm-readout");
@@ -30,8 +31,6 @@ export function mountTransport({ getScheduler }) {
   const playheadBar = playheadEl.parentElement;
   const statusEl = mustEl("status");
   const midiPillEl = mustEl("midi-status");
-  const captureBtn = mustEl("capture");
-  const captureBadge = mustEl("capture-count");
 
   // Last-rendered values, to skip unnecessary DOM writes.
   let lastBpm = NaN;
@@ -124,20 +123,13 @@ export function mountTransport({ getScheduler }) {
     midiPillEl.classList.toggle("is-err", ok === false);
   }
 
-  function setCaptureState({ recording, count }) {
-    captureBtn.classList.toggle("recording", !!recording);
-    captureBtn.setAttribute("aria-pressed", recording ? "true" : "false");
-    if (count != null) captureBadge.textContent = String(count);
-    if (!recording) captureBadge.textContent = "";
-  }
-
   function dispose() {
     if (raf != null) cancelAnimationFrame(raf);
     raf = null;
     clearInterval(poll);
   }
 
-  return { kick, setStatus, setMidiStatus, setCaptureState, dispose };
+  return { kick, setStatus, setMidiStatus, dispose };
 }
 
 function mustEl(id) {
