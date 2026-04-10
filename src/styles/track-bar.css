@@ -8,11 +8,10 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 0 var(--space-2) 0 var(--space-3);
+  padding: 0 var(--space-3);
   min-height: 28px;
   background: color-mix(in oklch, var(--surface-1) 72%, var(--surface-0));
-  border-bottom: 1px solid
-    color-mix(in oklch, var(--border) 70%, var(--border-soft));
+  border-top: 1px solid var(--border-soft);
   overflow: hidden;
 }
 
@@ -65,8 +64,8 @@
   --track-entry-fg: var(--text-mut);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 7px;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
   height: 22px;
   border: 1px solid var(--track-entry-bd);
   border-radius: var(--radius-sm);
@@ -146,7 +145,7 @@
   justify-content: center;
   min-width: 14px;
   height: 14px;
-  padding: 0 4px;
+  padding: 0 var(--space-1);
   border-radius: 999px;
   background: color-mix(in oklch, var(--surface-3) 82%, var(--surface-1));
   color: var(--text-dim);
@@ -158,7 +157,7 @@
 .track-bar__states {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .track-bar__state--muted {

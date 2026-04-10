@@ -51,7 +51,7 @@
 .midi-bar__octave {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-1);
 }
 
 .midi-bar__oct-btn {
@@ -152,7 +152,7 @@
   width: 1px;
   height: 16px;
   background: var(--border);
-  margin: 0 var(--space-1);
+  margin: 0 var(--space-2);
   flex-shrink: 0;
 }
 
@@ -181,7 +181,7 @@
   outline-offset: 1px;
 }
 .midi-bar__preset-chevron {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-mut);
 }
 
@@ -299,8 +299,8 @@
 }
 .midi-bar .capture__count {
   position: absolute;
-  bottom: -3px;
-  right: -3px;
+  bottom: -2px;
+  right: -2px;
   display: none;
   min-width: 14px;
   height: 14px;
@@ -334,4 +334,11 @@
 .midi-bar__spacer {
   flex: 1;
   min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .midi-bar .btn.capture[aria-pressed="true"],
+  .midi-bar .btn.capture.recording {
+    animation: none;
+  }
 }

@@ -21,12 +21,12 @@
  * Call `installSoundCompletion(view, functionNames)` after
  * `editor.updateSettings()` has been called.
  */
-import { autocompletion } from '@codemirror/autocomplete';
-import { compartments } from '@strudel/codemirror';
-import { soundMap } from '@strudel/webaudio';
-import { complex } from '@strudel/tonal';
-import { miniNotationCompletion } from './mini-notation.js';
-import docs from '../strudel-docs.json';
+import { autocompletion } from "@codemirror/autocomplete";
+import { compartments } from "@strudel/codemirror";
+import { soundMap } from "@strudel/webaudio";
+import { complex } from "@strudel/tonal";
+import { miniNotationCompletion } from "./mini-notation.js";
+import docs from "../strudel-docs.json";
 
 // ─── Completion info panel renderer ──────────────────────────────────────
 // Returns a DOM element using the class names already styled in
@@ -40,50 +40,50 @@ import docs from '../strudel-docs.json';
  * @returns {HTMLElement}
  */
 function renderCompletionInfo(label, entry) {
-  const container = document.createElement('div');
-  container.className = 'autocomplete-info-container';
+  const container = document.createElement("div");
+  container.className = "autocomplete-info-container";
 
-  const tooltip = document.createElement('div');
-  tooltip.className = 'autocomplete-info-tooltip';
+  const tooltip = document.createElement("div");
+  tooltip.className = "autocomplete-info-tooltip";
   container.appendChild(tooltip);
 
   // Function name (use the signature head when available, fall back to label)
-  const name = document.createElement('h3');
-  name.className = 'autocomplete-info-function-name';
+  const name = document.createElement("h3");
+  name.className = "autocomplete-info-function-name";
   name.textContent = entry.signature || `${label}()`;
   tooltip.appendChild(name);
 
   // Description
   if (entry.doc) {
-    const desc = document.createElement('div');
-    desc.className = 'autocomplete-info-function-description';
+    const desc = document.createElement("div");
+    desc.className = "autocomplete-info-function-description";
     desc.textContent = entry.doc;
     tooltip.appendChild(desc);
   }
 
   // Params
   if (entry.params && entry.params.length > 0) {
-    const params = document.createElement('div');
-    params.className = 'autocomplete-info-params-section';
+    const params = document.createElement("div");
+    params.className = "autocomplete-info-params-section";
     for (const p of entry.params) {
-      const item = document.createElement('div');
-      item.className = 'autocomplete-info-param-item';
+      const item = document.createElement("div");
+      item.className = "autocomplete-info-param-item";
 
-      const pname = document.createElement('span');
-      pname.className = 'autocomplete-info-param-name';
+      const pname = document.createElement("span");
+      pname.className = "autocomplete-info-param-name";
       pname.textContent = p.name;
       item.appendChild(pname);
 
       if (p.type) {
-        const ptype = document.createElement('span');
-        ptype.className = 'autocomplete-info-param-type';
+        const ptype = document.createElement("span");
+        ptype.className = "autocomplete-info-param-type";
         ptype.textContent = p.type;
         item.appendChild(ptype);
       }
 
       if (p.doc) {
-        const pdesc = document.createElement('div');
-        pdesc.className = 'autocomplete-info-param-desc';
+        const pdesc = document.createElement("div");
+        pdesc.className = "autocomplete-info-param-desc";
         pdesc.textContent = p.doc;
         item.appendChild(pdesc);
       }
@@ -95,11 +95,11 @@ function renderCompletionInfo(label, entry) {
 
   // Examples
   if (entry.examples && entry.examples.length > 0) {
-    const ex = document.createElement('div');
-    ex.className = 'autocomplete-info-examples-section';
+    const ex = document.createElement("div");
+    ex.className = "autocomplete-info-examples-section";
     for (const code of entry.examples) {
-      const pre = document.createElement('pre');
-      pre.className = 'autocomplete-info-example-code';
+      const pre = document.createElement("pre");
+      pre.className = "autocomplete-info-example-code";
       pre.textContent = code;
       ex.appendChild(pre);
     }
@@ -142,10 +142,23 @@ function soundHandler(context) {
   const fragment = fragMatch ? fragMatch[1] : inside;
 
   const keys = getSoundKeys();
-  const filtered = keys.filter((name) => name.includes(fragment));
-  const options = filtered.map((name) => ({ label: name, type: 'sound' }));
+  const lowerFrag = fragment.toLowerCase();
+  const options = [];
+  for (const name of keys) {
+    const lower = name.toLowerCase();
+    if (lower.startsWith(lowerFrag)) {
+      // Prefix match — highest priority
+      const bank =
+        name.indexOf("_") > 0 ? name.slice(0, name.indexOf("_")) : "";
+      options.push({ label: name, type: "sound", boost: 2, detail: bank });
+    } else if (lower.includes(lowerFrag)) {
+      const bank =
+        name.indexOf("_") > 0 ? name.slice(0, name.indexOf("_")) : "";
+      options.push({ label: name, type: "sound", boost: 0, detail: bank });
+    }
+  }
 
-  return { from: soundCtx.to - fragment.length, options };
+  return { from: soundCtx.to - fragment.length, options, filter: false };
 }
 
 // ─── Bank completion handler ─────────────────────────────────────────────
@@ -167,12 +180,16 @@ function bankHandler(context) {
   const soundDict = soundMap.get();
   const banks = new Set();
   for (const key of Object.keys(soundDict)) {
-    const idx = key.indexOf('_');
+    const idx = key.indexOf("_");
     if (idx > 0) banks.add(key.slice(0, idx));
   }
   const sorted = Array.from(banks).sort();
   const filtered = sorted.filter((b) => b.startsWith(fragment));
-  const options = filtered.map((name) => ({ label: name, type: 'bank' }));
+  const options = filtered.map((name) => ({
+    label: name,
+    type: "namespace",
+    detail: "bank",
+  }));
 
   return { from: bankCtx.to - fragment.length, options };
 }
@@ -180,31 +197,50 @@ function bankHandler(context) {
 // ─── Pitch / chord / mode completion data ────────────────────────────────
 // 21 entries: natural + sharp + flat for each pitch class.
 const pitchNames = [
-  'C', 'C#', 'Db',
-  'D', 'D#', 'Eb',
-  'E', 'E#', 'Fb',
-  'F', 'F#', 'Gb',
-  'G', 'G#', 'Ab',
-  'A', 'A#', 'Bb',
-  'B', 'B#', 'Cb',
+  "C",
+  "C#",
+  "Db",
+  "D",
+  "D#",
+  "Eb",
+  "E",
+  "E#",
+  "Fb",
+  "F",
+  "F#",
+  "Gb",
+  "G",
+  "G#",
+  "Ab",
+  "A",
+  "A#",
+  "Bb",
+  "B",
+  "B#",
+  "Cb",
 ];
 
 // Valid chord symbols from the iReal complex dictionary, plus '' for major
 // triads. Mirrors upstream autocomplete.mjs lines 113–128.
-const chordSymbols = ['', ...Object.keys(complex)].sort();
+const chordSymbols = ["", ...Object.keys(complex)].sort();
 const chordSymbolCompletions = chordSymbols.map((symbol) => {
-  if (symbol === '') {
-    return { label: 'major', apply: '', type: 'chord-symbol' };
+  if (symbol === "") {
+    return { label: "major", apply: "", type: "type", detail: "chord quality" };
   }
-  return { label: symbol, apply: symbol, type: 'chord-symbol' };
+  return {
+    label: symbol,
+    apply: symbol,
+    type: "type",
+    detail: "chord quality",
+  };
 });
 
 // Valid mode values for `voicing()` — hardcoded upstream.
 const modeCompletions = [
-  { label: 'below', type: 'mode' },
-  { label: 'above', type: 'mode' },
-  { label: 'duck', type: 'mode' },
-  { label: 'root', type: 'mode' },
+  { label: "below", type: "keyword", detail: "voice below anchor" },
+  { label: "above", type: "keyword", detail: "voice above anchor" },
+  { label: "duck", type: "keyword", detail: "avoid root note" },
+  { label: "root", type: "keyword", detail: "root position" },
 ];
 
 // TODO: Strudel's scale completions are disabled upstream because the Tonal
@@ -261,7 +297,7 @@ function chordHandler(context) {
   const filteredPitches = pitchNames.filter((p) =>
     p.toLowerCase().startsWith(fragment.toLowerCase()),
   );
-  const options = filteredPitches.map((p) => ({ label: p, type: 'pitch' }));
+  const options = filteredPitches.map((p) => ({ label: p, type: "pitch" }));
   return { from: chordCtx.to - fragment.length, options };
 }
 
@@ -283,13 +319,15 @@ function scaleHandler(context) {
   const afterColon = context.matchBefore(SCALE_AFTER_COLON);
   if (afterColon) {
     const text = afterColon.text;
-    const colonIdx = text.lastIndexOf(':');
+    const colonIdx = text.lastIndexOf(":");
     if (colonIdx !== -1) {
       const fragment = text.slice(colonIdx + 1);
-      const filtered = scaleCompletions.filter((s) => s.label.startsWith(fragment));
+      const filtered = scaleCompletions.filter((s) =>
+        s.label.startsWith(fragment),
+      );
       const options = filtered.map((s) => ({
         ...s,
-        apply: s.label.replace(SCALE_SPACES_TO_COLON, ':'),
+        apply: s.label.replace(SCALE_SPACES_TO_COLON, ":"),
       }));
       return { from: afterColon.from + colonIdx + 1, options };
     }
@@ -297,14 +335,14 @@ function scaleHandler(context) {
 
   // Pre-colon: pitch root.
   const preColon = context.matchBefore(SCALE_PRE_COLON);
-  if (preColon && !preColon.text.includes(':')) {
+  if (preColon && !preColon.text.includes(":")) {
     if (context.explicit) {
       const match = preColon.text.match(SCALE_PITCH_MATCH);
-      const fragment = match ? match[0] : '';
+      const fragment = match ? match[0] : "";
       const filtered = pitchNames.filter((p) =>
         p.toLowerCase().startsWith(fragment.toLowerCase()),
       );
-      const options = filtered.map((p) => ({ label: p, type: 'pitch' }));
+      const options = filtered.map((p) => ({ label: p, type: "pitch" }));
       return { from: preColon.to - fragment.length, options };
     }
     return { from: preColon.to, options: [] };
@@ -327,13 +365,13 @@ function modeHandler(context) {
   const afterColon = context.matchBefore(MODE_AFTER_COLON);
   if (afterColon) {
     const text = afterColon.text;
-    const colonIdx = text.lastIndexOf(':');
+    const colonIdx = text.lastIndexOf(":");
     if (colonIdx !== -1) {
       const fragment = text.slice(colonIdx + 1);
       const filtered = pitchNames.filter((p) =>
         p.toLowerCase().startsWith(fragment.toLowerCase()),
       );
-      const options = filtered.map((p) => ({ label: p, type: 'pitch' }));
+      const options = filtered.map((p) => ({ label: p, type: "pitch" }));
       return { from: afterColon.from + colonIdx + 1, options };
     }
   }
@@ -413,13 +451,21 @@ export function installSoundCompletion(view, functionNames) {
     seen.add(name);
     const entry = docs[name];
     if (entry) {
+      // Extract a short summary: first sentence of the doc, max 60 chars
+      let detail = "";
+      if (entry.doc) {
+        const first = entry.doc.split(/[.!?]\s/)[0];
+        detail = first.length > 60 ? first.slice(0, 57) + "..." : first;
+      }
       out.push({
         label: name,
-        type: 'function',
+        type: "function",
+        detail,
+        boost: 1,
         info: () => renderCompletionInfo(name, entry),
       });
     } else {
-      out.push({ label: name, type: 'function' });
+      out.push({ label: name, type: "function", boost: -1 });
     }
   };
 

@@ -47,6 +47,66 @@
   font-weight: 600;
 }
 
+/* ─── Detail text (secondary info right of label) ─────────────────────── */
+
+.cm-completionDetail {
+  color: var(--text-dim) !important;
+  font-style: normal !important;
+  font-size: var(--text-xs);
+  margin-left: var(--space-2);
+}
+
+/* ─── Category icons (type-based) ─────────────────────────────────────── */
+/* CM6 generates .cm-completionIcon-{type} from the Completion.type field.
+   We use ::after content as a lightweight category badge. The completion
+   icon area is 1.6em × 1em per CM6 baseline. */
+
+.cm-completionIcon {
+  opacity: 0.7;
+}
+
+/* Sound name — waveform symbol */
+.cm-completionIcon-sound::after {
+  content: "♪";
+  color: var(--accent);
+}
+
+/* Bank / namespace */
+.cm-completionIcon-namespace::after {
+  content: "◫";
+  color: var(--text-mut);
+}
+
+/* Function */
+.cm-completionIcon-function::after {
+  content: "ƒ";
+  color: var(--accent-hi);
+}
+
+/* Note / constant */
+.cm-completionIcon-constant::after {
+  content: "♮";
+  color: var(--ok);
+}
+
+/* Chord quality / type */
+.cm-completionIcon-type::after {
+  content: "△";
+  color: var(--text-mut);
+}
+
+/* Keyword (modes etc.) */
+.cm-completionIcon-keyword::after {
+  content: "◆";
+  color: var(--text-dim);
+}
+
+/* Variable (mini-notation sound context) */
+.cm-completionIcon-variable::after {
+  content: "♪";
+  color: var(--accent);
+}
+
 /* ─── Completion info panel (Strudel docs tooltip) ────────────────────── */
 
 .cm-completionInfo {
@@ -54,10 +114,10 @@
   border: 1px solid var(--border) !important;
   border-radius: var(--radius-md) !important;
   box-shadow: var(--shadow-pop) !important;
-  max-width: 320px;
-  max-height: 400px;
+  max-width: 300px;
+  max-height: 320px;
   overflow-y: auto;
-  padding: var(--space-3);
+  padding: var(--space-2) var(--space-3);
   scrollbar-width: thin;
   scrollbar-color: var(--surface-3) transparent;
 }
@@ -112,6 +172,27 @@
   margin-left: var(--space-2);
 }
 
+.autocomplete-info-param-type {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  margin-left: var(--space-1);
+}
+
+.autocomplete-info-param-type::before {
+  content: ": ";
+}
+
+.autocomplete-info-param-desc {
+  color: var(--text-mut);
+  font-size: var(--text-xs);
+  margin-top: 1px;
+}
+
+.autocomplete-info-param-item {
+  padding: 1px 0;
+}
+
 .autocomplete-info-examples-section {
   margin-top: var(--space-2);
   border-top: 1px solid var(--border-soft);
@@ -125,9 +206,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-pop);
-  padding: var(--space-3);
-  max-width: 400px;
-  max-height: 360px;
+  padding: var(--space-2) var(--space-3);
+  max-width: 360px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--surface-3) transparent;
@@ -148,7 +228,47 @@
 
 .hover-docs-desc {
   color: var(--text-mut);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Collapsible detail section — params + examples behind a disclosure */
+.hover-docs-details {
+  border-top: 1px solid var(--border-soft);
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+}
+
+.hover-docs-summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+  padding: var(--space-1) 0;
+  transition: color var(--t-hover);
+}
+
+.hover-docs-summary::-webkit-details-marker {
+  display: none;
+}
+
+.hover-docs-summary::before {
+  content: "▸ ";
+  display: inline;
+  transition: transform var(--t-hover);
+}
+
+.hover-docs-details[open] > .hover-docs-summary::before {
+  content: "▾ ";
+}
+
+.hover-docs-summary:hover {
+  color: var(--text-mut);
 }
 
 .hover-docs-params {
@@ -220,7 +340,9 @@
   font-size: var(--text-xs);
   font-weight: 600;
   cursor: pointer;
-  transition: background var(--t-hover), border-color var(--t-hover);
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover);
 }
 .hover-docs-ref-link:hover {
   background: var(--accent-wash);
@@ -233,26 +355,26 @@
   position: absolute;
   z-index: 100;
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-pop);
-  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-low);
+  padding: 2px var(--space-2);
   font-family: var(--font-mono);
-  font-size: var(--code-sm);
-  line-height: var(--lh-sm);
-  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-mut);
   white-space: nowrap;
   pointer-events: none;
   animation: sig-hint-in var(--t-pop-in) both;
 }
 
 .sig-hint-name {
-  color: var(--accent);
+  color: var(--text);
   font-weight: 600;
 }
 
 .sig-hint-active-param {
-  color: var(--text);
+  color: var(--accent);
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;

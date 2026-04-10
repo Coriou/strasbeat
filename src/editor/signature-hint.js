@@ -8,6 +8,7 @@
  */
 import { EditorView, ViewPlugin } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
+import { completionStatus } from "@codemirror/autocomplete";
 import docs from "./strudel-docs.json";
 
 /**
@@ -124,6 +125,12 @@ const signaturePlugin = ViewPlugin.fromClass(
 
       const { state } = update.view;
       const pos = state.selection.main.head;
+
+      // Hide when autocomplete is active — one surface owns attention at a time
+      if (completionStatus(state) !== null) {
+        this.hide();
+        return;
+      }
 
       // Don't show if there's a selection range (multi-char select)
       if (!state.selection.main.empty) {

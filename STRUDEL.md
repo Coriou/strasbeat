@@ -162,11 +162,23 @@ $: progression("Cm7 F7 Bb^7 Eb^7");
 $: progression("Cm7 F7 Bb^7 Eb^7", { rhythm: "arp-up" });
 $: progression("ii V I", { key: "C", style: "jazz-comp" });
 $: progression("C G Am F", { style: "folk-strum", bass: true });
+$: progression("Am F C G@2"); // G held for 2 cycle-lengths
+$: progression("Am F C G*2"); // G repeated twice (compressed)
+$: progression("ii V@2 I", { key: "C" }); // Roman + weight
 ```
 
 The chord string is a whitespace-separated list of either **absolute
 chord symbols** (`Cm7 F7 Bb^7 Eb^7`) or **Roman numerals** (`ii V I`,
-when `options.key` is supplied). Strudel's voicing dictionaries do the
+when `options.key` is supplied). Each token can carry an optional
+modifier mirroring mini-notation operators:
+
+- **`@N`** (weight) — hold a chord longer: `G@2` gives G twice the
+  time of an unweighted chord. Internally uses Strudel's `timeCat`.
+- **`*N`** (repeat) — play a chord N times in its slot: `G*2` plays G
+  twice in the space one chord normally occupies (compressed).
+- `/N` is **not** supported (collides with slash chords like `Cm7/G`).
+
+Strudel's voicing dictionaries do the
 musical work — `progression()` only owns the defaults, the rhythm
 preset table, and the style merge.
 
