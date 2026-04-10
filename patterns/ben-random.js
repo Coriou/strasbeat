@@ -2,7 +2,9 @@ export default `// default cps
 
 drums: stack(note("b5 c2 c2 b4").s("bd"), note("c2*8").s("hh"))
 
-lead: note("c4 a4 f4 e4")
+const notes = "[c4, c3] [a4, a3] [f4, f3] [e4, e3]"
+
+lead: note(notes)
   .s("supersaw")
   .lpf("2400")
   .room("0.2")
@@ -12,7 +14,7 @@ lead: note("c4 a4 f4 e4")
   .mask("<0 0 0 1 1 1 1>")
   .gain("0.8")
 
-leadrev: note("c4 a4 f4 e4")
+leadrev: note(notes)
   .s("supersaw")
   .lpf("800")
   .room("0.2")
@@ -20,7 +22,7 @@ leadrev: note("c4 a4 f4 e4")
   .mask("<1 1 0 0>")
   .rev()
 
-leaddel: note("c4 a4 f4 e4")
+leaddel: note(notes)
   .s("supersaw")
   .lpf("800")
   .room("0.2")
@@ -28,7 +30,7 @@ leaddel: note("c4 a4 f4 e4")
   .delay("<0 .25 .25 0.5>")
   .scale("c:minor")
 
-leadbis: note("c4 f4 a4 g4")
+leadbis: note(notes)
   .s("gm_lead_6_voice")
   .attack("<0.9 0.9 0.9 0.8>")
   .gain("<1 1.75 1.75 1.25>")
