@@ -14,7 +14,7 @@ chorus: progression('C^ Am7 Dm7 G7', { style: 'jazz-comp', bass: true })
   .lpf("800")
   .gain("1")
 
-leadrev: progression('C^ Am7 Dm7 G7', { style: 'jazz-comp', bass: false })
+leadrev: progression('C^ Am7 Dm7 G7', { style: 'lo-fi', bass: false })
   .s("gm_synth_bass_2")
   .lpf("800")
   .gain("0.75")
