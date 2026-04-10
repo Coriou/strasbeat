@@ -336,6 +336,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   // Note display + keyboard redraw on noteon
   let noteFadeTimer = null;
   function onNoteOn({ midi: midiNote, velocity, noteName }) {
+    fadingNotes.delete(midiNote); // cancel any in-progress fade for re-struck key
     // Update note/chord display
     const activeKeys = [...midi.activeNotes.keys()];
     if (activeKeys.length > 1) {
@@ -352,8 +353,13 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     );
     redrawKeyboard();
   }
-  function onNoteOff() {
-    redrawKeyboard();
+  function onNoteOff({ midi: midiNote, velocity }) {
+    // Start progressive fade for the released key
+    fadingNotes.set(midiNote, {
+      velocity: velocity ?? 0.5,
+      startedAt: performance.now(),
+    });
+    startFadeLoop();
     // Update chord display if notes remain
     const activeKeys = [...midi.activeNotes.keys()];
     if (activeKeys.length > 1) {
@@ -389,6 +395,11 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
       noteEl.textContent = "";
       noteEl.classList.remove("midi-bar__note--faded");
       clearTimeout(noteFadeTimer);
+      fadingNotes.clear();
+      if (fadeAnimId !== null) {
+        cancelAnimationFrame(fadeAnimId);
+        fadeAnimId = null;
+      }
       susLamp.classList.remove("midi-bar__sustain--active");
       redrawKeyboard();
     }
@@ -606,6 +617,11 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     document.removeEventListener("keydown", onDocKeydown);
     clearTimeout(noteFadeTimer);
     clearTimeout(previewTimer);
+    fadingNotes.clear();
+    if (fadeAnimId !== null) {
+      cancelAnimationFrame(fadeAnimId);
+      fadeAnimId = null;
+    }
     if (popover.parentNode) popover.parentNode.removeChild(popover);
   }
 

@@ -37,12 +37,13 @@
   color: var(--text);
   min-width: 60px;
   text-align: center;
-  transition: opacity var(--t-panel);
+  transition: opacity 0.15s ease-out; /* fast snap-in when a note is struck */
   white-space: nowrap;
 }
 
 .midi-bar__note--faded {
   opacity: 0;
+  transition: opacity 1.8s ease-out; /* slow progressive fade after release */
 }
 
 /* ─── Octave shift ─── */

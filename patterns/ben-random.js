@@ -1,6 +1,6 @@
-export default `$: note("b5 c2 c2 b4").s("bd")
+export default `// default cps
 
-$: note("c2*8").s("hh")
+drums: stack(note("b5 c2 c2 b4").s("bd"), note("c2*8").s("hh"))
 
 lead: note("c4 a4 f4 e4")
   .s("supersaw")
