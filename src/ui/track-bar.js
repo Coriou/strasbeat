@@ -34,6 +34,24 @@ export function mountTrackBar({ container, view, onEvaluate }) {
 
     container.hidden = false;
 
+    const meta = document.createElement("div");
+    meta.className = "track-bar__meta";
+
+    const title = document.createElement("span");
+    title.className = "track-bar__title";
+    title.textContent = "Tracks";
+
+    const hint = document.createElement("span");
+    hint.className = "track-bar__hint";
+    hint.textContent = "Click mute · Shift solo";
+
+    meta.append(title, hint);
+    container.appendChild(meta);
+
+    const entries = document.createElement("div");
+    entries.className = "track-bar__entries";
+    container.appendChild(entries);
+
     for (let i = 0; i < labels.length; i++) {
       const label = labels[i];
       const color = PALETTE[i % PALETTE.length];
@@ -44,14 +62,19 @@ export function mountTrackBar({ container, view, onEvaluate }) {
       btn.className = "track-bar__entry";
       if (label.muted) btn.classList.add("track-bar__entry--muted");
       if (label.soloed) btn.classList.add("track-bar__entry--soloed");
-      btn.title =
+      const stateText =
         label.muted && label.soloed
-          ? `${displayName} (muted + soloed) — click to unmute, Shift+click to unsolo`
+          ? "Muted and soloed"
           : label.muted
-            ? `${displayName} (muted) — click to unmute, Shift+click to solo`
+            ? "Muted"
             : label.soloed
-              ? `${displayName} (soloed) — click to mute, Shift+click to unsolo`
-              : `${displayName} — click to mute, Shift+click to solo`;
+              ? "Soloed"
+              : "Active";
+      btn.title = `${displayName} · ${stateText} · Click mute · Shift-click solo`;
+      btn.setAttribute(
+        "aria-label",
+        `${displayName}. ${stateText}. Click toggles mute. Shift-click toggles solo.`,
+      );
 
       const dot = document.createElement("span");
       dot.className = "track-bar__dot";
@@ -62,8 +85,26 @@ export function mountTrackBar({ container, view, onEvaluate }) {
       labelEl.className = "track-bar__label";
       labelEl.textContent = displayName;
 
+      const states = document.createElement("span");
+      states.className = "track-bar__states";
+      if (label.muted) {
+        const mutedTag = document.createElement("span");
+        mutedTag.className = "track-bar__state track-bar__state--muted";
+        mutedTag.textContent = "M";
+        mutedTag.setAttribute("aria-hidden", "true");
+        states.appendChild(mutedTag);
+      }
+      if (label.soloed) {
+        const soloTag = document.createElement("span");
+        soloTag.className = "track-bar__state track-bar__state--soloed";
+        soloTag.textContent = "S";
+        soloTag.setAttribute("aria-hidden", "true");
+        states.appendChild(soloTag);
+      }
+
       btn.appendChild(dot);
       btn.appendChild(labelEl);
+      if (states.childElementCount > 0) btn.appendChild(states);
 
       btn.addEventListener("click", (e) => {
         const currentCode = view.state.doc.toString();
@@ -86,7 +127,7 @@ export function mountTrackBar({ container, view, onEvaluate }) {
         }
       });
 
-      container.appendChild(btn);
+      entries.appendChild(btn);
     }
   }
 

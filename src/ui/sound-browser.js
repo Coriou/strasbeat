@@ -29,7 +29,7 @@
 // Pure DOM, no framework. Match the imperative style of left-rail.js
 // and transport.js.
 
-import { makeIcon } from './icons.js';
+import { makeIcon } from "./icons.js";
 
 const SEARCH_DEBOUNCE_MS = 150;
 
@@ -37,10 +37,29 @@ const SEARCH_DEBOUNCE_MS = 150;
 // suffixes sort first in this order, then everything else falls back to
 // alphabetical. Lifted from common DAW sample browsers.
 const DRUM_ORDER = [
-  'bd', 'kick', 'sd', 'snare', 'rim', 'cp', 'clap',
-  'hh', 'ch', 'oh', 'ho',
-  'lt', 'mt', 'ht', 'tom',
-  'cb', 'cy', 'cr', 'crash', 'rd', 'ride', 'sh', 'shaker',
+  "bd",
+  "kick",
+  "sd",
+  "snare",
+  "rim",
+  "cp",
+  "clap",
+  "hh",
+  "ch",
+  "oh",
+  "ho",
+  "lt",
+  "mt",
+  "ht",
+  "tom",
+  "cb",
+  "cy",
+  "cr",
+  "crash",
+  "rd",
+  "ride",
+  "sh",
+  "shaker",
 ];
 
 export function createSoundBrowserPanel({
@@ -54,10 +73,12 @@ export function createSoundBrowserPanel({
   let allSounds = [];
   /** @type {Set<string>} */
   let inUse = new Set();
-  let currentBufferText = '';
-  let query = '';
-  let category = 'all'; // all | kits | gm | synth
+  let currentBufferText = "";
+  let query = "";
+  let category = "all"; // all | kits | gm | synth
   let activeIndex = -1; // index into the currently-rendered flat list
+  /** @type {Set<string>} */
+  let collapsedGroups = new Set();
 
   // DOM refs (re-bound on create()).
   let root = null;
@@ -77,9 +98,9 @@ export function createSoundBrowserPanel({
   // ─── Right-rail panel spec ────────────────────────────────────────────
 
   return {
-    id: 'sounds',
-    icon: 'music',
-    label: 'Sound browser',
+    id: "sounds",
+    icon: "music",
+    label: "Sound browser",
     create,
     activate,
     deactivate,
@@ -91,51 +112,61 @@ export function createSoundBrowserPanel({
 
   function create(container) {
     root = container;
-    root.classList.add('sound-browser');
+    root.classList.add("sound-browser");
 
     // Header — search input.
-    const header = el('div', 'sound-browser__header');
-    const search = el('div', 'sound-browser__search');
-    const searchIcon = el('span', 'sound-browser__search-icon');
-    searchIcon.appendChild(makeIcon('search'));
+    const header = el("div", "sound-browser__header");
+    const search = el("div", "sound-browser__search");
+    const searchIcon = el("span", "sound-browser__search-icon");
+    searchIcon.appendChild(makeIcon("search"));
     search.appendChild(searchIcon);
 
-    searchInput = el('input', 'sound-browser__search-input');
-    searchInput.type = 'text';
-    searchInput.placeholder = 'Search sounds…';
-    searchInput.setAttribute('aria-label', 'Search sounds');
+    searchInput = el("input", "sound-browser__search-input");
+    searchInput.type = "text";
+    searchInput.placeholder = "Search sounds…";
+    searchInput.setAttribute("aria-label", "Search sounds");
     searchInput.spellcheck = false;
-    searchInput.autocomplete = 'off';
-    searchInput.addEventListener('input', onSearchInput);
-    searchInput.addEventListener('keydown', onSearchKeydown);
+    searchInput.autocomplete = "off";
+    searchInput.addEventListener("input", onSearchInput);
+    searchInput.addEventListener("keydown", onSearchKeydown);
     search.appendChild(searchInput);
     header.appendChild(search);
+
+    // Discoverability hint — fades out after the user's first preview.
+    const hint = el(
+      "div",
+      "sound-browser__hint",
+      "Hold to preview · double-click to insert",
+    );
+    header.appendChild(hint);
+
     root.appendChild(header);
 
     // Category pills.
-    pillsEl = el('div', 'sound-browser__pills');
-    pillsEl.setAttribute('role', 'tablist');
-    pillsEl.setAttribute('aria-label', 'Sound category');
+    pillsEl = el("div", "sound-browser__pills");
+    pillsEl.setAttribute("role", "tablist");
+    pillsEl.setAttribute("aria-label", "Sound category");
     for (const c of [
-      { id: 'all', label: 'All' },
-      { id: 'kits', label: 'Kits' },
-      { id: 'gm', label: 'GM' },
-      { id: 'synth', label: 'Synth' },
+      { id: "all", label: "All" },
+      { id: "kits", label: "Kits" },
+      { id: "gm", label: "GM", title: "General MIDI soundfont instruments" },
+      { id: "synth", label: "Synth" },
     ]) {
-      const pill = document.createElement('button');
-      pill.type = 'button';
-      pill.className = 'sound-browser__pill';
+      const pill = document.createElement("button");
+      pill.type = "button";
+      pill.className = "sound-browser__pill";
       pill.dataset.category = c.id;
       pill.textContent = c.label;
-      pill.setAttribute('role', 'tab');
-      pill.setAttribute('aria-selected', c.id === category ? 'true' : 'false');
-      if (c.id === category) pill.classList.add('is-active');
-      pill.addEventListener('click', () => {
+      if (c.title) pill.title = c.title;
+      pill.setAttribute("role", "tab");
+      pill.setAttribute("aria-selected", c.id === category ? "true" : "false");
+      if (c.id === category) pill.classList.add("is-active");
+      pill.addEventListener("click", () => {
         category = c.id;
-        for (const p of pillsEl.querySelectorAll('.sound-browser__pill')) {
+        for (const p of pillsEl.querySelectorAll(".sound-browser__pill")) {
           const isMe = p.dataset.category === category;
-          p.classList.toggle('is-active', isMe);
-          p.setAttribute('aria-selected', isMe ? 'true' : 'false');
+          p.classList.toggle("is-active", isMe);
+          p.setAttribute("aria-selected", isMe ? "true" : "false");
         }
         render();
       });
@@ -144,14 +175,14 @@ export function createSoundBrowserPanel({
     root.appendChild(pillsEl);
 
     // List container — scroll region for groups + sound items.
-    listEl = el('div', 'sound-browser__list');
-    listEl.setAttribute('role', 'listbox');
-    listEl.setAttribute('aria-label', 'Sounds');
-    listEl.addEventListener('keydown', onListKeydown);
+    listEl = el("div", "sound-browser__list");
+    listEl.setAttribute("role", "listbox");
+    listEl.setAttribute("aria-label", "Sounds");
+    listEl.addEventListener("keydown", onListKeydown);
     root.appendChild(listEl);
 
     // Footer — count of visible / total sounds.
-    countEl = el('div', 'sound-browser__count');
+    countEl = el("div", "sound-browser__count");
     root.appendChild(countEl);
 
     mounted = true;
@@ -182,7 +213,7 @@ export function createSoundBrowserPanel({
   }
 
   function setBufferText(text) {
-    currentBufferText = text ?? '';
+    currentBufferText = text ?? "";
     inUse = scanInUse(currentBufferText, allSounds);
     if (mounted) updateInUseHighlights();
   }
@@ -202,25 +233,26 @@ export function createSoundBrowserPanel({
     const filtered = query
       ? visible.filter((s) => {
           const lname = s.name.toLowerCase();
-          const lkit = s.kit ? s.kit.toLowerCase() : '';
+          const lkit = s.kit ? s.kit.toLowerCase() : "";
           return lname.includes(query) || lkit.includes(query);
         })
       : visible;
 
-    countEl.textContent = filtered.length === allSounds.length
-      ? `${allSounds.length} sounds`
-      : `${filtered.length} of ${allSounds.length}`;
+    countEl.textContent =
+      filtered.length === allSounds.length
+        ? `${allSounds.length} sounds`
+        : `${filtered.length} shown · ${allSounds.length} total`;
 
     if (allSounds.length === 0) {
-      const empty = el('div', 'sound-browser__empty', 'no sounds loaded yet');
+      const empty = el("div", "sound-browser__empty", "no sounds loaded yet");
       listEl.appendChild(empty);
       return;
     }
     if (filtered.length === 0) {
       const empty = el(
-        'div',
-        'sound-browser__empty',
-        query ? `no sounds match "${query}"` : 'no sounds in this category',
+        "div",
+        "sound-browser__empty",
+        query ? `no sounds match "${query}"` : "no sounds in this category",
       );
       listEl.appendChild(empty);
       return;
@@ -231,7 +263,7 @@ export function createSoundBrowserPanel({
     //    - synth, gm, all (with no query): collapsible groups too
     //    - all (with query): flat alphabetical list (groups would
     //      collapse most of the matches anyway)
-    const useGroups = (category !== 'all') || !query;
+    const useGroups = category !== "all" || !query;
     if (useGroups) renderGrouped(filtered);
     else renderFlat(filtered);
   }
@@ -276,32 +308,41 @@ export function createSoundBrowserPanel({
   }
 
   function buildGroup(key, sounds) {
-    const group = el('div', 'sound-browser__group');
-    const head = el('button', 'sound-browser__group-head');
-    head.type = 'button';
-    head.setAttribute('aria-expanded', 'true');
+    const group = el("div", "sound-browser__group");
+    const head = el("button", "sound-browser__group-head");
+    head.type = "button";
+    const isCollapsed = collapsedGroups.has(key);
+    head.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+    if (isCollapsed) group.classList.add("is-collapsed");
 
-    const chev = el('span', 'sound-browser__group-chev');
-    chev.appendChild(makeIcon('chevron-down'));
+    const chev = el("span", "sound-browser__group-chev");
+    chev.appendChild(makeIcon("chevron-down"));
     head.appendChild(chev);
 
-    const label = el('span', 'sound-browser__group-label', key);
+    const label = el(
+      "span",
+      "sound-browser__group-label",
+      formatGroupLabel(key, sounds),
+    );
     head.appendChild(label);
 
     const total = sounds.reduce((n, s) => n + Math.max(1, s.sampleCount), 0);
-    const meta = el('span', 'sound-browser__group-meta', `${sounds.length}`);
-    meta.title = `${sounds.length} sound${sounds.length === 1 ? '' : 's'}, ${total} sample${total === 1 ? '' : 's'}`;
+    const meta = el("span", "sound-browser__group-meta", `${sounds.length}`);
+    meta.title = `${sounds.length} sound${sounds.length === 1 ? "" : "s"}, ${total} sample${total === 1 ? "" : "s"}`;
     head.appendChild(meta);
 
-    const items = el('div', 'sound-browser__group-items');
+    const items = el("div", "sound-browser__group-items");
     for (const s of sounds) {
       items.appendChild(buildSoundItem(s));
-      flatVisible.push({ name: s.name, kit: s.kit });
+      if (!isCollapsed) flatVisible.push({ name: s.name, kit: s.kit });
     }
 
-    head.addEventListener('click', () => {
-      const collapsed = group.classList.toggle('is-collapsed');
-      head.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    head.addEventListener("click", () => {
+      const collapsed = group.classList.toggle("is-collapsed");
+      if (collapsed) collapsedGroups.add(key);
+      else collapsedGroups.delete(key);
+      head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      syncFlatVisibleFromDom();
     });
 
     group.appendChild(head);
@@ -310,25 +351,30 @@ export function createSoundBrowserPanel({
   }
 
   function buildSoundItem(sound) {
-    const item = el('div', 'sound-browser__item');
-    item.setAttribute('role', 'option');
-    item.setAttribute('tabindex', '-1');
+    const item = el("div", "sound-browser__item");
+    item.setAttribute("role", "option");
+    item.setAttribute("tabindex", "-1");
     item.dataset.soundName = sound.name;
-    if (inUse.has(sound.name)) item.classList.add('is-in-use');
+    if (inUse.has(sound.name)) item.classList.add("is-in-use");
 
     // The "name" is shown without its kit prefix when we're in a kit
     // group, to reduce visual repetition (`bd`, `sd`, `hh` instead of
     // `808_bd`, `808_sd`, `808_hh`).
-    const displayName = sound.kit && sound.name.startsWith(sound.kit + '_')
-      ? sound.name.slice(sound.kit.length + 1)
-      : sound.name;
+    const displayName =
+      sound.kit && sound.name.startsWith(sound.kit + "_")
+        ? sound.name.slice(sound.kit.length + 1)
+        : sound.name;
 
-    const nameEl = el('span', 'sound-browser__item-name');
+    const nameEl = el("span", "sound-browser__item-name");
     appendHighlightedText(nameEl, displayName, query);
     item.appendChild(nameEl);
 
     if (sound.sampleCount > 1) {
-      const meta = el('span', 'sound-browser__item-meta', `${sound.sampleCount}`);
+      const meta = el(
+        "span",
+        "sound-browser__item-meta",
+        `${sound.sampleCount}`,
+      );
       meta.title = `${sound.sampleCount} variations`;
       item.appendChild(meta);
     }
@@ -337,17 +383,17 @@ export function createSoundBrowserPanel({
     // fires the instant the user touches the row — feels more like an
     // instrument and avoids the click-vs-double-click delay. Insert is on
     // double-click, which fires its own dblclick event later.
-    item.addEventListener('mousedown', (e) => {
+    item.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       previewSound(sound.name, item);
     });
-    item.addEventListener('dblclick', (e) => {
+    item.addEventListener("dblclick", (e) => {
       e.preventDefault();
       insertSound(sound.name);
     });
 
     // Click also focuses the item so arrow keys take over from there.
-    item.addEventListener('click', () => focusItem(sound.name));
+    item.addEventListener("click", () => focusItem(sound.name));
 
     return item;
   }
@@ -364,16 +410,20 @@ export function createSoundBrowserPanel({
       return;
     }
     parent.appendChild(document.createTextNode(text.slice(0, idx)));
-    const match = el('span', 'sound-browser__item-match', text.slice(idx, idx + q.length));
+    const match = el(
+      "span",
+      "sound-browser__item-match",
+      text.slice(idx, idx + q.length),
+    );
     parent.appendChild(match);
     parent.appendChild(document.createTextNode(text.slice(idx + q.length)));
   }
 
   function updateInUseHighlights() {
     if (!listEl) return;
-    for (const item of listEl.querySelectorAll('.sound-browser__item')) {
+    for (const item of listEl.querySelectorAll(".sound-browser__item")) {
       const name = item.dataset.soundName;
-      item.classList.toggle('is-in-use', inUse.has(name));
+      item.classList.toggle("is-in-use", inUse.has(name));
     }
   }
 
@@ -383,18 +433,24 @@ export function createSoundBrowserPanel({
     try {
       onPreview(name);
     } catch (err) {
-      console.warn('[sound-browser] preview failed:', err);
+      console.warn("[sound-browser] preview failed:", err);
     }
     if (!itemEl) return;
-    itemEl.classList.add('is-previewing');
-    setTimeout(() => itemEl.classList.remove('is-previewing'), 500);
+    itemEl.classList.add("is-previewing");
+    setTimeout(() => itemEl.classList.remove("is-previewing"), 800);
+
+    // Fade out the discoverability hint after the first successful preview.
+    const hintEl = root?.querySelector(".sound-browser__hint");
+    if (hintEl && !hintEl.classList.contains("is-hidden")) {
+      hintEl.classList.add("is-hidden");
+    }
   }
 
   function insertSound(name) {
     try {
       onInsert(name);
     } catch (err) {
-      console.warn('[sound-browser] insert failed:', err);
+      console.warn("[sound-browser] insert failed:", err);
     }
   }
 
@@ -405,17 +461,42 @@ export function createSoundBrowserPanel({
 
   function paintActive() {
     if (!listEl) return;
-    for (const item of listEl.querySelectorAll('.sound-browser__item')) {
-      item.classList.remove('is-active');
+    for (const item of listEl.querySelectorAll(".sound-browser__item")) {
+      item.classList.remove("is-active");
     }
     if (activeIndex < 0 || activeIndex >= flatVisible.length) return;
     const name = flatVisible[activeIndex].name;
-    const target = listEl.querySelector(`.sound-browser__item[data-sound-name="${cssEscape(name)}"]`);
+    const target = listEl.querySelector(
+      `.sound-browser__item[data-sound-name="${cssEscape(name)}"]`,
+    );
     if (target) {
-      target.classList.add('is-active');
-      target.scrollIntoView({ block: 'nearest' });
+      target.classList.add("is-active");
+      target.scrollIntoView({ block: "nearest" });
       target.focus({ preventScroll: true });
     }
+  }
+
+  function syncFlatVisibleFromDom() {
+    if (!listEl) return;
+    const activeName =
+      activeIndex >= 0 && activeIndex < flatVisible.length
+        ? flatVisible[activeIndex].name
+        : null;
+
+    flatVisible = [];
+    for (const item of listEl.querySelectorAll(".sound-browser__item")) {
+      const group = item.closest(".sound-browser__group");
+      if (group?.classList.contains("is-collapsed")) continue;
+      flatVisible.push({
+        name: item.dataset.soundName,
+        kit: null,
+      });
+    }
+
+    activeIndex = activeName
+      ? flatVisible.findIndex((sound) => sound.name === activeName)
+      : -1;
+    paintActive();
   }
 
   function moveActive(delta) {
@@ -423,7 +504,8 @@ export function createSoundBrowserPanel({
     if (activeIndex < 0) {
       activeIndex = delta > 0 ? 0 : flatVisible.length - 1;
     } else {
-      activeIndex = (activeIndex + delta + flatVisible.length) % flatVisible.length;
+      activeIndex =
+        (activeIndex + delta + flatVisible.length) % flatVisible.length;
     }
     paintActive();
   }
@@ -439,11 +521,11 @@ export function createSoundBrowserPanel({
   }
 
   function onSearchKeydown(e) {
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       if (searchInput.value) {
         e.preventDefault();
-        searchInput.value = '';
-        query = '';
+        searchInput.value = "";
+        query = "";
         render();
         return;
       }
@@ -451,7 +533,7 @@ export function createSoundBrowserPanel({
       onFocusEditor();
       return;
     }
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       // Flush the debounce so render() has the freshest filter, then jump
       // into the list.
@@ -461,7 +543,7 @@ export function createSoundBrowserPanel({
       moveActive(+1);
       return;
     }
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       // Pick the first visible sound — preview by default, insert with
       // Shift held (matches the rest of the keyboard behavior in the
@@ -479,12 +561,12 @@ export function createSoundBrowserPanel({
   }
 
   function onListKeydown(e) {
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       moveActive(+1);
       return;
     }
-    if (e.key === 'ArrowUp') {
+    if (e.key === "ArrowUp") {
       e.preventDefault();
       if (activeIndex === 0) {
         // Wrap back into the search field at the top.
@@ -497,12 +579,12 @@ export function createSoundBrowserPanel({
       moveActive(-1);
       return;
     }
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       e.preventDefault();
       onFocusEditor();
       return;
     }
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       if (activeIndex < 0) return;
       const name = flatVisible[activeIndex].name;
@@ -514,16 +596,22 @@ export function createSoundBrowserPanel({
   function currentItemEl() {
     if (activeIndex < 0 || !listEl) return null;
     const name = flatVisible[activeIndex].name;
-    return listEl.querySelector(`.sound-browser__item[data-sound-name="${cssEscape(name)}"]`);
+    return listEl.querySelector(
+      `.sound-browser__item[data-sound-name="${cssEscape(name)}"]`,
+    );
   }
 
   function matchCategory(s, c) {
     switch (c) {
-      case 'kits': return !!s.kit;
-      case 'gm': return s.name.startsWith('gm_');
-      case 'synth': return s.type === 'synth';
-      case 'all':
-      default: return true;
+      case "kits":
+        return !!s.kit;
+      case "gm":
+        return s.name.startsWith("gm_");
+      case "synth":
+        return s.type === "synth";
+      case "all":
+      default:
+        return true;
     }
   }
 }
@@ -537,13 +625,15 @@ export function createSoundBrowserPanel({
  * exists when 3+ sounds share the same prefix.
  */
 function collectSounds(soundMapObj) {
-  if (!soundMapObj || typeof soundMapObj !== 'object') {
-    console.warn('[sound-browser] soundMap is empty or invalid:', soundMapObj);
+  if (!soundMapObj || typeof soundMapObj !== "object") {
+    console.warn("[sound-browser] soundMap is empty or invalid:", soundMapObj);
     return [];
   }
   const names = Object.keys(soundMapObj);
   if (names.length === 0) {
-    console.warn('[sound-browser] soundMap has no sounds — has prebake completed?');
+    console.warn(
+      "[sound-browser] soundMap has no sounds — has prebake completed?",
+    );
     return [];
   }
 
@@ -567,12 +657,12 @@ function collectSounds(soundMapObj) {
     const data = entry?.data ?? {};
     const sampleCount = Array.isArray(data.samples)
       ? data.samples.length
-      : (typeof data.samples === 'object' && data.samples != null)
-      ? Object.values(data.samples).reduce(
-          (n, v) => n + (Array.isArray(v) ? v.length : 1),
-          0,
-        )
-      : 1;
+      : typeof data.samples === "object" && data.samples != null
+        ? Object.values(data.samples).reduce(
+            (n, v) => n + (Array.isArray(v) ? v.length : 1),
+            0,
+          )
+        : 1;
     const prefix = splitPrefix(name);
     const kit = prefix && kitPrefixes.has(prefix) ? prefix : null;
     out.push({
@@ -586,30 +676,52 @@ function collectSounds(soundMapObj) {
 }
 
 function splitPrefix(name) {
-  const i = name.indexOf('_');
+  const i = name.indexOf("_");
   if (i <= 0) return null;
   return name.slice(0, i);
 }
 
 function inferType(name) {
-  if (name.startsWith('gm_')) return 'soundfont';
+  if (name.startsWith("gm_")) return "soundfont";
   // Strudel's built-in synth waveform names — the few sounds the soundMap
   // ships with `data.type === 'synth'` are exactly this set, but in case
   // a future bank skips the type field we still want to bucket them.
-  if (['sine', 'sawtooth', 'square', 'triangle', 'pulse', 'supersaw',
-       'pwm', 'noise', 'pink', 'brown', 'white', 'crackle'].includes(name)) {
-    return 'synth';
+  if (
+    [
+      "sine",
+      "sawtooth",
+      "square",
+      "triangle",
+      "pulse",
+      "supersaw",
+      "pwm",
+      "noise",
+      "pink",
+      "brown",
+      "white",
+      "crackle",
+    ].includes(name)
+  ) {
+    return "synth";
   }
-  return 'sample';
+  return "sample";
 }
 
 function bucketLabel(sound) {
   switch (sound.type) {
-    case 'synth': return 'synth';
-    case 'soundfont': return 'soundfonts';
-    case 'sample': return 'samples';
-    default: return sound.type ?? 'other';
+    case "synth":
+      return "synth";
+    case "soundfont":
+      return "soundfonts";
+    case "sample":
+      return "samples";
+    default:
+      return sound.type ?? "other";
   }
+}
+
+function formatGroupLabel(key, sounds) {
+  return sounds[0]?.kit ? key : key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 function byDrumOrder(a, b) {
@@ -625,7 +737,7 @@ function byDrumOrder(a, b) {
 }
 
 function stripKitPrefix(name) {
-  const i = name.indexOf('_');
+  const i = name.indexOf("_");
   return i > 0 ? name.slice(i + 1) : name;
 }
 
@@ -652,8 +764,8 @@ function scanInUse(text, sounds) {
     while (from <= text.length) {
       const i = text.indexOf(name, from);
       if (i < 0) break;
-      const before = i === 0 ? '' : text[i - 1];
-      const after = text[i + name.length] ?? '';
+      const before = i === 0 ? "" : text[i - 1];
+      const after = text[i + name.length] ?? "";
       if (!isWordChar(before) && !isWordChar(after)) {
         out.add(name);
         break;
@@ -672,10 +784,10 @@ function cssEscape(s) {
   // Use the standards CSS.escape if available; the names we get are
   // [a-z0-9_-]+ in practice but defending against future weirdness
   // (`/`, `:`) is cheap.
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
     return CSS.escape(s);
   }
-  return s.replace(/[^a-z0-9_-]/gi, '\\$&');
+  return s.replace(/[^a-z0-9_-]/gi, "\\$&");
 }
 
 function el(tag, className, text) {

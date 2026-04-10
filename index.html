@@ -113,64 +113,96 @@
         </div>
       </aside>
 
-      <footer class="transport" id="transport">
-        <div class="transport__group transport__group--left">
-          <button
-            id="play"
-            class="btn btn--icon"
-            type="button"
-            title="Play (Ctrl/Cmd+Enter in editor)"
-            aria-label="Play"
+      <footer class="transport" id="transport" data-transport-state="idle">
+        <div class="transport__group transport__group--lead">
+          <div
+            class="transport__controls"
+            role="group"
+            aria-label="Transport controls"
           >
-            <span class="btn__icon" data-icon="play"></span>
-          </button>
-          <button
-            id="stop"
-            class="btn btn--icon"
-            type="button"
-            title="Stop (Ctrl/Cmd+. in editor)"
-            aria-label="Stop"
+            <button
+              id="play"
+              class="btn transport__action transport__action--play"
+              type="button"
+              title="Play current pattern (Ctrl/Cmd+Enter)"
+              aria-label="Play current pattern"
+            >
+              <span class="btn__icon" data-icon="play"></span>
+              <span class="btn__label">Play</span>
+            </button>
+            <button
+              id="stop"
+              class="btn transport__action transport__action--stop"
+              type="button"
+              title="Stop playback (Ctrl+. or Alt+.)"
+              aria-label="Stop playback"
+            >
+              <span class="btn__icon" data-icon="square"></span>
+              <span
+                class="btn__label transport__action-label transport__action-label--optional"
+                >Stop</span
+              >
+            </button>
+          </div>
+          <span
+            id="status"
+            class="transport__status"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            >Loading…</span
           >
-            <span class="btn__icon" data-icon="square"></span>
-          </button>
         </div>
 
-        <div class="transport__group transport__group--center">
+        <div
+          class="transport__group transport__group--center"
+          role="group"
+          aria-label="Transport readouts"
+        >
           <span
-            id="bpm-readout"
             class="transport__readout transport__readout--bpm"
-            title="Tempo (assuming 4 beats / cycle)"
-            >– bpm</span
+            title="Tempo estimate (assuming 4 beats per cycle)"
           >
+            <span class="transport__readout-label">BPM</span>
+            <span id="bpm-readout" class="transport__readout-value">–</span>
+          </span>
           <span
-            id="cycle-readout"
             class="transport__readout transport__readout--cycle"
-            title="Current cycle position"
-            >cyc –</span
+            title="Current play position (in cycles)"
           >
+            <span class="transport__readout-label">position</span>
+            <span id="cycle-readout" class="transport__readout-value">–</span>
+          </span>
           <div class="transport__playhead" aria-hidden="true">
+            <div
+              id="playhead-progress"
+              class="transport__playhead-progress"
+            ></div>
             <div id="playhead-dot" class="transport__playhead-dot"></div>
           </div>
         </div>
 
         <div class="transport__group transport__group--right">
-          <span id="status" class="transport__status">loading…</span>
           <span
             id="midi-status"
             class="transport__pill transport__pill--midi"
-            title="MIDI input status"
-            >midi: off</span
+            title="MIDI status"
+            >MIDI…</span
           >
           <button
             id="roll-toggle"
-            class="btn btn--icon"
+            class="btn transport__roll-toggle"
             type="button"
-            title="Toggle piano roll"
-            aria-label="Toggle piano roll"
+            title="Show or hide the piano roll"
+            aria-label="Show or hide the piano roll"
             aria-expanded="true"
             aria-controls="roll-pane"
           >
             <span class="btn__icon" data-icon="chevrons-down-up"></span>
+            <span
+              class="btn__label transport__action-label transport__action-label--optional"
+              >Piano roll</span
+            >
           </button>
         </div>
       </footer>

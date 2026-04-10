@@ -101,21 +101,43 @@ export function mount({
   searchInput.setAttribute("aria-label", "Search patterns");
   searchInput.spellcheck = false;
   searchInput.autocomplete = "off";
+
+  const clearBtn = el("button", "left-rail__search-clear");
+  clearBtn.type = "button";
+  clearBtn.title = "Clear search";
+  clearBtn.setAttribute("aria-label", "Clear search");
+  clearBtn.appendChild(makeIcon("x"));
+  clearBtn.style.display = "none";
+  clearBtn.addEventListener("click", () => {
+    searchInput.value = "";
+    query = "";
+    clearBtn.style.display = "none";
+    renderList();
+    searchInput.focus();
+  });
+
   searchInput.addEventListener("input", () => {
     query = searchInput.value.trim().toLowerCase();
+    clearBtn.style.display = query ? "" : "none";
     renderList();
   });
   searchInput.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       searchInput.value = "";
       query = "";
+      clearBtn.style.display = "none";
       renderList();
     } else if (e.key === "Enter") {
       const first = listEl.querySelector(".left-rail__item");
       if (first) first.click();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const first = listEl.querySelector(".left-rail__item");
+      if (first) first.focus();
     }
   });
   search.appendChild(searchInput);
+  search.appendChild(clearBtn);
   container.appendChild(search);
 
   // List
@@ -124,6 +146,12 @@ export function mount({
   container.appendChild(listEl);
 
   renderList();
+
+  // Scroll the active pattern into view after mount (no animation on first paint).
+  requestAnimationFrame(() => {
+    const activeRow = listEl.querySelector(".left-rail__item.is-active");
+    if (activeRow) activeRow.scrollIntoView({ block: "nearest" });
+  });
 
   // ─── render: re-paint the list rows ───────────────────────────────────
   function renderList() {
@@ -165,12 +193,17 @@ export function mount({
   function buildRow(name, isUser) {
     const row = el("div", "left-rail__item");
     row.setAttribute("role", "option");
+    row.setAttribute("tabindex", "-1");
     row.setAttribute("data-name", name);
     if (isUser) row.setAttribute("data-user", "");
     if (name === activeName) {
       row.classList.add("is-active");
       row.setAttribute("aria-selected", "true");
     }
+
+    const accentEl = el("span", "left-rail__item-accent");
+    accentEl.setAttribute("aria-hidden", "true");
+    row.appendChild(accentEl);
 
     const nameEl = el("span", "left-rail__item-name");
     if (query) {
@@ -195,17 +228,41 @@ export function mount({
     }
     row.appendChild(nameEl);
 
+    const metaEl = el("span", "left-rail__item-meta");
+    metaEl.setAttribute("aria-hidden", "true");
+
     // Modified dot for shipped patterns with working copies.
     if (!isUser && dirtySet.has(name)) {
       const dot = el("span", "left-rail__dirty-dot");
       dot.title = "Modified — right-click to revert";
-      row.appendChild(dot);
+      metaEl.appendChild(dot);
     }
+
+    row.appendChild(metaEl);
 
     row.addEventListener("click", () => {
       dismissContextMenu();
       setCurrent(name);
       onSelect(name);
+    });
+
+    // Keyboard navigation within the list.
+    row.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const next = nextItem(row);
+        if (next) next.focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const prev = prevItem(row);
+        if (prev) prev.focus();
+        else searchInput.focus();
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        row.click();
+      } else if (e.key === "Escape") {
+        searchInput.focus();
+      }
     });
 
     // Context menu on right-click.
@@ -215,6 +272,21 @@ export function mount({
     });
 
     return row;
+  }
+
+  /** Next .left-rail__item sibling, skipping dividers. */
+  function nextItem(current) {
+    let el = current.nextElementSibling;
+    while (el && !el.classList.contains("left-rail__item"))
+      el = el.nextElementSibling;
+    return el;
+  }
+  /** Previous .left-rail__item sibling, skipping dividers. */
+  function prevItem(current) {
+    let el = current.previousElementSibling;
+    while (el && !el.classList.contains("left-rail__item"))
+      el = el.previousElementSibling;
+    return el;
   }
 
   // ─── Context menu ─────────────────────────────────────────────────────

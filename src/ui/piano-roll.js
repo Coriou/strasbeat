@@ -74,6 +74,14 @@ function ensureState(canvas) {
       // Last frame's t1 in cycles, for detecting backward time jumps
       // (stop+play, scrub, pattern eval that resets time).
       lastT1: -Infinity,
+      // Hover state: the currently hovered hit-map entry, or null. Updated
+      // by the mousemove listener, consumed by the renderer to draw a
+      // highlight ring and by the cursor-style logic.
+      hoveredHit: null,
+      // Error flash: performance.now() timestamp until which to draw a
+      // brief red tint at the top of the note area. Set by the click
+      // handler when a CM6 dispatch call fails.
+      errorFlashUntil: 0,
     };
     stateByCanvas.set(canvas, s);
   }
@@ -213,7 +221,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   syncEditorState(state, state.view);
 
   if (!state.clickBound) {
-    bindClick(canvas, state);
+    bindInteraction(canvas, state);
     state.clickBound = true;
   }
 
@@ -402,6 +410,39 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     }
   }
 
+  // ── Hover highlight ───────────────────────────────────────────────────
+  // Draw a subtle ring around the hovered pill so users know the roll is
+  // clickable before they click. Only drawn when the cursor is over a pill.
+  if (state.hoveredHit) {
+    const hh = state.hoveredHit;
+    const r = Math.max(
+      0,
+      Math.min(PILL_RADIUS + 1, (hh.h + 2) / 2, (hh.w + 2) / 2),
+    );
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = tokens.text;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(hh.x - 1, hh.y - 1, hh.w + 2, hh.h + 2, r);
+    } else {
+      ctx.rect(hh.x - 1, hh.y - 1, hh.w + 2, hh.h + 2);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // ── Error flash ──────────────────────────────────────────────────────
+  // Brief red tint across the note area when a click-to-locate dispatch
+  // fails. Fades over ~400ms so it reads as a blink, not a state.
+  const flashRemaining = state.errorFlashUntil - performance.now();
+  if (flashRemaining > 0) {
+    ctx.globalAlpha = Math.min(0.18, 0.18 * (flashRemaining / 400));
+    ctx.fillStyle = tokens.accent;
+    ctx.fillRect(noteAreaX, noteAreaY, noteAreaW, noteAreaH);
+    ctx.globalAlpha = 1;
+  }
+
   // ── Playhead ─────────────────────────────────────────────────────────
   const px = Math.round(timeToX(time)) + 0.5;
   // Subtle accent glow behind the line.
@@ -479,43 +520,76 @@ function drawNotePill(ctx, x, y, w, h, color, isActive, dynAlpha = 1) {
     // failing back to a sharp rect is preferable to throwing.
     ctx.rect(x, y, w, h);
   }
-  ctx.globalAlpha = (isActive ? 0.9 : 0.35) * dynAlpha;
+  ctx.globalAlpha = (isActive ? 0.92 : 0.35) * dynAlpha;
   ctx.fillStyle = color;
   ctx.fill();
   ctx.globalAlpha = (isActive ? 1.0 : 0.5) * dynAlpha;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
   ctx.stroke();
+
+  // Active pill: subtle bright top-edge highlight to reinforce "playing now"
+  // beyond the opacity change alone. Thin white line across the top of the
+  // pill, low opacity so it reads as a sheen, not an outline.
+  if (isActive && h >= 4 && w >= 4) {
+    ctx.globalAlpha = 0.35 * dynAlpha;
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + r, y + 0.5);
+    ctx.lineTo(x + w - r, y + 0.5);
+    ctx.stroke();
+  }
 }
 
-function bindClick(canvas, state) {
+// Hit-test helper shared by click and mousemove. Returns the matched hit
+// entry or null.
+function hitTest(state, cx, cy) {
+  for (let i = state.hits.length - 1; i >= 0; i--) {
+    const hit = state.hits[i];
+    if (
+      cx >= hit.x &&
+      cx <= hit.x + hit.w &&
+      cy >= hit.y &&
+      cy <= hit.y + hit.h
+    ) {
+      return hit;
+    }
+  }
+  return null;
+}
+
+function bindInteraction(canvas, state) {
+  // Click → jump to source location in the editor.
   canvas.addEventListener("click", (e) => {
     const view = state.view;
     if (!view) return;
     const rect = canvas.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    // Iterate from the end so the most recently drawn pill (top z-order)
-    // wins ties. O(n) over visible hits is fine — typically a few dozen.
-    for (let i = state.hits.length - 1; i >= 0; i--) {
-      const hit = state.hits[i];
-      if (
-        cx >= hit.x &&
-        cx <= hit.x + hit.w &&
-        cy >= hit.y &&
-        cy <= hit.y + hit.h
-      ) {
-        try {
-          view.dispatch({
-            selection: { anchor: hit.start, head: hit.end },
-            scrollIntoView: true,
-          });
-          view.focus?.();
-        } catch (err) {
-          console.warn("[strasbeat/piano-roll] dispatch failed:", err);
-        }
-        return;
-      }
+    const hit = hitTest(state, e.clientX - rect.left, e.clientY - rect.top);
+    if (!hit) return;
+    try {
+      view.dispatch({
+        selection: { anchor: hit.start, head: hit.end },
+        scrollIntoView: true,
+      });
+      view.focus?.();
+    } catch (err) {
+      console.warn("[strasbeat/piano-roll] dispatch failed:", err);
+      // Visual flash so the user knows the click didn't just vanish.
+      state.errorFlashUntil = performance.now() + 400;
     }
+  });
+
+  // Mousemove → cursor affordance + hover highlight for clickable pills.
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const hit = hitTest(state, e.clientX - rect.left, e.clientY - rect.top);
+    state.hoveredHit = hit;
+    canvas.style.cursor = hit ? "pointer" : "";
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    state.hoveredHit = null;
+    canvas.style.cursor = "";
   });
 }

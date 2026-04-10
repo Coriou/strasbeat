@@ -125,6 +125,7 @@ export function createExportPanel({
   function create(container) {
     root = container;
     root.classList.add("export-panel");
+    root.appendChild(buildHeader());
 
     // ─── Controls block ────────────────────────────────────────────────
     // Three rows: filename, cycles, sample rate. Every row shares the
@@ -144,7 +145,10 @@ export function createExportPanel({
     filenameInput.autocomplete = "off";
     filenameInput.value = getPatternName() || "untitled";
     filenameInput.addEventListener("keydown", onInputKeydown);
-    filenameRow.control.appendChild(filenameInput);
+    const filenameField = el("div", "export-panel__field");
+    filenameField.appendChild(filenameInput);
+    filenameField.appendChild(el("span", "export-panel__suffix", ".wav"));
+    filenameRow.control.appendChild(filenameField);
     controls.appendChild(filenameRow.row);
 
     // Cycles — number input with min/max validation deferred until the
@@ -205,6 +209,13 @@ export function createExportPanel({
     exportBtn.appendChild(btnLabel);
     exportBtn.addEventListener("click", onExportClick);
     root.appendChild(exportBtn);
+
+    const exportHint = el(
+      "div",
+      "export-panel__hint",
+      "Offline render. .wav is added automatically.",
+    );
+    root.appendChild(exportHint);
 
     // ─── Progress row (hidden until a render starts) ──────────────────
     progressRow = el("div", "export-panel__progress");
@@ -302,6 +313,22 @@ export function createExportPanel({
   }
 
   // ─── Public API (host → panel) ────────────────────────────────────────
+
+  function buildHeader() {
+    const header = el("div", "export-panel__header");
+    const titleWrap = el("div", "export-panel__title-wrap");
+    titleWrap.appendChild(el("div", "export-panel__eyebrow", "Offline render"));
+    titleWrap.appendChild(el("div", "export-panel__title", "Export WAV"));
+    titleWrap.appendChild(
+      el(
+        "div",
+        "export-panel__meta",
+        "Render the current pattern to disk with the current settings.",
+      ),
+    );
+    header.appendChild(titleWrap);
+    return header;
+  }
 
   function showProgress(ratio) {
     if (!mounted) return;

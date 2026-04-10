@@ -1,3 +1,8 @@
+import {
+  installDefaultStrudelLogger,
+  shouldIgnoreStrudelLog,
+} from "./strudel-logger.js";
+
 // ─── Export current pattern → WAV ────────────────────────────────────────
 // We don't use upstream `renderPatternAudio` because it has a bug: it
 // constructs `new SuperdoughAudioController(offline)` *before* `initAudio()`,
@@ -467,6 +472,7 @@ export async function runExport(options, ctx) {
   // Surface per-hap errors that superdough's errorLogger normally swallows.
   const captured = [];
   setLogger((msg, type) => {
+    if (shouldIgnoreStrudelLog(msg)) return;
     captured.push({ msg, type });
     if (type === "error" || type === "warning") console.warn("[strudel]", msg);
     else console.log("[strudel]", msg);
@@ -592,7 +598,7 @@ export async function runExport(options, ctx) {
     throw err;
   } finally {
     // Restore the default strudel logger.
-    setLogger((msg) => console.log(msg));
+    installDefaultStrudelLogger(setLogger);
     // The render tore down the live audio context — restore it so the
     // user can press play again without reloading.
     try {

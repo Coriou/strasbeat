@@ -18,15 +18,19 @@
 // readout is the authoritative one for non-4/4 patterns.
 
 const BEATS_PER_CYCLE = 4; // see comment above
+const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
 
 /**
  * @param {object} opts
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
- * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean, msg: string}) => void, dispose: () => void }}
+ * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, dispose: () => void }}
  */
 export function mountTransport({ getScheduler }) {
+  const transportEl = mustEl("transport");
+  const stopBtn = mustEl("stop");
   const bpmEl = mustEl("bpm-readout");
   const cycleEl = mustEl("cycle-readout");
+  const playheadProgressEl = mustEl("playhead-progress");
   const playheadEl = mustEl("playhead-dot");
   const playheadBar = playheadEl.parentElement;
   const statusEl = mustEl("status");
@@ -37,6 +41,7 @@ export function mountTransport({ getScheduler }) {
   let lastCycleText = "";
   let lastPct = -1;
   let lastIdle = null;
+  let playbackState = "idle";
 
   let raf = null;
   // Safety-net poll: catches the case where the scheduler starts via the
@@ -59,6 +64,7 @@ export function mountTransport({ getScheduler }) {
 
   // Initial paint, so we don't show "– bpm" forever if the user never plays.
   tick();
+  setPlaybackState("idle");
 
   function tick() {
     // Don't null raf at the top — keep it non-null so kick()'s guard
@@ -86,10 +92,10 @@ export function mountTransport({ getScheduler }) {
     const bpm = Math.round(cps * 60 * BEATS_PER_CYCLE);
     if (bpm !== lastBpm) {
       lastBpm = bpm;
-      bpmEl.textContent = bpm > 0 ? `${bpm} bpm` : "– bpm";
+      bpmEl.textContent = bpm > 0 ? String(bpm) : "—";
     }
     // Cycle text — show 1 decimal so the eye sees motion.
-    const cycText = started ? `cyc ${cycle.toFixed(1)}` : "cyc –";
+    const cycText = started ? cycle.toFixed(1) : "—";
     if (cycText !== lastCycleText) {
       lastCycleText = cycText;
       cycleEl.textContent = cycText;
@@ -99,6 +105,7 @@ export function mountTransport({ getScheduler }) {
     const pct = Math.round(pos * 1000) / 10; // 1-decimal % to keep DOM writes coarse
     if (pct !== lastPct) {
       lastPct = pct;
+      playheadProgressEl.style.width = `${pct}%`;
       playheadEl.style.left = `${pct}%`;
     }
     const idle = !started;
@@ -106,6 +113,7 @@ export function mountTransport({ getScheduler }) {
       lastIdle = idle;
       playheadBar.classList.toggle("transport__playhead--idle", idle);
     }
+    syncPlaybackState(started);
   }
 
   function kick() {
@@ -115,12 +123,45 @@ export function mountTransport({ getScheduler }) {
 
   function setStatus(text) {
     statusEl.textContent = text;
+    statusEl.title = text;
   }
 
-  function setMidiStatus({ ok, msg }) {
+  function setMidiStatus({ ok, msg, title }) {
     midiPillEl.textContent = msg;
+    midiPillEl.title = title ?? msg;
+    midiPillEl.setAttribute("aria-label", title ?? msg);
+    midiPillEl.classList.toggle("is-idle", ok !== true && ok !== false);
     midiPillEl.classList.toggle("is-ok", ok === true);
     midiPillEl.classList.toggle("is-err", ok === false);
+  }
+
+  function syncPlaybackState(started) {
+    if (started && playbackState !== "playing") {
+      playbackState = "playing";
+    } else if (!started && playbackState === "playing") {
+      playbackState = "idle";
+    }
+    applyPlaybackState(playbackState);
+  }
+
+  function setPlaybackState(state) {
+    playbackState = PLAYBACK_STATES.has(state) ? state : "idle";
+    syncPlaybackState(!!getScheduler()?.started);
+  }
+
+  function applyPlaybackState(state) {
+    transportEl.dataset.transportState = state;
+    stopBtn.disabled = state === "idle";
+    if (state === "queued") {
+      stopBtn.title = "Cancel queued playback";
+      stopBtn.setAttribute("aria-label", "Cancel queued playback");
+    } else if (state === "loading") {
+      stopBtn.title = "Cancel playback start";
+      stopBtn.setAttribute("aria-label", "Cancel playback start");
+    } else {
+      stopBtn.title = "Stop playback (Ctrl+. or Alt+.)";
+      stopBtn.setAttribute("aria-label", "Stop playback");
+    }
   }
 
   function dispose() {
@@ -129,7 +170,7 @@ export function mountTransport({ getScheduler }) {
     clearInterval(poll);
   }
 
-  return { kick, setStatus, setMidiStatus, dispose };
+  return { kick, setStatus, setMidiStatus, setPlaybackState, dispose };
 }
 
 function mustEl(id) {

@@ -343,14 +343,22 @@ export class MidiBridge {
 
   async start() {
     if (typeof navigator.requestMIDIAccess !== "function") {
-      this.onStatus({ ok: false, msg: "MIDI: Web MIDI not supported" });
+      this.onStatus({
+        ok: false,
+        msg: "MIDI unavailable",
+        title: "Web MIDI is not supported in this browser.",
+      });
       return false;
     }
     try {
       this.access = await navigator.requestMIDIAccess();
     } catch (e) {
       console.warn("[midi] permission denied:", e);
-      this.onStatus({ ok: false, msg: "MIDI: permission denied" });
+      this.onStatus({
+        ok: false,
+        msg: "MIDI blocked",
+        title: "MIDI permission was denied for this page.",
+      });
       return false;
     }
     this._wireInputs();
@@ -371,11 +379,17 @@ export class MidiBridge {
   _announce() {
     const inputs = this.access ? [...this.access.inputs.values()] : [];
     if (inputs.length === 0) {
-      this.onStatus({ ok: true, msg: "MIDI: ready · plug in a device" });
+      this.onStatus({
+        ok: null,
+        msg: "No MIDI device",
+        title: "No MIDI device connected. Connect a keyboard at any time.",
+      });
     } else {
+      const names = inputs.map((i) => i.name).join(", ");
       this.onStatus({
         ok: true,
-        msg: `MIDI: ${inputs.map((i) => i.name).join(", ")}`,
+        msg: `MIDI: ${names}`,
+        title: `Connected MIDI input${inputs.length === 1 ? "" : "s"}: ${names}`,
       });
     }
   }
@@ -410,8 +424,9 @@ export class MidiBridge {
     const ctx = getAudioContext();
     if (!ctx || ctx.state !== "running") {
       this.onStatus({
-        ok: true,
-        msg: "MIDI: click the page once to enable audio",
+        ok: null,
+        msg: "MIDI needs audio",
+        title: "Click the page once to enable audio for live MIDI.",
       });
       return;
     }
@@ -447,7 +462,8 @@ export class MidiBridge {
         );
         this.onStatus({
           ok: false,
-          msg: `MIDI: "${presetKey}" sound "${preset.s}" not loaded`,
+          msg: "MIDI preset unavailable",
+          title: `MIDI preset "${presetKey}" could not load sound "${preset.s}".`,
         });
         return;
       }

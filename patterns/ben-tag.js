@@ -17,7 +17,7 @@ const chords = 'Abm Gb Db Db'
 
 lead: progression(chords, {
   bass: true,
-  rythm: "block",
+  rhythm: "block",
 })
   .s("gm_lead_1_square")
   .room("0.25")
@@ -28,7 +28,7 @@ lead: progression(chords, {
 
 leadback: progression(chords, {
   bass: true,
-  rythm: "block",
+  rhythm: "block",
 })
   .s("gm_bassoon")
   .room("0.5")
@@ -40,7 +40,7 @@ leadback: progression(chords, {
 
 choirs: progression(chords, {
   bass: true,
-  rythm: "strum",
+  rhythm: "strum",
 })
   .s("gm_choir_aahs")
   .lpf("1200")

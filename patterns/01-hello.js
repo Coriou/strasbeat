@@ -1,12 +1,12 @@
 export default `setcpm(110 / 4)
 
 drums: stack(
-  s("bd*4").mask("<1 1 1 0>"),
-  s("~ sd ~ sd").mask("<1 1 1 0>"),
-  s("hh*8").gain(0.5).mask("<1 1 1 0>"),
-)
+  s("bd*4"),
+  s("~ sd ~ sd"),
+  s("hh*8").gain(0.5),
+).mask("<1 1 1 0>")
 
-bass: note("[b5, e3, ~, b3]*8".add("<0 <1 -1>>"))
+bass: note("[b2, e3, ~, b3]*8".add("<0 <1 -1>>"))
   .s("gm_acoustic_bass")
   .lpf(sine.range(2200, 2600).slow(8))
   .attack(0.1)
@@ -16,10 +16,10 @@ bass: note("[b5, e3, ~, b3]*8".add("<0 <1 -1>>"))
   .room(0.5)
 
 lead: stack(
-  note("c3 e3 g3 b3").s("gm_electric_guitar_muted").add("<0 <1 -1>>").gain(2),
+  note("c3 e3 g3 b3".add("<0 <1 -1>>")).s("gm_electric_guitar_muted").gain(2),
   note("c3 e3 g3 b3").s("gm_voice_oohs").gain(2),
   note("~ ~ ~ b5").s("triangle").gain(0.05),
-  note("~ e3 ~ b5").s("gm_acoustic_bass").gain(2),
+  note("~ e2 ~ b2").s("gm_acoustic_bass").gain(2),
 )
 
 leadrev: note("c3 e3 g3 b3")

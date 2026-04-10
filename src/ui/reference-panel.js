@@ -47,7 +47,7 @@
 // Pure DOM, no framework. Match the imperative style of left-rail.js,
 // transport.js, and sound-browser.js.
 
-import { makeIcon } from './icons.js';
+import { makeIcon } from "./icons.js";
 
 const SEARCH_DEBOUNCE_MS = 150;
 
@@ -62,36 +62,131 @@ const SEARCH_DEBOUNCE_MS = 150;
 // Tonal, `gain` in Popular / Sound / Effects, etc.
 
 const POPULAR = [
-  'note', 's', 'sound', 'stack', 'cat', 'n', 'gain', 'lpf', 'delay', 'room',
-  'speed', 'pan', 'rev', 'arp', 'chord', 'scale', 'voicing', 'setcpm',
-  'silence',
+  "note",
+  "s",
+  "sound",
+  "stack",
+  "cat",
+  "n",
+  "gain",
+  "lpf",
+  "delay",
+  "room",
+  "speed",
+  "pan",
+  "rev",
+  "arp",
+  "chord",
+  "scale",
+  "voicing",
+  "setcpm",
+  "silence",
 ];
 
 const SOUND = [
-  's', 'sound', 'bank', 'n', 'gain', 'pan', 'orbit', 'speed',
-  'begin', 'end', 'loop', 'cut', 'clip', 'samples',
+  "s",
+  "sound",
+  "bank",
+  "n",
+  "gain",
+  "pan",
+  "orbit",
+  "speed",
+  "begin",
+  "end",
+  "loop",
+  "cut",
+  "clip",
+  "samples",
 ];
 
 const PATTERN = [
-  'stack', 'cat', 'slowcat', 'arrange', 'rev', 'fast', 'slow',
-  'every', 'when', 'sometimes', 'rarely', 'often', 'almostAlways',
-  'almostNever', 'firstOf', 'lastOf', 'jux', 'off', 'struct', 'mask',
-  'euclid', 'iter', 'chunk', 'striate', 'chop', 'splice', 'randcat',
-  'choose', 'wchoose', 'segment', 'range', 'run', 'irand', 'rand',
-  'perlin', 'sine', 'saw', 'tri', 'square',
+  "stack",
+  "cat",
+  "slowcat",
+  "arrange",
+  "rev",
+  "fast",
+  "slow",
+  "every",
+  "when",
+  "sometimes",
+  "rarely",
+  "often",
+  "almostAlways",
+  "almostNever",
+  "firstOf",
+  "lastOf",
+  "jux",
+  "off",
+  "struct",
+  "mask",
+  "euclid",
+  "iter",
+  "chunk",
+  "striate",
+  "chop",
+  "splice",
+  "randcat",
+  "choose",
+  "wchoose",
+  "segment",
+  "range",
+  "run",
+  "irand",
+  "rand",
+  "perlin",
+  "sine",
+  "saw",
+  "tri",
+  "square",
 ];
 
 const EFFECTS = [
-  'lpf', 'hpf', 'bpf', 'lpenv', 'hpenv', 'delay', 'delaytime',
-  'delayfeedback', 'room', 'roomsize', 'shape', 'distort', 'crush',
-  'coarse', 'phaser', 'phaserdepth', 'vibrato', 'vibmod', 'vowel',
-  'pan', 'orbit', 'gain', 'velocity', 'attack', 'decay', 'sustain',
-  'release', 'adsr',
+  "lpf",
+  "hpf",
+  "bpf",
+  "lpenv",
+  "hpenv",
+  "delay",
+  "delaytime",
+  "delayfeedback",
+  "room",
+  "roomsize",
+  "shape",
+  "distort",
+  "crush",
+  "coarse",
+  "phaser",
+  "phaserdepth",
+  "vibrato",
+  "vibmod",
+  "vowel",
+  "pan",
+  "orbit",
+  "gain",
+  "velocity",
+  "attack",
+  "decay",
+  "sustain",
+  "release",
+  "adsr",
 ];
 
 const TONAL = [
-  'note', 'chord', 'scale', 'voicing', 'voicings', 'mode', 'transpose',
-  'add', 'sub', 'mul', 'div', 'octave', 'offset',
+  "note",
+  "chord",
+  "scale",
+  "voicing",
+  "voicings",
+  "mode",
+  "transpose",
+  "add",
+  "sub",
+  "mul",
+  "div",
+  "octave",
+  "offset",
 ];
 
 // Mini-notation operators — synthesized entries, not from strudel-docs
@@ -100,75 +195,121 @@ const TONAL = [
 // of the render path doesn't have to special-case it.
 const MINI_OPERATORS = [
   {
-    name: '*',
-    signature: 'pattern * n',
-    doc: 'Repeat: speed up the pattern n times per cycle. `bd*4` plays four kicks every cycle.',
+    name: "*",
+    signature: "pattern * n",
+    doc: "Repeat: speed up the pattern n times per cycle. `bd*4` plays four kicks every cycle.",
     examples: ['s("bd*4")', 's("hh*8")'],
+    aliases: ["repeat", "multiply", "speed up", "faster"],
   },
   {
-    name: '/',
-    signature: 'pattern / n',
-    doc: 'Slow down: stretch the pattern over n cycles. `bd/2` plays one kick every two cycles.',
+    name: "/",
+    signature: "pattern / n",
+    doc: "Slow down: stretch the pattern over n cycles. `bd/2` plays one kick every two cycles.",
     examples: ['s("bd/2")', 's("[bd sd]/2")'],
+    aliases: ["slow down", "divide", "stretch", "slower"],
   },
   {
-    name: '<>',
-    signature: '<a b c …>',
-    doc: 'Alternate: cycle through values one per cycle. Cycle 0 picks `a`, cycle 1 picks `b`, and so on.',
+    name: "<>",
+    signature: "<a b c …>",
+    doc: "Alternate: cycle through values one per cycle. Cycle 0 picks `a`, cycle 1 picks `b`, and so on.",
     examples: ['s("<bd sd cp>")', 'note("<c e g>").s("piano")'],
+    aliases: ["alternate", "cycle", "switch", "rotate"],
   },
   {
-    name: '[ ]',
-    signature: '[a b c …]',
-    doc: 'Group: pack a sub-pattern into one step. `bd [hh hh]` plays one bd then two hats inside the same step.',
+    name: "[ ]",
+    signature: "[a b c …]",
+    doc: "Group: pack a sub-pattern into one step. `bd [hh hh]` plays one bd then two hats inside the same step.",
     examples: ['s("bd [hh hh] sd hh")'],
+    aliases: ["group", "subdivide", "bracket", "nest"],
   },
   {
-    name: '~',
-    signature: '~',
-    doc: 'Rest: silence for one step. Useful for placing gaps inside a pattern.',
+    name: "~",
+    signature: "~",
+    doc: "Rest: silence for one step. Useful for placing gaps inside a pattern.",
     examples: ['s("bd ~ sd ~")'],
+    aliases: ["rest", "silence", "gap", "pause"],
   },
   {
-    name: '!',
-    signature: 'value!n',
-    doc: 'Replicate: repeat a value n consecutive steps without speeding it up. `bd!3` is shorthand for `bd bd bd`.',
+    name: "!",
+    signature: "value!n",
+    doc: "Replicate: repeat a value n consecutive steps without speeding it up. `bd!3` is shorthand for `bd bd bd`.",
     examples: ['s("bd!3 sd")', 'note("c!2 e!2 g!2")'],
+    aliases: ["replicate", "duplicate", "copy"],
   },
   {
-    name: '@',
-    signature: 'value@n',
-    doc: 'Elongate: make a value take up n steps of cycle space. `bd@3 sd` makes the kick three times as long as the snare.',
+    name: "@",
+    signature: "value@n",
+    doc: "Elongate: make a value take up n steps of cycle space. `bd@3 sd` makes the kick three times as long as the snare.",
     examples: ['s("bd@3 sd")'],
+    aliases: ["elongate", "hold", "sustain", "extend", "weight"],
   },
   {
-    name: '?',
-    signature: 'value? / value?p',
-    doc: 'Degrade: drop the value 50% of the time. Append a probability to override (e.g. `bd?0.2` plays 20% of the time).',
+    name: "?",
+    signature: "value? / value?p",
+    doc: "Degrade: drop the value 50% of the time. Append a probability to override (e.g. `bd?0.2` plays 20% of the time).",
     examples: ['s("hh? hh hh? hh")'],
+    aliases: ["degrade", "random", "probability", "chance", "maybe"],
   },
   {
-    name: '{ }',
-    signature: '{a b, c d e}%n',
-    doc: 'Polymeter: stack two patterns of different lengths and align them every n steps via `%n`.',
+    name: "{ }",
+    signature: "{a b, c d e}%n",
+    doc: "Polymeter: stack two patterns of different lengths and align them every n steps via `%n`.",
     examples: ['s("{bd sd, hh hh hh}%4")'],
+    aliases: ["polymeter", "polyrhythm", "different lengths"],
   },
   {
-    name: ',',
-    signature: '[a, b, c …]',
-    doc: 'Parallel: stack values inside `[]` so they play simultaneously. The mini-language equivalent of `stack(...)`.',
+    name: ",",
+    signature: "[a, b, c …]",
+    doc: "Parallel: stack values inside `[]` so they play simultaneously. The mini-language equivalent of `stack(...)`.",
     examples: ['s("[bd, hh]*4")', 'note("[c, e, g]")'],
+    aliases: ["parallel", "stack", "simultaneous", "layer", "combine"],
   },
 ];
 
 const CATEGORIES = [
-  { id: 'popular', label: 'Popular', set: new Set(POPULAR) },
-  { id: 'sound', label: 'Sound', set: new Set(SOUND) },
-  { id: 'pattern', label: 'Pattern', set: new Set(PATTERN) },
-  { id: 'effects', label: 'Effects', set: new Set(EFFECTS) },
-  { id: 'tonal', label: 'Tonal', set: new Set(TONAL) },
-  { id: 'mini', label: 'Mini', set: null }, // mini gets its own source
-  { id: 'all', label: 'All', set: null },
+  {
+    id: "popular",
+    label: "Popular",
+    description: "Starter moves for sound, timing, and tone-shaping.",
+    set: new Set(POPULAR),
+  },
+  {
+    id: "sound",
+    label: "Sound",
+    description: "Pick sources, layer samples, and shape playback.",
+    set: new Set(SOUND),
+  },
+  {
+    id: "pattern",
+    label: "Pattern",
+    description: "Structure time, variation, and layered sequences.",
+    set: new Set(PATTERN),
+  },
+  {
+    id: "effects",
+    label: "Effects",
+    description: "Filter, space, and texture controls for the signal.",
+    set: new Set(EFFECTS),
+  },
+  {
+    id: "tonal",
+    label: "Tonal",
+    description: "Pitch, harmony, scales, and voicing tools.",
+    set: new Set(TONAL),
+  },
+  {
+    id: "mini",
+    label: "Mini",
+    description: "Operators used inside quoted mini-notation patterns.",
+    set: null,
+    title: "Mini-notation operators (the pattern language inside quotes)",
+  },
+  {
+    id: "all",
+    label: "All",
+    description: "Every documented Strudel function and mini operator.",
+    set: null,
+  },
 ];
 
 // ─── Factory ─────────────────────────────────────────────────────────────
@@ -186,9 +327,8 @@ export function createReferencePanel({
   const entryByName = new Map();
   /** Names of entries currently appearing in the editor buffer. */
   let inUse = new Set();
-  let currentBufferText = '';
-  let query = '';
-  let category = 'popular';
+  let query = "";
+  let category = "popular";
   /** Name of the single accordion-expanded entry, or null. */
   let expandedName = null;
   let activeIndex = -1;
@@ -196,6 +336,8 @@ export function createReferencePanel({
   // DOM refs (re-bound on create()).
   let root = null;
   let searchInput = null;
+  let summaryTitleEl = null;
+  let summaryMetaEl = null;
   let pillsEl = null;
   let listEl = null;
   let countEl = null;
@@ -214,9 +356,9 @@ export function createReferencePanel({
   // ─── Right-rail panel spec ─────────────────────────────────────────────
 
   return {
-    id: 'reference',
-    icon: 'book-open',
-    label: 'API reference',
+    id: "reference",
+    icon: "book-open",
+    label: "API reference",
     create,
     activate,
     deactivate,
@@ -228,48 +370,51 @@ export function createReferencePanel({
 
   function create(container) {
     root = container;
-    root.classList.add('reference-panel');
+    root.classList.add("reference-panel");
 
     // Header — search input.
-    const header = el('div', 'reference-panel__header');
-    const search = el('div', 'reference-panel__search');
-    const searchIcon = el('span', 'reference-panel__search-icon');
-    searchIcon.appendChild(makeIcon('search'));
+    const header = el("div", "reference-panel__header");
+    const search = el("div", "reference-panel__search");
+    const searchIcon = el("span", "reference-panel__search-icon");
+    searchIcon.appendChild(makeIcon("search"));
     search.appendChild(searchIcon);
 
-    searchInput = el('input', 'reference-panel__search-input');
-    searchInput.type = 'text';
-    searchInput.placeholder = 'Search functions…';
-    searchInput.setAttribute('aria-label', 'Search functions');
+    searchInput = el("input", "reference-panel__search-input");
+    searchInput.type = "text";
+    searchInput.placeholder = "Search functions…";
+    searchInput.setAttribute("aria-label", "Search functions");
     searchInput.spellcheck = false;
-    searchInput.autocomplete = 'off';
-    searchInput.addEventListener('input', onSearchInput);
-    searchInput.addEventListener('keydown', onSearchKeydown);
+    searchInput.autocomplete = "off";
+    searchInput.addEventListener("input", onSearchInput);
+    searchInput.addEventListener("keydown", onSearchKeydown);
     search.appendChild(searchInput);
     header.appendChild(search);
+
+    const summary = el("div", "reference-panel__summary");
+    summaryTitleEl = el("div", "reference-panel__summary-title");
+    summaryMetaEl = el("div", "reference-panel__summary-meta");
+    summary.appendChild(summaryTitleEl);
+    summary.appendChild(summaryMetaEl);
+    header.appendChild(summary);
     root.appendChild(header);
 
     // Category pills.
-    pillsEl = el('div', 'reference-panel__pills');
-    pillsEl.setAttribute('role', 'tablist');
-    pillsEl.setAttribute('aria-label', 'Reference category');
+    pillsEl = el("div", "reference-panel__pills");
+    pillsEl.setAttribute("role", "tablist");
+    pillsEl.setAttribute("aria-label", "Reference category");
     for (const c of CATEGORIES) {
-      const pill = document.createElement('button');
-      pill.type = 'button';
-      pill.className = 'reference-panel__pill';
+      const pill = document.createElement("button");
+      pill.type = "button";
+      pill.className = "reference-panel__pill";
       pill.dataset.category = c.id;
       pill.textContent = c.label;
-      pill.setAttribute('role', 'tab');
-      pill.setAttribute('aria-selected', c.id === category ? 'true' : 'false');
-      if (c.id === category) pill.classList.add('is-active');
-      pill.addEventListener('click', () => {
+      if (c.title) pill.title = c.title;
+      pill.setAttribute("role", "tab");
+      pill.setAttribute("aria-selected", c.id === category ? "true" : "false");
+      if (c.id === category) pill.classList.add("is-active");
+      pill.addEventListener("click", () => {
         if (category === c.id) return;
-        category = c.id;
-        for (const p of pillsEl.querySelectorAll('.reference-panel__pill')) {
-          const isMe = p.dataset.category === category;
-          p.classList.toggle('is-active', isMe);
-          p.setAttribute('aria-selected', isMe ? 'true' : 'false');
-        }
+        setCategory(c.id);
         render();
       });
       pillsEl.appendChild(pill);
@@ -277,14 +422,14 @@ export function createReferencePanel({
     root.appendChild(pillsEl);
 
     // List container — scroll region for collapsed/expanded entries.
-    listEl = el('div', 'reference-panel__list');
-    listEl.setAttribute('role', 'listbox');
-    listEl.setAttribute('aria-label', 'Functions');
-    listEl.addEventListener('keydown', onListKeydown);
+    listEl = el("div", "reference-panel__list");
+    listEl.setAttribute("role", "listbox");
+    listEl.setAttribute("aria-label", "Functions");
+    listEl.addEventListener("keydown", onListKeydown);
     root.appendChild(listEl);
 
     // Footer — count of visible / total entries.
-    countEl = el('div', 'reference-panel__count');
+    countEl = el("div", "reference-panel__count");
     root.appendChild(countEl);
 
     mounted = true;
@@ -307,9 +452,8 @@ export function createReferencePanel({
   // ─── Public helpers ────────────────────────────────────────────────────
 
   function setBufferText(text) {
-    currentBufferText = text ?? '';
-    inUse = scanInUse(currentBufferText, allEntries);
-    if (mounted) updateInUseHighlights();
+    inUse = scanInUse(text ?? "", allEntries);
+    if (mounted) render();
   }
 
   /**
@@ -327,21 +471,16 @@ export function createReferencePanel({
       // The right-rail wiring guarantees create() runs before scrollTo()
       // is called from a deep link, but if a future caller violates that
       // ordering we want to fail loudly rather than silently no-op.
-      console.warn('[reference-panel] scrollTo called before mount');
+      console.warn("[reference-panel] scrollTo called before mount");
       return;
     }
     // Reset filters so the entry is visible regardless of current state.
-    if (category !== 'all') {
-      category = 'all';
-      for (const p of pillsEl.querySelectorAll('.reference-panel__pill')) {
-        const isMe = p.dataset.category === 'all';
-        p.classList.toggle('is-active', isMe);
-        p.setAttribute('aria-selected', isMe ? 'true' : 'false');
-      }
+    if (category !== "all") {
+      setCategory("all");
     }
     if (searchInput.value || query) {
-      searchInput.value = '';
-      query = '';
+      searchInput.value = "";
+      query = "";
     }
     expandedName = name;
     render();
@@ -350,17 +489,17 @@ export function createReferencePanel({
       `.reference-panel__entry[data-entry-name="${cssEscape(name)}"]`,
     );
     if (target) {
-      target.scrollIntoView({ block: 'center' });
-      target.classList.add('is-active');
+      target.scrollIntoView({ block: "center" });
+      target.classList.add("is-active");
     }
   }
 
   // ─── Build entries ─────────────────────────────────────────────────────
 
   function buildEntries() {
-    if (!docs || typeof docs !== 'object') {
+    if (!docs || typeof docs !== "object") {
       console.warn(
-        '[reference-panel] strudel-docs.json is empty or invalid:',
+        "[reference-panel] strudel-docs.json is empty or invalid:",
         docs,
       );
       allEntries = [];
@@ -369,7 +508,7 @@ export function createReferencePanel({
     const names = Object.keys(docs);
     if (names.length === 0) {
       console.warn(
-        '[reference-panel] strudel-docs.json has no entries — has `pnpm gen:docs` run?',
+        "[reference-panel] strudel-docs.json has no entries — has `pnpm gen:docs` run?",
       );
     }
 
@@ -379,7 +518,7 @@ export function createReferencePanel({
     const synonymGroups = new Map();
     for (const name of names) {
       const e = docs[name];
-      const key = JSON.stringify({ doc: e.doc ?? '', params: e.params ?? [] });
+      const key = JSON.stringify({ doc: e.doc ?? "", params: e.params ?? [] });
       if (!synonymGroups.has(key)) synonymGroups.set(key, []);
       synonymGroups.get(key).push(name);
     }
@@ -388,18 +527,18 @@ export function createReferencePanel({
     const out = [];
     for (const name of names) {
       const e = docs[name];
-      const key = JSON.stringify({ doc: e.doc ?? '', params: e.params ?? [] });
+      const key = JSON.stringify({ doc: e.doc ?? "", params: e.params ?? [] });
       const group = synonymGroups.get(key) ?? [name];
       const synonyms = group.filter((n) => n !== name);
-      const categories = new Set(['all']);
+      const categories = new Set(["all"]);
       for (const c of CATEGORIES) {
         if (c.set && c.set.has(name)) categories.add(c.id);
       }
       out.push({
         name,
-        source: 'strudel',
+        source: "strudel",
         signature: e.signature ?? `${name}()`,
-        doc: e.doc ?? '',
+        doc: e.doc ?? "",
         params: e.params ?? [],
         examples: e.examples ?? [],
         synonyms,
@@ -412,13 +551,14 @@ export function createReferencePanel({
     for (const m of MINI_OPERATORS) {
       out.push({
         name: m.name,
-        source: 'mini',
+        source: "mini",
         signature: m.signature,
         doc: m.doc,
         params: [],
         examples: m.examples ?? [],
         synonyms: [],
-        categories: new Set(['mini', 'all']),
+        aliases: m.aliases ?? [],
+        categories: new Set(["mini", "all"]),
       });
     }
 
@@ -453,24 +593,33 @@ export function createReferencePanel({
 
     // 2. Filter + rank by query (or sort alpha if no query).
     const ranked = query ? rankEntries(visible, query) : sortAlpha(visible);
+    const categoryDef = getCategory(category);
+    const usedVisibleCount = ranked.filter((entry) =>
+      inUse.has(entry.name),
+    ).length;
 
-    countEl.textContent =
+    updateSummary(categoryDef, ranked.length, usedVisibleCount);
+
+    const countText =
       ranked.length === allEntries.length
         ? `${allEntries.length} entries`
         : `${ranked.length} of ${allEntries.length}`;
+    countEl.textContent = usedVisibleCount
+      ? `${countText} · ${usedVisibleCount} used`
+      : countText;
 
     if (allEntries.length === 0) {
-      const empty = el('div', 'reference-panel__empty', 'no docs loaded');
+      const empty = el("div", "reference-panel__empty", "no docs loaded");
       listEl.appendChild(empty);
       return;
     }
     if (ranked.length === 0) {
       const empty = el(
-        'div',
-        'reference-panel__empty',
+        "div",
+        "reference-panel__empty",
         query
           ? `no functions match "${query}"`
-          : 'no functions in this category',
+          : "no functions in this category",
       );
       listEl.appendChild(empty);
       return;
@@ -487,34 +636,47 @@ export function createReferencePanel({
   }
 
   function buildEntry(entry) {
-    const wrap = el('div', 'reference-panel__entry');
+    const wrap = el("div", "reference-panel__entry");
     wrap.dataset.entryName = entry.name;
-    wrap.setAttribute('role', 'option');
-    wrap.setAttribute('tabindex', '-1');
-    if (inUse.has(entry.name)) wrap.classList.add('is-in-use');
-    if (entry.name === expandedName) wrap.classList.add('is-expanded');
+    wrap.setAttribute("role", "option");
+    wrap.setAttribute("tabindex", "-1");
+    if (entry.name === expandedName) wrap.classList.add("is-expanded");
 
     // Collapsed header — chevron + name. Always rendered.
-    const head = el('button', 'reference-panel__entry-head');
-    head.type = 'button';
+    const head = el("button", "reference-panel__entry-head");
+    head.type = "button";
     head.setAttribute(
-      'aria-expanded',
-      entry.name === expandedName ? 'true' : 'false',
+      "aria-expanded",
+      entry.name === expandedName ? "true" : "false",
     );
-    const chev = el('span', 'reference-panel__entry-chev');
-    chev.appendChild(makeIcon('chevron-down'));
+    const chev = el("span", "reference-panel__entry-chev");
+    chev.appendChild(makeIcon("chevron-down"));
     head.appendChild(chev);
 
-    const nameEl = el('span', 'reference-panel__entry-name');
+    const nameEl = el("span", "reference-panel__entry-name");
     appendHighlightedText(nameEl, entry.name, query);
-    head.appendChild(nameEl);
+    const textWrap = el("span", "reference-panel__entry-text");
+    textWrap.appendChild(nameEl);
+    const preview = buildPreview(entry);
+    if (preview) {
+      textWrap.appendChild(
+        el("span", "reference-panel__entry-preview", preview),
+      );
+    }
+    head.appendChild(textWrap);
 
-    if (entry.source === 'mini') {
-      const tag = el('span', 'reference-panel__entry-tag', 'mini');
+    if (inUse.has(entry.name)) {
+      const state = el("span", "reference-panel__entry-state", "used");
+      state.title = "Appears in the current editor buffer";
+      head.appendChild(state);
+    }
+
+    if (entry.source === "mini") {
+      const tag = el("span", "reference-panel__entry-tag", "mini");
       head.appendChild(tag);
     }
 
-    head.addEventListener('click', (e) => {
+    head.addEventListener("click", (e) => {
       e.preventDefault();
       toggleExpanded(entry.name);
     });
@@ -530,94 +692,89 @@ export function createReferencePanel({
   }
 
   function buildEntryBody(entry) {
-    const body = el('div', 'reference-panel__entry-body');
+    const body = el("div", "reference-panel__entry-body");
+    const overview = el("div", "reference-panel__entry-overview");
 
     // Signature
-    const sig = el('div', 'reference-panel__entry-sig', entry.signature);
-    body.appendChild(sig);
+    const sig = el("div", "reference-panel__entry-sig", entry.signature);
+    overview.appendChild(sig);
 
     // Description
     if (entry.doc) {
-      const desc = el('div', 'reference-panel__entry-doc', entry.doc);
-      body.appendChild(desc);
+      const desc = el("div", "reference-panel__entry-doc", entry.doc);
+      overview.appendChild(desc);
     }
+    body.appendChild(overview);
 
     // Parameters
     if (entry.params && entry.params.length > 0) {
-      const params = el('div', 'reference-panel__entry-params');
+      const paramsSection = buildSection("Parameters");
+      const params = el("div", "reference-panel__entry-params");
       for (const p of entry.params) {
-        const row = el('div', 'reference-panel__entry-param');
-        const pname = el('span', 'reference-panel__entry-param-name', p.name);
-        row.appendChild(pname);
+        const row = el("div", "reference-panel__entry-param");
+        const meta = el("div", "reference-panel__entry-param-head");
+        const pname = el("span", "reference-panel__entry-param-name", p.name);
+        meta.appendChild(pname);
         if (p.type) {
-          const ptype = el('span', 'reference-panel__entry-param-type', p.type);
-          row.appendChild(ptype);
+          const ptype = el("span", "reference-panel__entry-param-type", p.type);
+          meta.appendChild(ptype);
         }
+        row.appendChild(meta);
         if (p.doc) {
-          const pdoc = el(
-            'span',
-            'reference-panel__entry-param-doc',
-            ' — ' + p.doc,
-          );
+          const pdoc = el("div", "reference-panel__entry-param-doc", p.doc);
           row.appendChild(pdoc);
         }
         params.appendChild(row);
       }
-      body.appendChild(params);
+      paramsSection.appendChild(params);
+      body.appendChild(paramsSection);
     }
 
     // Examples
     if (entry.examples && entry.examples.length > 0) {
-      const exSection = el('div', 'reference-panel__entry-examples');
+      const examplesSection = buildSection("Examples");
+      const exSection = el("div", "reference-panel__entry-examples");
       for (const ex of entry.examples) {
-        const pre = document.createElement('pre');
-        pre.className = 'reference-panel__entry-example';
+        const pre = document.createElement("pre");
+        pre.className = "reference-panel__entry-example";
         pre.textContent = ex;
         exSection.appendChild(pre);
       }
-      body.appendChild(exSection);
+      examplesSection.appendChild(exSection);
+      body.appendChild(examplesSection);
     }
 
     // Synonyms — clickable, jump to the alias's entry via scrollTo.
     if (entry.synonyms && entry.synonyms.length > 0) {
-      const syn = el('div', 'reference-panel__entry-synonyms');
-      const label = el(
-        'span',
-        'reference-panel__entry-synonyms-label',
-        'Also: ',
-      );
-      syn.appendChild(label);
-      for (let i = 0; i < entry.synonyms.length; i++) {
-        const a = document.createElement('button');
-        a.type = 'button';
-        a.className = 'reference-panel__entry-synonym';
-        a.textContent = entry.synonyms[i];
-        const synName = entry.synonyms[i];
-        a.addEventListener('click', (e) => {
+      const synSection = buildSection("Also named");
+      const syn = el("div", "reference-panel__entry-synonyms");
+      for (const synName of entry.synonyms) {
+        const a = document.createElement("button");
+        a.type = "button";
+        a.className = "reference-panel__entry-synonym";
+        a.textContent = synName;
+        a.addEventListener("click", (e) => {
           e.stopPropagation();
           scrollTo(synName);
         });
         syn.appendChild(a);
-        if (i < entry.synonyms.length - 1) {
-          syn.appendChild(document.createTextNode(' '));
-        }
       }
-      body.appendChild(syn);
+      synSection.appendChild(syn);
+      body.appendChild(synSection);
     }
 
     // Action buttons.
-    const actions = el('div', 'reference-panel__entry-actions');
+    const actions = el("div", "reference-panel__entry-actions");
 
     // Try is meaningful for any entry that has a runnable example.
     if (entry.examples && entry.examples.length > 0) {
-      const tryBtn = document.createElement('button');
-      tryBtn.type = 'button';
+      const tryBtn = document.createElement("button");
+      tryBtn.type = "button";
       tryBtn.className =
-        'reference-panel__entry-btn reference-panel__entry-btn--primary';
-      tryBtn.textContent = '▶ Try';
-      tryBtn.title =
-        'Replace the editor buffer with this example and play it';
-      tryBtn.addEventListener('click', (e) => {
+        "reference-panel__entry-btn reference-panel__entry-btn--primary";
+      tryBtn.textContent = "▶ Try in editor";
+      tryBtn.title = "Replace the editor buffer with this example and play it";
+      tryBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         triggerTry(entry);
       });
@@ -626,13 +783,13 @@ export function createReferencePanel({
 
     // Insert is only meaningful for actual function entries — mini
     // operators aren't called like functions.
-    if (entry.source === 'strudel') {
-      const insertBtn = document.createElement('button');
-      insertBtn.type = 'button';
-      insertBtn.className = 'reference-panel__entry-btn';
-      insertBtn.textContent = 'Insert';
-      insertBtn.title = 'Insert a call template at the cursor';
-      insertBtn.addEventListener('click', (e) => {
+    if (entry.source === "strudel") {
+      const insertBtn = document.createElement("button");
+      insertBtn.type = "button";
+      insertBtn.className = "reference-panel__entry-btn";
+      insertBtn.textContent = "Insert";
+      insertBtn.title = "Insert a call template at the cursor";
+      insertBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         triggerInsert(entry);
       });
@@ -657,20 +814,44 @@ export function createReferencePanel({
     }
     parent.appendChild(document.createTextNode(text.slice(0, idx)));
     const match = el(
-      'span',
-      'reference-panel__entry-match',
+      "span",
+      "reference-panel__entry-match",
       text.slice(idx, idx + q.length),
     );
     parent.appendChild(match);
     parent.appendChild(document.createTextNode(text.slice(idx + q.length)));
   }
 
-  function updateInUseHighlights() {
-    if (!listEl) return;
-    for (const item of listEl.querySelectorAll('.reference-panel__entry')) {
-      const name = item.dataset.entryName;
-      item.classList.toggle('is-in-use', inUse.has(name));
+  function setCategory(nextCategory) {
+    category = nextCategory;
+    syncPills();
+  }
+
+  function syncPills() {
+    if (!pillsEl) return;
+    for (const p of pillsEl.querySelectorAll(".reference-panel__pill")) {
+      const isMe = p.dataset.category === category;
+      p.classList.toggle("is-active", isMe);
+      p.setAttribute("aria-selected", isMe ? "true" : "false");
     }
+  }
+
+  function updateSummary(categoryDef, visibleCount, usedVisibleCount) {
+    if (!summaryTitleEl || !summaryMetaEl) return;
+
+    if (query) {
+      summaryTitleEl.textContent = `Search results for "${query}"`;
+      summaryMetaEl.textContent =
+        `${visibleCount} match${visibleCount === 1 ? "" : "es"} ` +
+        `in ${categoryDef.label.toLowerCase()}` +
+        (usedVisibleCount ? ` · ${usedVisibleCount} used` : "");
+      return;
+    }
+
+    summaryTitleEl.textContent = categoryDef.description;
+    summaryMetaEl.textContent = usedVisibleCount
+      ? `${usedVisibleCount} in current pattern`
+      : `${visibleCount} ${categoryDef.label.toLowerCase()} entries`;
   }
 
   // ─── Expand / collapse ─────────────────────────────────────────────────
@@ -692,10 +873,10 @@ export function createReferencePanel({
     // Pick the example to send to the editor: prefer the first listed
     // example. If there isn't one, synthesize a minimal pattern that
     // calls the function on top of `s("piano")`.
-    let code = '';
+    let code = "";
     if (entry.examples && entry.examples.length > 0) {
       code = entry.examples[0];
-    } else if (entry.source !== 'strudel') {
+    } else if (entry.source !== "strudel") {
       return;
     } else {
       code = `s("piano").${entry.name}()`;
@@ -711,12 +892,12 @@ export function createReferencePanel({
     try {
       onTry(code);
     } catch (err) {
-      console.warn('[reference-panel] try failed:', err);
+      console.warn("[reference-panel] try failed:", err);
     }
   }
 
   function triggerInsert(entry) {
-    if (entry.source !== 'strudel') return;
+    if (entry.source !== "strudel") return;
     // Intentionally simple heuristic per spec: insert `name()` at the
     // cursor regardless of chainable / standalone usage. The host
     // (main.js) places the cursor between the parens.
@@ -724,7 +905,7 @@ export function createReferencePanel({
     try {
       onInsert(entry.name, template);
     } catch (err) {
-      console.warn('[reference-panel] insert failed:', err);
+      console.warn("[reference-panel] insert failed:", err);
     }
   }
 
@@ -732,19 +913,21 @@ export function createReferencePanel({
 
   function rankEntries(entries, q) {
     // Four-tier rank: exact name > prefix on name > substring in name >
-    // substring in description (or in a synonym name). Within a tier,
+    // substring in description / synonym / alias. Within a tier,
     // ties are broken alphabetically by name so the ordering is stable
     // across identical-rank matches.
     const ql = q.toLowerCase();
     const ranked = [];
     for (const e of entries) {
       const nameL = e.name.toLowerCase();
-      const docL = (e.doc ?? '').toLowerCase();
+      const docL = (e.doc ?? "").toLowerCase();
       let rank = -1;
       if (nameL === ql) rank = 0;
       else if (nameL.startsWith(ql)) rank = 1;
       else if (nameL.includes(ql)) rank = 2;
       else if (e.synonyms.some((s) => s.toLowerCase().includes(ql))) rank = 2;
+      else if (e.aliases && e.aliases.some((a) => a.toLowerCase().includes(ql)))
+        rank = 2;
       else if (docL.includes(ql)) rank = 3;
       if (rank >= 0) ranked.push({ entry: e, rank });
     }
@@ -760,8 +943,8 @@ export function createReferencePanel({
     // mixes both — their single-character names sort before everything
     // else otherwise, which feels noisy.
     return [...entries].sort((a, b) => {
-      const am = a.source === 'mini' ? 1 : 0;
-      const bm = b.source === 'mini' ? 1 : 0;
+      const am = a.source === "mini" ? 1 : 0;
+      const bm = b.source === "mini" ? 1 : 0;
       if (am !== bm) return am - bm;
       return a.name.localeCompare(b.name);
     });
@@ -771,8 +954,8 @@ export function createReferencePanel({
 
   function paintActive() {
     if (!listEl) return;
-    for (const item of listEl.querySelectorAll('.reference-panel__entry')) {
-      item.classList.remove('is-active');
+    for (const item of listEl.querySelectorAll(".reference-panel__entry")) {
+      item.classList.remove("is-active");
     }
     if (activeIndex < 0 || activeIndex >= flatVisible.length) return;
     const name = flatVisible[activeIndex].name;
@@ -780,8 +963,8 @@ export function createReferencePanel({
       `.reference-panel__entry[data-entry-name="${cssEscape(name)}"]`,
     );
     if (target) {
-      target.classList.add('is-active');
-      target.scrollIntoView({ block: 'nearest' });
+      target.classList.add("is-active");
+      target.scrollIntoView({ block: "nearest" });
       target.focus({ preventScroll: true });
     }
   }
@@ -808,11 +991,11 @@ export function createReferencePanel({
   }
 
   function onSearchKeydown(e) {
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       if (searchInput.value) {
         e.preventDefault();
-        searchInput.value = '';
-        query = '';
+        searchInput.value = "";
+        query = "";
         render();
         return;
       }
@@ -820,7 +1003,7 @@ export function createReferencePanel({
       onFocusEditor();
       return;
     }
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       // Flush the debounce so render() has the freshest filter, then
       // jump into the list.
@@ -830,7 +1013,7 @@ export function createReferencePanel({
       moveActive(+1);
       return;
     }
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       clearTimeout(searchTimer);
       query = searchInput.value.trim().toLowerCase();
@@ -845,12 +1028,12 @@ export function createReferencePanel({
   }
 
   function onListKeydown(e) {
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       moveActive(+1);
       return;
     }
-    if (e.key === 'ArrowUp') {
+    if (e.key === "ArrowUp") {
       e.preventDefault();
       if (activeIndex === 0) {
         // Wrap back into the search field at the top.
@@ -863,12 +1046,12 @@ export function createReferencePanel({
       moveActive(-1);
       return;
     }
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       e.preventDefault();
       onFocusEditor();
       return;
     }
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       if (activeIndex < 0) return;
       const entryName = flatVisible[activeIndex].name;
@@ -898,14 +1081,14 @@ function scanInUse(text, entries) {
   const out = new Set();
   if (!text) return out;
   for (const e of entries) {
-    if (e.source === 'mini') continue;
+    if (e.source === "mini") continue;
     const name = e.name;
     let from = 0;
     while (from <= text.length) {
       const i = text.indexOf(name, from);
       if (i < 0) break;
-      const before = i === 0 ? '' : text[i - 1];
-      const after = text[i + name.length] ?? '';
+      const before = i === 0 ? "" : text[i - 1];
+      const after = text[i + name.length] ?? "";
       if (!isWordChar(before) && !isWordChar(after)) {
         out.add(name);
         break;
@@ -921,10 +1104,30 @@ function isWordChar(c) {
 }
 
 function cssEscape(s) {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
     return CSS.escape(s);
   }
-  return s.replace(/[^a-z0-9_-]/gi, '\\$&');
+  return s.replace(/[^a-z0-9_-]/gi, "\\$&");
+}
+
+function getCategory(id) {
+  return (
+    CATEGORIES.find((c) => c.id === id) ?? CATEGORIES[CATEGORIES.length - 1]
+  );
+}
+
+function buildPreview(entry) {
+  const source = entry.doc || entry.signature;
+  if (!source) return "";
+  const compact = source.replace(/\s+/g, " ").trim();
+  if (compact.length <= 64) return compact;
+  return compact.slice(0, 61).trimEnd() + "...";
+}
+
+function buildSection(label) {
+  const section = el("div", "reference-panel__section");
+  section.appendChild(el("div", "reference-panel__section-label", label));
+  return section;
 }
 
 function el(tag, className, text) {

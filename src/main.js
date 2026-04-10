@@ -36,6 +36,10 @@ import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
 import { discoverPatterns, computeDirtySet, getUserPatternNames, createAutosave, handleNewPatternClick } from "./patterns.js"; // prettier-ignore
 import { readStoredCmSettingsFromLocalStorage, applyInitialSettings, dispatchEditorExtensions, THEME_OPTIONS, applyPanelSetting } from "./editor-setup.js"; // prettier-ignore
+import {
+  installDefaultStrudelLogger,
+  shouldIgnoreStrudelLog,
+} from "./strudel-logger.js";
 
 const { evalScope, controls } = strudelCore;
 const { getAudioContext, webaudioOutput, registerSynthSounds, initAudio, initAudioOnFirstClick, setLogger, samples, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
@@ -67,6 +71,7 @@ const shareBtn = document.getElementById("share");
 const midiBarContainer = document.getElementById("midi-bar");
 
 const shellEl = document.querySelector(".shell");
+const transportEl = document.getElementById("transport");
 const leftRailContainer = document.getElementById("left-rail");
 const patternMenuBtn = document.getElementById("pattern-menu");
 const patternMenuName = document.getElementById("pattern-menu-name");
@@ -81,6 +86,7 @@ const rightRailResizeEl = document.getElementById("right-rail-resize");
 hydrateIcons(document);
 applyStoredAccent();
 if (import.meta.env.DEV) document.body.classList.add("dev-mode");
+installDefaultStrudelLogger(setLogger);
 
 // HiDPI piano roll — ResizeObserver handles window resize, right-rail
 // reflow, and DPR changes (e.g. dragging between monitors).
@@ -140,7 +146,6 @@ const INITIAL_STORED_CM_SETTINGS = readStoredCmSettingsFromLocalStorage();
 // surface partial failures rather than silently degrading.
 let bootReady = false;
 let bootFailures = [];
-let pendingPlay = false;
 let _bootResolve;
 const bootPromise = new Promise((r) => {
   _bootResolve = r;
@@ -156,8 +161,7 @@ function setBootProgress(fraction, label) {
   if (label) status.textContent = label;
 }
 
-// Gate play/export/share until boot completes.
-playBtn.disabled = true;
+// Gate export/share until boot completes.
 exportBtn.disabled = true;
 shellEl.classList.add("is-booting");
 
@@ -236,16 +240,14 @@ const editor = new StrudelMirror({
       // ── Finalize boot state ──
       bootFailures = failures;
       bootReady = true;
-      playBtn.disabled = false;
       exportBtn.disabled = false;
       shellEl.classList.remove("is-booting");
       shellEl.classList.add("is-ready");
 
       if (failures.length === 0) {
-        status.textContent = "ready · click play (or Ctrl/Cmd+Enter)";
+        status.textContent = "Ready to play";
       } else {
-        const names = failures.join(", ");
-        status.textContent = `ready · ${failures.length} source(s) failed to load (${names})`;
+        status.textContent = `Ready with ${failures.length} load warning${failures.length === 1 ? "" : "s"}`;
         console.warn("[strasbeat] boot completed with failures:", failures);
       }
 
@@ -254,26 +256,16 @@ const editor = new StrudelMirror({
       setTimeout(() => progressBar.remove(), 600);
 
       _bootResolve();
-
-      // If the user tried to play during loading, fire now.
-      if (pendingPlay) {
-        pendingPlay = false;
-        editor.evaluate();
-        transport.kick();
-      }
     } catch (fatalErr) {
       // Top-level error boundary — boot must ALWAYS resolve so the
       // editor is at least usable (even if sounds didn't load). Without
-      // this, an unhandled throw leaves play disabled and the boot
-      // promise hanging forever.
+      // this, an unhandled throw leaves the boot promise hanging forever.
       console.error("[strasbeat] fatal boot error:", fatalErr);
       bootReady = true;
-      playBtn.disabled = false;
       exportBtn.disabled = false;
       shellEl.classList.remove("is-booting");
       shellEl.classList.add("is-ready");
-      status.textContent =
-        "boot failed — some features may not work. Check console.";
+      status.textContent = "Boot failed. Check console.";
       progressBar.classList.add("boot-progress--done");
       setTimeout(() => progressBar.remove(), 600);
       _bootResolve();
@@ -331,7 +323,7 @@ const leftRail = mountLeftRail({
     const idx = store.getIndex();
     idx.lastOpen = name;
     store.setIndex(idx);
-    transport.setStatus(`loaded "${name}" — press play to hear it`);
+    transport.setStatus(`Loaded "${name}"`);
   },
   onCreate() {
     handleNewPatternClick({
@@ -375,6 +367,7 @@ const leftRail = mountLeftRail({
 const transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
 });
+let playbackRequestId = 0;
 
 // Keeps the top-bar wordmark, left rail highlight, and `currentName` in sync.
 function setCurrentName(name) {
@@ -514,6 +507,7 @@ document.addEventListener("strudel.log", (e) => {
   const type = typeof detail.type === "string" ? detail.type : "";
   const message = detail.message ?? "";
   const data = detail.data ?? null;
+  if (shouldIgnoreStrudelLog(message)) return;
   try {
     if (type === "error") consolePanel.error(message, data);
     else if (type === "warning") consolePanel.warn(message, data);
@@ -544,84 +538,122 @@ bootPromise.then(() => {
 let _firstEvalDone = false;
 const _editorEvaluate = editor.evaluate.bind(editor);
 editor.evaluate = async function patchedEvaluate(...args) {
-  // If prebake is still in progress, show feedback instead of hanging.
-  if (!bootReady) {
-    transport.setStatus("waiting for sounds to finish loading…");
-    await bootPromise;
-  }
+  const evalRequestId = ++playbackRequestId;
 
-  // Health-check: if the AudioContext is closed (e.g. post-export bug,
-  // tab backgrounded on iOS), restore it before evaluating. A suspended
-  // context is normal (autoplay policy) — resume will un-gate it.
   try {
-    const ac = getAudioContext();
-    if (ac.state === "closed") {
-      console.warn("[strasbeat] AudioContext was closed — restoring");
-      setAudioContext(null);
-      setSuperdoughAudioController(null);
-      resetGlobalEffects();
-      await initAudio();
-    } else if (ac.state === "suspended") {
-      await ac.resume();
+    // If prebake is still in progress, keep Play live and queue the start.
+    if (!bootReady) {
+      transport.setPlaybackState("queued");
+      transport.setStatus("Loading sounds…");
+      await bootPromise;
+      if (evalRequestId !== playbackRequestId) return null;
     }
-  } catch (err) {
-    console.warn("[strasbeat] audio context health check failed:", err);
-  }
 
-  try {
-    consolePanel?.divider(currentName || "eval");
-  } catch (err) {
-    console.warn("[strasbeat/console] divider failed:", err);
-  }
-  const result = await _editorEvaluate(...args);
-  try {
-    soundBrowser.setBufferText(editor.code ?? "");
-  } catch (err) {
-    console.warn("[strasbeat/sound-browser] in-use scan failed:", err);
-  }
-  try {
-    referencePanel.setBufferText(editor.code ?? "");
-  } catch (err) {
-    console.warn("[strasbeat/reference-panel] in-use scan failed:", err);
-  }
+    transport.setPlaybackState("loading");
 
-  // Pre-warm: trigger loading of all sounds the pattern uses.
-  // First play: AWAIT pre-warm so every instrument is ready before
-  // cycle 1 — eliminates the "sounds appear gradually" artifact.
-  // Subsequent plays: fire-and-forget (sounds are already cached).
-  try {
-    const pattern = editor.repl?.state?.pattern;
-    const cps = editor.repl?.scheduler?.cps ?? 1;
-    if (pattern) {
-      const haps = pattern.queryArc(0, 4, { _cps: cps });
-      if (!_firstEvalDone) {
-        _firstEvalDone = true;
-        transport.setStatus("loading instruments…");
-        const { warmed, failed } = await prewarmSounds(haps, {
-          getSound,
-          getAudioContext,
-        });
-        if (failed.length) {
-          console.warn(
-            `[strasbeat/prewarm] ${failed.length} sound(s) failed to warm:`,
-            failed,
-          );
-          transport.setStatus(
-            `playing · ${failed.length} sound(s) couldn't load`,
-          );
-        } else {
-          transport.setStatus(`playing · ${warmed} instruments ready`);
-        }
-      } else {
-        prewarmSounds(haps, { getSound, getAudioContext }).catch((err) =>
-          console.warn("[strasbeat/prewarm] background warm failed:", err),
-        );
+    // Health-check: if the AudioContext is closed (e.g. post-export bug,
+    // tab backgrounded on iOS), restore it before evaluating. A suspended
+    // context is normal (autoplay policy) — resume will un-gate it.
+    try {
+      const ac = getAudioContext();
+      if (ac.state === "closed") {
+        console.warn("[strasbeat] AudioContext was closed — restoring");
+        setAudioContext(null);
+        setSuperdoughAudioController(null);
+        resetGlobalEffects();
+        await initAudio();
+      } else if (ac.state === "suspended") {
+        await ac.resume();
       }
+    } catch (err) {
+      console.warn("[strasbeat] audio context health check failed:", err);
     }
-  } catch (err) {
-    console.warn("[strasbeat/prewarm] failed to kick off pre-warm:", err);
-  }
+    if (evalRequestId !== playbackRequestId) return null;
 
+    try {
+      consolePanel?.divider(currentName || "eval");
+    } catch (err) {
+      console.warn("[strasbeat/console] divider failed:", err);
+    }
+    const result = await _editorEvaluate(...args);
+    if (evalRequestId !== playbackRequestId) return result;
+
+    try {
+      soundBrowser.setBufferText(editor.code ?? "");
+    } catch (err) {
+      console.warn("[strasbeat/sound-browser] in-use scan failed:", err);
+    }
+    try {
+      referencePanel.setBufferText(editor.code ?? "");
+    } catch (err) {
+      console.warn("[strasbeat/reference-panel] in-use scan failed:", err);
+    }
+
+    // Pre-warm: trigger loading of all sounds the pattern uses.
+    // First play: AWAIT pre-warm so every instrument is ready before
+    // cycle 1 — eliminates the "sounds appear gradually" artifact.
+    // Subsequent plays: fire-and-forget (sounds are already cached).
+    try {
+      const pattern = editor.repl?.state?.pattern;
+      const cps = editor.repl?.scheduler?.cps ?? 1;
+      if (pattern) {
+        const haps = pattern.queryArc(0, 4, { _cps: cps });
+        if (!_firstEvalDone) {
+          _firstEvalDone = true;
+          transport.setStatus("loading instruments…");
+          const { warmed, failed } = await prewarmSounds(haps, {
+            getSound,
+            getAudioContext,
+          });
+          if (evalRequestId !== playbackRequestId) return result;
+          if (failed.length) {
+            console.warn(
+              `[strasbeat/prewarm] ${failed.length} sound(s) failed to warm:`,
+              failed,
+            );
+            transport.setStatus(
+              `playing · ${failed.length} sound(s) couldn't load`,
+            );
+          } else {
+            transport.setStatus(`playing · ${warmed} instruments ready`);
+          }
+        } else {
+          prewarmSounds(haps, { getSound, getAudioContext }).catch((err) =>
+            console.warn("[strasbeat/prewarm] background warm failed:", err),
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("[strasbeat/prewarm] failed to kick off pre-warm:", err);
+    }
+
+    if (
+      evalRequestId === playbackRequestId &&
+      !editor.repl?.scheduler?.started
+    ) {
+      transport.setPlaybackState("idle");
+    }
+
+    return result;
+  } catch (err) {
+    if (evalRequestId === playbackRequestId) {
+      transport.setPlaybackState("idle");
+    }
+    throw err;
+  }
+};
+
+const _editorStop = editor.stop.bind(editor);
+editor.stop = function patchedStop(...args) {
+  const state = transportEl?.dataset.transportState ?? "idle";
+  playbackRequestId += 1;
+  const result = _editorStop(...args);
+  transport.setPlaybackState("idle");
+  if (state === "queued" || state === "loading") {
+    transport.setStatus("play canceled");
+  } else {
+    transport.setStatus("Stopped");
+  }
   return result;
 };
 
@@ -652,14 +684,7 @@ mountTrackBar({
 // ─── Transport ───────────────────────────────────────────────────────────
 playBtn.addEventListener("click", async () => {
   if (isExportRunning()) {
-    transport.setStatus("export in progress — wait for it to finish");
-    return;
-  }
-  if (!bootReady) {
-    // Sample banks still loading — queue playback so it auto-starts
-    // the moment prebake resolves instead of hanging silently.
-    pendingPlay = true;
-    transport.setStatus("waiting for sounds to finish loading…");
+    transport.setStatus("Export in progress");
     return;
   }
   await editor.evaluate();

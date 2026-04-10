@@ -7,11 +7,12 @@
 .track-bar {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
-  height: 24px;
-  background: var(--surface-1);
-  border-bottom: 1px solid var(--border-soft);
+  gap: var(--space-3);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  min-height: 28px;
+  background: color-mix(in oklch, var(--surface-1) 72%, var(--surface-0));
+  border-bottom: 1px solid
+    color-mix(in oklch, var(--border) 70%, var(--border-soft));
   overflow: hidden;
 }
 
@@ -22,24 +23,68 @@
 }
 
 /* One button per labeled track. */
+.track-bar__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.track-bar__title {
+  color: var(--text-dim);
+  font: 600 9px var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.track-bar__hint {
+  color: var(--text-dim);
+  font: 500 var(--text-xs) var(--font-sans);
+  white-space: nowrap;
+}
+
+.track-bar__entries {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.track-bar__entries::-webkit-scrollbar {
+  display: none;
+}
+
 .track-bar__entry {
+  --track-entry-bg: color-mix(in oklch, var(--surface-2) 82%, var(--surface-1));
+  --track-entry-bd: transparent;
+  --track-entry-fg: var(--text-mut);
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0 var(--space-2);
-  height: 20px;
-  border: none;
+  padding: 0 7px;
+  height: 22px;
+  border: 1px solid var(--track-entry-bd);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--track-entry-bg);
   cursor: pointer;
   font: 500 var(--text-xs) var(--font-mono);
-  color: var(--text);
-  transition: background var(--t-hover);
+  color: var(--track-entry-fg);
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover);
   white-space: nowrap;
 }
 
 .track-bar__entry:hover {
-  background: var(--surface-3);
+  --track-entry-bg: color-mix(in oklch, var(--surface-3) 94%, var(--surface-1));
+  --track-entry-bd: color-mix(in oklch, var(--border) 72%, var(--border-soft));
+  --track-entry-fg: var(--text);
 }
 
 .track-bar__entry:focus-visible {
@@ -47,26 +92,87 @@
   outline-offset: 1px;
 }
 
-/* Muted: dim the whole button + strikethrough on the label. */
 .track-bar__entry--muted {
-  opacity: 0.35;
+  --track-entry-bg: color-mix(in oklch, var(--surface-2) 58%, var(--surface-1));
+  --track-entry-bd: color-mix(
+    in oklch,
+    var(--text-dim) 18%,
+    var(--border-soft)
+  );
+  --track-entry-fg: var(--text-dim);
 }
 
 .track-bar__entry--muted .track-bar__label {
   text-decoration: line-through;
+  text-decoration-thickness: 1px;
 }
 
-/* Soloed: accent underline on the label. */
-.track-bar__entry--soloed .track-bar__label {
-  text-decoration: underline;
-  text-decoration-color: var(--accent);
-  text-underline-offset: 3px;
+.track-bar__entry--soloed {
+  --track-entry-bg: color-mix(
+    in oklch,
+    var(--accent-wash) 78%,
+    var(--surface-2)
+  );
+  --track-entry-bd: color-mix(in oklch, var(--accent) 24%, var(--border-soft));
+  --track-entry-fg: var(--text);
+}
+
+.track-bar__entry--muted.track-bar__entry--soloed {
+  --track-entry-bg: color-mix(
+    in oklch,
+    var(--accent-wash) 58%,
+    var(--surface-2)
+  );
+  --track-entry-bd: color-mix(in oklch, var(--accent) 30%, var(--border));
+  --track-entry-fg: var(--text);
 }
 
 /* Palette dot matching the piano roll layer color. */
 .track-bar__dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--surface-0) 72%, transparent);
+}
+
+.track-bar__entry--muted .track-bar__dot {
+  opacity: 0.55;
+}
+
+.track-bar__state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-3) 82%, var(--surface-1));
+  color: var(--text-dim);
+  font: 600 9px var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.track-bar__states {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.track-bar__state--muted {
+  background: color-mix(in oklch, var(--surface-3) 92%, var(--surface-1));
+  color: var(--text-mut);
+}
+
+.track-bar__state--soloed {
+  background: color-mix(in oklch, var(--accent) 18%, var(--surface-2));
+  color: color-mix(in oklch, var(--accent-hi) 56%, var(--text));
+}
+
+@media (max-width: 900px) {
+  .track-bar__hint {
+    display: none;
+  }
 }
