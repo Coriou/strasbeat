@@ -237,10 +237,6 @@
   height: 16px;
   stroke: currentColor;
 }
-.transport .btn__icon svg {
-  width: 14px;
-  height: 14px;
-}
 
 .btn__label {
   font-size: var(--text-sm);

@@ -147,6 +147,16 @@
   --btn-bg: var(--surface-2);
   --btn-bd: var(--border);
   --btn-fg: var(--text);
+  pointer-events: auto;
+}
+
+.transport[data-transport-state="playing"] .transport__action--stop:hover {
+  --btn-bg: var(--surface-3);
+  --btn-bd: oklch(0.34 0 0);
+}
+
+.transport[data-transport-state="playing"] .transport__action--stop:active {
+  --btn-bg: var(--surface-2);
 }
 
 .transport__readout {
@@ -355,5 +365,21 @@
   .transport__playhead-progress,
   .transport__playhead-dot {
     transition: none;
+  }
+}
+
+/* Touch devices: expand hit regions to meet 44px minimum. The visual
+   height stays 28px; the padding extends the touchable area. */
+@media (pointer: coarse) {
+  .transport__action,
+  .transport__roll-toggle {
+    position: relative;
+  }
+
+  .transport__action::after,
+  .transport__roll-toggle::after {
+    content: "";
+    position: absolute;
+    inset: -8px -4px;
   }
 }
