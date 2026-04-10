@@ -61,12 +61,13 @@
 }
 
 .pattern-menu__chevron {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-right: 1.5px solid var(--text-mut);
-  border-bottom: 1.5px solid var(--text-mut);
-  transform: rotate(45deg) translate(-1px, -1px);
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-mut);
+}
+.pattern-menu__chevron svg {
+  width: 14px;
+  height: 14px;
 }
 
 .top-bar__spacer {

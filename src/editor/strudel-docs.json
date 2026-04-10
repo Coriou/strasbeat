@@ -7577,5 +7577,27 @@
     "doc": "Loads a collection of wavetables to use with `s`",
     "params": [],
     "examples": []
+  },
+  "progression": {
+    "signature": "progression(chords: string, options: object)",
+    "doc": "Turn a one-line chord progression into a playable Strudel pattern.  Accepts absolute chord symbols or Roman numerals (when options.key is set). Voice leading, slash chords, and voicing dictionaries are delegated to strudel/tonal. Returns a real Pattern that chains with .slow(), .gain(), .every(), etc. like any other Strudel source.  Use single quotes in pattern files — the transpiler rewrites double-quoted strings to mini-notation, which silently breaks this function.",
+    "params": [
+      {
+        "name": "chords",
+        "type": "string",
+        "doc": "Space-separated chord symbols or Roman numerals. Per-token modifiers: @N weight (like Strudel's @), *N repeat (like *)."
+      },
+      {
+        "name": "options",
+        "type": "object",
+        "doc": "sound, dict, rhythm (block/strum/comp/arp-up/arp-down/alberti), bass, style (jazz-comp/pop-pad/lo-fi/folk-strum/piano-bare), key"
+      }
+    ],
+    "examples": [
+      "progression('Cm7 F7 Bb^7 Eb^7')",
+      "progression('ii V I', { key: 'C' })",
+      "progression('C G Am F', { style: 'folk-strum', bass: true })",
+      "progression('Am F C G@2')"
+    ]
   }
 }

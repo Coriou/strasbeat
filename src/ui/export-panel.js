@@ -339,7 +339,7 @@ export function createExportPanel({
       return;
     }
     const pct = Math.max(0, Math.min(1, Number(ratio) || 0));
-    if (progressFill) progressFill.style.width = `${(pct * 100).toFixed(1)}%`;
+    if (progressFill) progressFill.style.transform = `scaleX(${pct.toFixed(4)})`;
     if (progressLabel) progressLabel.textContent = `${Math.round(pct * 100)}%`;
   }
 
@@ -351,7 +351,7 @@ export function createExportPanel({
 
     // Pin the progress bar at 100% so the transition from "rendering" to
     // "done" reads naturally — a jump back to 0% would look broken.
-    if (progressFill) progressFill.style.width = "100%";
+    if (progressFill) progressFill.style.transform = "scaleX(1)";
     if (progressLabel) progressLabel.textContent = "100%";
 
     renderWaveform(result.buffer);
@@ -422,7 +422,7 @@ export function createExportPanel({
     progressRow.hidden = true;
     resultSection.hidden = true;
     errorSection.hidden = true;
-    if (progressFill) progressFill.style.width = "0%";
+    if (progressFill) progressFill.style.transform = "scaleX(0)";
     if (progressLabel) progressLabel.textContent = "0%";
     setInputsDisabled(false);
     setExportButtonState("idle");
@@ -492,7 +492,7 @@ export function createExportPanel({
     errorSection.hidden = true;
     resultSection.hidden = true;
     progressRow.hidden = false;
-    if (progressFill) progressFill.style.width = "0%";
+    if (progressFill) progressFill.style.transform = "scaleX(0)";
     if (progressLabel) progressLabel.textContent = "0%";
     setInputsDisabled(true);
     setExportButtonState("running");

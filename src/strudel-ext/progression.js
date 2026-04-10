@@ -66,15 +66,10 @@ const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
 // with slash-chord notation (`Cm7/G`).
 const MODIFIER_RE = /^(.+?)([@*])(\d+)$/;
 
-/**
- * Parse a single chord token into its symbol and optional weight/repeat
- * modifier.  `'G@2'` → `{ symbol: 'G', weight: 2, repeat: 1 }`,
- * `'Am*3'` → `{ symbol: 'Am', weight: 1, repeat: 3 }`.
- *
- * Invalid modifiers (N ≤ 0, both `@` and `*` present) warn and are ignored.
- * @param {string} raw  A single whitespace-split token, e.g. `'Cm7'`, `'G@2'`
- * @returns {{ symbol: string, weight: number, repeat: number }}
- */
+// Parse a single chord token into its symbol and optional weight/repeat
+// modifier.  'G@2' → { symbol: 'G', weight: 2, repeat: 1 },
+// 'Am*3' → { symbol: 'Am', weight: 1, repeat: 3 }.
+// Invalid modifiers (N ≤ 0) warn and are ignored.
 function parseChordToken(raw) {
   const m = MODIFIER_RE.exec(raw);
   if (!m) return { symbol: raw, weight: 1, repeat: 1 };
@@ -98,66 +93,24 @@ function parseChordToken(raw) {
 /**
  * Turn a one-line chord progression into a playable Strudel pattern.
  *
- * Accepts either:
- *   - **absolute** chord symbols (`Cm7 F7 Bb^7`), or
- *   - **Roman numerals** (`ii7 V7 I^7`) when an `options.key` is supplied.
+ * Accepts absolute chord symbols or Roman numerals (when options.key is set).
+ * Voice leading, slash chords, and voicing dictionaries are delegated to
+ * strudel/tonal. Returns a real Pattern that chains with .slow(), .gain(),
+ * .every(), etc. like any other Strudel source.
  *
- * Cycles through the chords at one per cycle and runs them through
- * `chord().dict().voicing()` from @strudel/tonal — so voice leading, slash
- * chord parsing (`Cm7/G`), and the voicing dictionaries (`ireal`,
- * `lefthand`, `triads`, `guidetones`, `legacy`) all come for free.
+ * Use single quotes in pattern files — the transpiler rewrites double-quoted
+ * strings to mini-notation, which silently breaks this function.
  *
- * Returns a real Strudel `Pattern`, so the result chains with `.slow()`,
- * `.gain()`, `.every()`, etc. like any other source.
- *
- * **Roman numeral input** (Phase 3): if the first whitespace-delimited
- * token looks like a Roman numeral (`I`, `ii`, `V7`, `bIII`, `vii°`,
- * `#iv`, …), the entire input is treated as Roman and dispatched
- * through `romanToChord()`. Mixing Roman and absolute tokens in the
- * same call is **not** supported — once detection picks Roman mode,
- * every token must parse as Roman or it produces silence + a warning.
- * Uppercase = major, lowercase = minor; minor keys use natural minor
- * (Aeolian).
- *
- * **Missing key**: if Roman input is detected but no `options.key` is
- * supplied, returns silence and warns — guessing a key would be worse
- * than failing audibly.
- *
- * Supports mini-notation-style modifiers on individual chord tokens:
- *   - `@N` (weight): `'Am F C G@2'` — G occupies 2 cycle-lengths (5 total).
- *     Mirrors Strudel's `@` operator.
- *   - `*N` (repeat): `'Am F C G*2'` — G plays twice in its one-cycle slot
- *     (compressed, like `bd*2` in mini-notation).
- *   - `/N` is intentionally unsupported (collides with slash chords).
- *
- * @param {string} chords whitespace-separated chord symbols OR Roman numerals, with optional `@N`/`*N` modifiers. Use single quotes in pattern files — double-quoted strings are rewritten to mini-notation by Strudel's transpiler.
- * @param {object} [options]
- * @param {string} [options.sound='gm_epiano1'] sound name (verify with `strasbeat.hasSound`)
- * @param {string} [options.dict='ireal'] voicing dictionary name
- * @param {string} [options.rhythm='block'] rhythm preset name OR a raw mini-notation arp string
- * @param {boolean|string} [options.bass=false] layer a bass line on the chord roots; pass a sound name to override `gm_acoustic_bass`
- * @param {string} [options.style] style preset that bundles sound + dict + rhythm + FX. Built-in styles: `jazz-comp`, `pop-pad`, `lo-fi`, `folk-strum`, `piano-bare`. Explicit options always override the style — `{ style: 'jazz-comp', sound: 'gm_piano' }` is "jazz comp on a real piano".
- * @param {string} [options.key] required when `chords` is in Roman-numeral form. Major (`'C'`, `'G'`, `'Bb'`) or minor (`'Am'`, `'Cm'`).
- * @returns {Pattern}
- *
+ * @param {string} chords Space-separated chord symbols or Roman numerals. Per-token modifiers: @N weight (like Strudel's @), *N repeat (like *).
+ * @param {object} options sound, dict, rhythm (block/strum/comp/arp-up/arp-down/alberti), bass, style (jazz-comp/pop-pad/lo-fi/folk-strum/piano-bare), key
  * @example
  * progression('Cm7 F7 Bb^7 Eb^7')
  * @example
  * progression('ii V I', { key: 'C' })
  * @example
- * progression('ii7 V7 I^7', { key: 'F', style: 'jazz-comp' })
- * @example
- * progression('i iv v', { key: 'Am', bass: true })
- * @example
- * progression('Cm7 F7 Bb^7', { style: 'jazz-comp' })
- * @example
  * progression('C G Am F', { style: 'folk-strum', bass: true })
  * @example
- * progression('Am F C G@2')  // G held for 2 cycle-lengths
- * @example
- * progression('Am F C G*2')  // G repeated twice (compressed)
- * @example
- * progression('ii V@2 I', { key: 'C' })  // Roman + weight
+ * progression('Am F C G@2')
  */
 export function progression(chords, options = {}) {
   // Defense-in-depth: Strudel's transpiler (plugin-mini.mjs) rewrites every

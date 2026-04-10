@@ -304,6 +304,7 @@ installSoundCompletion(editor.editor, [
     ...Object.keys(strudelMini),
     ...Object.keys(strudelTonal),
     ...Object.keys(strudelWebaudio),
+    ...Object.keys(strudelExt),
   ]),
 ]);
 

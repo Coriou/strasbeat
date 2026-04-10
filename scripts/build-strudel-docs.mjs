@@ -2,13 +2,14 @@
 /**
  * build-strudel-docs.mjs
  *
- * Extracts JSDoc from strudel-source/packages/ and writes a compact JSON
- * index to src/editor/strudel-docs.json for use by hover-docs and
- * signature-hint extensions.
+ * Extracts JSDoc from strudel-source/packages/ AND src/strudel-ext/ and
+ * writes a compact JSON index to src/editor/strudel-docs.json for use by
+ * hover-docs, signature-hint, and autocomplete extensions.
  *
- * Run: node scripts/build-strudel-docs.mjs
+ * Run: node scripts/build-strudel-docs.mjs   (or: pnpm gen:docs)
  *
- * If strudel-source/ is missing, outputs an empty stub with a warning.
+ * strasbeat extension docs (src/strudel-ext/) are always included.
+ * If strudel-source/ is missing, only the extension docs are written.
  */
 import { readdir, readFile, writeFile, access } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -167,49 +168,66 @@ async function scanPackage(pkgDir) {
   return entries;
 }
 
-async function main() {
-  // Check if strudel-source exists
-  try {
-    await access(STRUDEL_SRC);
-  } catch {
-    console.warn(
-      "[build-strudel-docs] strudel-source/ not found — writing empty stub",
-    );
-    await writeFile(OUT, JSON.stringify({}, null, 2) + "\n");
-    return;
-  }
+/**
+ * Add a parsed JSDoc entry to `docs`, building its signature and registering
+ * any synonyms.  Shared by the upstream and strasbeat scan passes.
+ */
+function addEntry(docs, entry) {
+  if (!entry.name || docs[entry.name]) return;
 
-  const docs = {};
-  for (const pkg of SCAN_PACKAGES) {
-    const pkgDir = join(STRUDEL_SRC, pkg);
-    const entries = await scanPackage(pkgDir);
-    for (const entry of entries) {
-      if (!entry.name || docs[entry.name]) continue;
+  const signature = entry.params.length
+    ? `${entry.name}(${entry.params.map((p) => (p.type ? `${p.name}: ${p.type}` : p.name)).join(", ")})`
+    : `${entry.name}()`;
 
-      const signature = entry.params.length
-        ? `${entry.name}(${entry.params.map((p) => (p.type ? `${p.name}: ${p.type}` : p.name)).join(", ")})`
-        : `${entry.name}()`;
+  docs[entry.name] = {
+    signature,
+    doc: entry.description,
+    params: entry.params,
+    examples: entry.examples,
+  };
 
-      docs[entry.name] = {
-        signature,
+  // Register synonyms as separate entries pointing to the same data
+  for (const syn of entry.synonyms) {
+    if (!docs[syn]) {
+      docs[syn] = {
+        signature: signature.replace(entry.name, syn),
         doc: entry.description,
         params: entry.params,
         examples: entry.examples,
       };
-
-      // Register synonyms as separate entries pointing to the same data
-      for (const syn of entry.synonyms) {
-        if (!docs[syn]) {
-          docs[syn] = {
-            signature: signature.replace(entry.name, syn),
-            doc: entry.description,
-            params: entry.params,
-            examples: entry.examples,
-          };
-        }
-      }
     }
   }
+}
+
+async function main() {
+  const docs = {};
+
+  // ── Upstream Strudel packages ─────────────────────────────────────────────
+  let strudelSrcFound = true;
+  try {
+    await access(STRUDEL_SRC);
+  } catch {
+    strudelSrcFound = false;
+    console.warn(
+      "[build-strudel-docs] strudel-source/ not found — upstream Strudel docs will be empty",
+    );
+  }
+
+  if (strudelSrcFound) {
+    for (const pkg of SCAN_PACKAGES) {
+      const pkgDir = join(STRUDEL_SRC, pkg);
+      const entries = await scanPackage(pkgDir);
+      for (const entry of entries) addEntry(docs, entry);
+    }
+  }
+
+  // ── Strasbeat extensions ──────────────────────────────────────────────────
+  // Always scanned so progression() (and future helpers) show up in hover
+  // docs, signature hints, and autocomplete even when strudel-source/ is
+  // absent.  Only exported functions with a public JSDoc are included —
+  // internal helpers use // comments so the scanner skips them.
+  const strasExt = join(ROOT, "src", "strudel-ext");
+  for (const entry of await scanPackage(strasExt)) addEntry(docs, entry);
 
   const count = Object.keys(docs).length;
   await writeFile(OUT, JSON.stringify(docs, null, 2) + "\n");

@@ -288,12 +288,15 @@
 
 .export-panel__progress-fill {
   height: 100%;
-  width: 0%;
+  width: 100%;
   background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(0);
   /* Soft ease so discrete poll steps don't read as stair-steps. The
      240ms budget is intentionally longer than the polling interval
-     (100ms) so the bar keeps moving between updates. */
-  transition: width 240ms linear;
+     (100ms) so the bar keeps moving between updates.
+     scaleX is compositor-only — no layout thrash during the render. */
+  transition: transform 240ms linear;
 }
 
 .export-panel__progress-label {

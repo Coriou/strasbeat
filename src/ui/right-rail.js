@@ -236,10 +236,10 @@ export function mountRightRail({
       btn.type = 'button';
       btn.className = 'right-rail__tab';
       btn.dataset.panelId = id;
+      btn.dataset.tooltip = panel.label;
       btn.setAttribute('role', 'tab');
       btn.setAttribute('aria-controls', 'right-rail-panel');
       btn.setAttribute('aria-label', panel.label);
-      btn.setAttribute('title', panel.label);
       btn.setAttribute('aria-selected', expanded && id === activeId ? 'true' : 'false');
       btn.appendChild(makeIcon(panel.icon));
       btn.addEventListener('click', () => onTabClick(id));

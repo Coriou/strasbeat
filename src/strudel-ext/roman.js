@@ -85,6 +85,7 @@ const ROMAN_RE =
  * common variants (`"Cmaj"`, `"Cmin"`, `"CM"`, `"cm"`). Returns null
  * for any input the parser can't make sense of — callers warn and
  * fall back to silence rather than guessing a key.
+ * @noAutocomplete
  */
 export function parseKey(key) {
   if (typeof key !== "string") return null;
@@ -114,6 +115,7 @@ export function parseKey(key) {
  * Decompose a Roman-numeral chord token into its parts. Returns null
  * if the token doesn't look like a Roman numeral at all (so the
  * caller can decide whether to warn or treat the token as absolute).
+ * @noAutocomplete
  */
 export function parseRoman(numeral) {
   if (typeof numeral !== "string") return null;
@@ -139,6 +141,7 @@ export function parseRoman(numeral) {
  * Used by progression() to decide whether to dispatch the whole input
  * through romanToChord() or treat it as absolute chord symbols. Cheap
  * because it just runs the same regex parseRoman() does.
+ * @noAutocomplete
  */
 export function isRomanToken(token) {
   if (typeof token !== "string" || token === "") return false;
@@ -151,7 +154,7 @@ export function isRomanToken(token) {
 /**
  * Convert a Roman-numeral chord (e.g. "ii7", "V7", "I^7", "bIII",
  * "vii°") plus a key string ("C", "G", "Bb", "Am", "Cm") into an
- * absolute chord symbol that @strudel/tonal can voice ("Dm7", "G7",
+ * absolute chord symbol that strudel/tonal can voice ("Dm7", "G7",
  * "F^7", "Eb", "Bo").
  *
  * Returns null on any parse failure — callers should `[strasbeat]`
@@ -169,6 +172,7 @@ export function isRomanToken(token) {
  *   - Augmented `+` passes through (I+ → C+)
  *   - Minor keys use the *natural* minor scale (Aeolian) — degree v
  *     is minor, not major; harmonic/melodic minor are out of scope
+ * @noAutocomplete
  */
 export function romanToChord(numeral, key) {
   const keyInfo = parseKey(key);

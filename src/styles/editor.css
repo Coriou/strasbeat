@@ -35,5 +35,8 @@
   border-right: 1px solid var(--border-soft);
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
+  /* Inherit font-size from the editor (set by StrudelMirror inline
+     styles on .cm-scroller) so gutter line numbers scale with the
+     user's chosen code size instead of staying fixed at --text-xs. */
+  font-size: inherit;
 }

@@ -139,6 +139,15 @@ extra import — exactly like `note`, `s`, `chord`.
 
 To add a new helper: drop a file under `src/strudel-ext/`, re-export it
 from `index.js`, and it's available in every pattern file on next reload.
+Add a `/** ... */` JSDoc block with `@param` and `@example` tags directly
+above the exported function — `pnpm gen:docs` (alias for
+`node scripts/build-strudel-docs.mjs`) will pick it up and add it to
+`src/editor/strudel-docs.json` so it appears in hover docs, signature
+hints, and autocomplete. Run `pnpm gen:docs` after adding or changing the
+JSDoc and commit the updated JSON alongside the code. For internal helpers
+that pattern authors shouldn't call directly, use `// comments` (not
+`/** */`) or add `@noAutocomplete` to the JSDoc.
+
 Anything you put here is *strasbeat-specific* — it doesn't exist in
 upstream Strudel and won't show up in `strudel.cc/learn/`. Reflect that
 in the docs (STRUDEL.md "Strasbeat extensions" section, README "What
