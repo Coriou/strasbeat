@@ -43,60 +43,8 @@
   margin: 0 var(--space-1);
 }
 
-/* ─── Capture button — recording state ─── */
-
-.btn.capture {
-  position: relative;
-  color: var(--text-mut);
-}
-.btn.capture[aria-pressed="true"],
-.btn.capture.recording {
-  color: var(--rec);
-  border-color: var(--rec);
-  animation: capture-pulse 1.2s ease-in-out infinite;
-}
-.capture__count {
-  position: absolute;
-  bottom: -3px;
-  right: -3px;
-  display: none;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  background: var(--rec);
-  color: var(--text);
-  border-radius: 7px;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 14px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.btn.capture[aria-pressed="true"] .capture__count,
-.btn.capture.recording .capture__count {
-  display: inline-block;
-}
-
-@keyframes capture-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 oklch(0.65 0.22 25 / 0.45); }
-  50%      { box-shadow: 0 0 0 4px oklch(0.65 0.22 25 / 0); }
-}
-
-/* ─── Preset picker — temporarily allowed as a native <select> ─── */
-
-.preset-picker {
-  height: 24px;
-  background: var(--surface-2);
-  color: var(--text);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-size: var(--text-xs);
-  padding: 0 var(--space-2);
-  cursor: pointer;
-}
-.preset-picker:hover { border-color: var(--border); }
-.preset-picker:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Capture button and preset picker have moved to the MIDI bar.
+   See src/styles/midi-bar.css. */
 
 /* ─── Centred readouts (BPM, cycle, playhead) ─── */
 
@@ -186,9 +134,15 @@
 
 /* Narrow viewport — drop the playhead first, then the cycle readout. */
 @media (max-width: 1100px) {
-  .transport__playhead { width: 80px; }
-  .transport__status { max-width: 32ch; }
+  .transport__playhead {
+    width: 80px;
+  }
+  .transport__status {
+    max-width: 32ch;
+  }
 }
 @media (max-width: 900px) {
-  .transport__playhead { display: none; }
+  .transport__playhead {
+    display: none;
+  }
 }

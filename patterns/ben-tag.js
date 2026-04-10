@@ -25,6 +25,17 @@ lead: progression(chords, {
   .pan(sine.slow(1))
   .gain("1")
 
+leadback: progression(chords, {
+  bass: true,
+  rythm: "block",
+})
+  .s("gm_bassoon")
+  .room("0.5")
+  .lpf("800")
+  .pan(sine.slow(4))
+  .gain("0.5")
+  .rev()
+
 choirs: progression(chords, {
   bass: true,
   rythm: "strum",

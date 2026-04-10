@@ -9,11 +9,13 @@
  *   ├──────────────────────────────────────────────────────┤
  *   │ track bar (full, auto-height, hidden when no labels) │  auto
  *   ├──────────────────────────────────────────────────────┤
+ *   │ midi bar (full, auto-height, hidden when no device)  │  auto
+ *   ├──────────────────────────────────────────────────────┤
  *   │ roll (full, collapsible via --roll-h)                │  var(--roll-h)
  *   └──────────────────────────────────────────────────────┘
  *
- * The `auto` track-bar row collapses to 0 when the element is hidden
- * (display: none), so it takes no space in the pre-eval / empty state.
+ * The `auto` track-bar and midi-bar rows collapse to 0 when the element
+ * is hidden (display: none), so they take no space in the default state.
  *
  * --right-rail-w defaults to the collapsed strip width (just the tab bar)
  * and is grown to the user's chosen panel width by JS when expanded. See
@@ -23,12 +25,15 @@
 .shell {
   display: grid;
   grid-template-columns: var(--left-rail-w) 1fr var(--right-rail-w);
-  grid-template-rows: var(--top-bar-h) 1fr var(--transport-h) auto var(--roll-h);
+  grid-template-rows: var(--top-bar-h) 1fr var(--transport-h) auto auto var(
+      --roll-h
+    );
   grid-template-areas:
     "topbar    topbar  topbar"
     "rail      editor  right-rail"
     "transport transport transport"
     "trackbar  trackbar trackbar"
+    "midibar   midibar  midibar"
     "roll      roll    roll";
   height: 100vh;
   width: 100vw;
@@ -51,20 +56,52 @@
   --roll-h: 0px;
 }
 
-.top-bar    { grid-area: topbar; }
-.left-rail  { grid-area: rail; }
-.editor-pane{ grid-area: editor; }
-.right-rail { grid-area: right-rail; }
-.transport  { grid-area: transport; }
-.track-bar  { grid-area: trackbar; min-width: 0; min-height: 0; }
-.roll-pane  { grid-area: roll; }
+.top-bar {
+  grid-area: topbar;
+}
+.left-rail {
+  grid-area: rail;
+}
+.editor-pane {
+  grid-area: editor;
+}
+.right-rail {
+  grid-area: right-rail;
+}
+.transport {
+  grid-area: transport;
+}
+.track-bar {
+  grid-area: trackbar;
+  min-width: 0;
+  min-height: 0;
+}
+.midi-bar {
+  grid-area: midibar;
+  min-width: 0;
+  min-height: 0;
+}
+.roll-pane {
+  grid-area: roll;
+}
 
 /* Adjacent panel seams — sharp, flush, 1px hairlines. */
-.top-bar    { border-bottom: 1px solid var(--border); }
-.left-rail  { border-right:  1px solid var(--border); }
-.right-rail { border-left:   1px solid var(--border); }
-.transport  { border-top:    1px solid var(--border); border-bottom: 1px solid var(--border); }
-.roll-pane  { border-top:    1px solid var(--border-soft); }
+.top-bar {
+  border-bottom: 1px solid var(--border);
+}
+.left-rail {
+  border-right: 1px solid var(--border);
+}
+.right-rail {
+  border-left: 1px solid var(--border);
+}
+.transport {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.roll-pane {
+  border-top: 1px solid var(--border-soft);
+}
 
 /* All panels share the same elevated-by-darkness vocabulary. */
 .top-bar,
@@ -105,7 +142,11 @@
   font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: background var(--t-hover), border-color var(--t-hover), color var(--t-hover), box-shadow var(--t-hover);
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover),
+    box-shadow var(--t-hover);
 }
 
 .btn:hover {
@@ -151,7 +192,10 @@
   height: 16px;
   stroke: currentColor;
 }
-.transport .btn__icon svg { width: 14px; height: 14px; }
+.transport .btn__icon svg {
+  width: 14px;
+  height: 14px;
+}
 
 .btn__label {
   font-size: var(--text-sm);

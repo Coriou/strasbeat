@@ -12,6 +12,7 @@ import * as strudelExt from "./strudel-ext/index.js";
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { MidiBridge, presets as midiPresets } from "./midi-bridge.js";
+import { mountMidiBar } from "./ui/midi-bar.js";
 import { installSoundCompletion } from "./editor/completions/sounds.js";
 import strudelDocs from "./editor/strudel-docs.json";
 import { hydrateIcons } from "./ui/icons.js";
@@ -63,8 +64,7 @@ const stopBtn = document.getElementById("stop");
 const saveBtn = document.getElementById("save");
 const exportBtn = document.getElementById("export-wav");
 const shareBtn = document.getElementById("share");
-const presetPicker = document.getElementById("preset-picker");
-const captureBtn = document.getElementById("capture");
+const midiBarContainer = document.getElementById("midi-bar");
 
 const shellEl = document.querySelector(".shell");
 const leftRailContainer = document.getElementById("left-rail");
@@ -484,7 +484,7 @@ document.addEventListener(
 
 mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
 mountTrackBar({
-  container: document.getElementById('track-bar'),
+  container: document.getElementById("track-bar"),
   view: editor.editor,
   onEvaluate: () => editor.evaluate(),
 });
@@ -558,28 +558,40 @@ if (import.meta.hot) {
 }
 
 // ─── MIDI bridge ─────────────────────────────────────────────────────────
-for (const [key, p] of Object.entries(midiPresets)) {
-  const opt = document.createElement("option");
-  opt.value = key;
-  opt.textContent = p.label ?? key;
-  presetPicker.appendChild(opt);
-}
-presetPicker.value = "epiano";
+let currentPreset = "epiano";
 
 const midi = new MidiBridge({
-  getPreset: () => presetPicker.value,
+  getPreset: () => currentPreset,
   onStatus: (s) => transport.setMidiStatus(s),
   onCaptureChange: (n) => {
     if (midi.isCaptureEnabled())
-      transport.setCaptureState({ recording: true, count: n });
+      midiBar.setCaptureState({ recording: true, count: n });
   },
 });
+
+const midiBar = mountMidiBar({
+  container: midiBarContainer,
+  midi,
+  getPreset: () => currentPreset,
+  onPresetChange: (key) => {
+    currentPreset = key;
+    midiBar.persistState();
+  },
+  onCaptureStateChange: () => {},
+});
+
+// Hydrate icons inside the dynamically built MIDI bar.
+hydrateIcons(midiBarContainer);
+
 midi.start();
+
+// Capture button lives inside the MIDI bar now; find it there.
+const captureBtn = midiBar.getCaptureButton();
 
 captureBtn.addEventListener("click", async () => {
   if (!midi.isCaptureEnabled()) {
     midi.setCaptureEnabled(true);
-    transport.setCaptureState({ recording: true, count: 0 });
+    midiBar.setCaptureState({ recording: true, count: 0 });
     transport.setStatus(
       "capturing MIDI · play something · click again to save",
     );
@@ -587,7 +599,7 @@ captureBtn.addEventListener("click", async () => {
   }
   // stop + save
   midi.setCaptureEnabled(false);
-  transport.setCaptureState({ recording: false });
+  midiBar.setCaptureState({ recording: false });
   const code = midi.buildPatternFromCapture();
   if (!code) {
     transport.setStatus("capture stopped — no notes recorded");

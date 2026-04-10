@@ -31,6 +31,7 @@
 @import "./styles/settings-panel.css";
 @import "./styles/transport.css";
 @import "./styles/track-bar.css";
+@import "./styles/midi-bar.css";
 @import "./styles/roll.css";
 @import "./styles/editor.css";
 @import "./styles/autocomplete.css";

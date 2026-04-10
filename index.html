@@ -133,26 +133,6 @@
           >
             <span class="btn__icon" data-icon="square"></span>
           </button>
-          <span class="transport__sep" aria-hidden="true"></span>
-          <button
-            id="capture"
-            class="btn btn--icon capture"
-            type="button"
-            title="Toggle live MIDI capture — click again to save the captured phrase"
-            aria-label="Capture"
-          >
-            <span class="btn__icon" data-icon="disc"></span>
-            <span id="capture-count" class="capture__count"></span>
-          </button>
-          <!--
-            Preset picker is allowed to remain a native <select> for this task.
-            Replacing it cleanly is a small follow-up — see 01-shell.md "out of scope".
-          -->
-          <select
-            id="preset-picker"
-            class="preset-picker"
-            title="Sound used when you play MIDI keys"
-          ></select>
         </div>
 
         <div class="transport__group transport__group--center">
@@ -196,6 +176,8 @@
       </footer>
 
       <div class="track-bar" id="track-bar"></div>
+
+      <div class="midi-bar" id="midi-bar" hidden></div>
 
       <section class="roll-pane" id="roll-pane">
         <div

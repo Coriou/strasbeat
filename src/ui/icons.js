@@ -26,7 +26,8 @@ import {
   BookOpen,
   Terminal,
   Eraser,
-} from 'lucide';
+  Volume2,
+} from "lucide";
 
 const ICONS = {
   play: Play,
@@ -37,13 +38,14 @@ const ICONS = {
   settings: Settings,
   plus: Plus,
   search: Search,
-  'chevron-down': ChevronDown,
-  'chevrons-down-up': ChevronsDownUp,
+  "chevron-down": ChevronDown,
+  "chevrons-down-up": ChevronsDownUp,
   save: Save,
   music: Music2,
-  'book-open': BookOpen,
+  "book-open": BookOpen,
   terminal: Terminal,
   eraser: Eraser,
+  "volume-2": Volume2,
 };
 
 /**
@@ -63,7 +65,7 @@ export function makeIcon(name, { size, className, ariaLabel } = {}) {
     // for missing Strudel sounds (see CLAUDE.md "Surface silent failures
     // loudly"). A wrong icon name is almost always a typo at the call site.
     console.warn(`[strasbeat/icons] unknown icon "${name}"`);
-    return document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    return document.createElementNS("http://www.w3.org/2000/svg", "svg");
   }
   const attrs = {};
   if (size != null) {
@@ -73,10 +75,10 @@ export function makeIcon(name, { size, className, ariaLabel } = {}) {
   if (className) attrs.class = className;
   const svg = createElement(node, attrs);
   if (ariaLabel) {
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', ariaLabel);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", ariaLabel);
   } else {
-    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute("aria-hidden", "true");
   }
   return svg;
 }
@@ -87,9 +89,9 @@ export function makeIcon(name, { size, className, ariaLabel } = {}) {
  * `index.html` for the placeholders this expands.
  */
 export function hydrateIcons(root = document) {
-  const placeholders = root.querySelectorAll('[data-icon]');
+  const placeholders = root.querySelectorAll("[data-icon]");
   for (const el of placeholders) {
-    const name = el.getAttribute('data-icon');
+    const name = el.getAttribute("data-icon");
     if (!name) continue;
     const svg = makeIcon(name);
     // Replace the inner content of the placeholder so its container styles

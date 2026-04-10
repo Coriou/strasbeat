@@ -30,18 +30,18 @@
 // DOM strip that lives in the shell grid above the roll pane. The canvas no
 // longer draws or hit-tests a legend strip.
 
-import { noteToMidi, freqToMidi, midi2note } from '@strudel/core';
-import { parseLabels } from '../editor/track-labels.js';
-import { PALETTE } from './palette.js';
+import { noteToMidi, freqToMidi, midi2note } from "@strudel/core";
+import { parseLabels } from "../editor/track-labels.js";
+import { PALETTE } from "./palette.js";
 
 // strasbeat patterns assume 4 beats / cycle (matches transport.js's
 // BEATS_PER_CYCLE — see the note there for why this is a project-wide
 // convention rather than something Strudel tracks).
 const BEATS_PER_CYCLE = 4;
-const BOTTOM_LABEL_H = 14;   // reserved strip at the bottom for cycle labels
-const LEFT_GUTTER_W = 44;    // reserved strip on the left for row labels
-const PILL_RADIUS = 3;       // ≈ --radius-sm minus a hair so corners stay crisp
-const MIN_PX_PER_BEAT = 8;   // hide beat lines below this density
+const BOTTOM_LABEL_H = 14; // reserved strip at the bottom for cycle labels
+const LEFT_GUTTER_W = 44; // reserved strip on the left for row labels
+const PILL_RADIUS = 3; // ≈ --radius-sm minus a hair so corners stay crisp
+const MIN_PX_PER_BEAT = 8; // hide beat lines below this density
 // How long a row stays reserved after we last saw any pill on it. The
 // framer's visibleHaps is only ~4 cycles wide and patterns with masks /
 // long periods don't show every value every frame, so we cache row values
@@ -61,7 +61,7 @@ function ensureState(canvas) {
       hits: [],
       view: null,
       doc: null,
-      code: '',
+      code: "",
       labels: [],
       clickBound: false,
       // First-sight → palette index. Persistent across frames so a layer's
@@ -90,7 +90,7 @@ function ensureState(canvas) {
 //   - null when no usable value is present.
 function getValue(hap) {
   let value = hap?.value;
-  if (typeof value !== 'object') {
+  if (typeof value !== "object") {
     value = { value };
   }
   let { note, n, freq, s } = value;
@@ -98,18 +98,18 @@ function getValue(hap) {
     return freqToMidi(freq);
   }
   note = note ?? n;
-  if (typeof note === 'string') {
+  if (typeof note === "string") {
     try {
       return noteToMidi(note);
     } catch {
       return 0;
     }
   }
-  if (typeof note === 'number') {
+  if (typeof note === "number") {
     return note;
   }
   if (s) {
-    return '_' + s;
+    return "_" + s;
   }
   return null;
 }
@@ -121,14 +121,14 @@ function getGroupKey(hap) {
   const locs = hap?.context?.locations;
   if (Array.isArray(locs) && locs.length > 0) {
     const first = locs[0];
-    if (first && typeof first.start === 'number') return `loc:${first.start}`;
+    if (first && typeof first.start === "number") return `loc:${first.start}`;
   }
   const v = hap?.value;
-  if (v && typeof v === 'object') {
-    if (typeof v.s === 'string') return `s:${v.s}`;
+  if (v && typeof v === "object") {
+    if (typeof v.s === "string") return `s:${v.s}`;
     if (v.note != null) return `note:${v.note}`;
   }
-  return 'default';
+  return "default";
 }
 
 // Returns the [start, end] char range of the first location, or null. Used
@@ -137,7 +137,11 @@ function getFirstLocation(hap) {
   const locs = hap?.context?.locations;
   if (Array.isArray(locs) && locs.length > 0) {
     const first = locs[0];
-    if (first && typeof first.start === 'number' && typeof first.end === 'number') {
+    if (
+      first &&
+      typeof first.start === "number" &&
+      typeof first.end === "number"
+    ) {
       return [first.start, first.end];
     }
   }
@@ -154,15 +158,15 @@ function readTokens(canvas) {
     return v || fallback;
   };
   return {
-    bg:         get('--surface-1', '#1f1f1f'),
-    border:     get('--border', '#4d4d4d'),
-    borderSoft: get('--border-soft', '#2e2e2e'),
-    accent:     get('--accent', '#cf418d'),
-    text:       get('--text', '#f5f5f5'),
-    textDim:    get('--text-dim', '#666'),
-    fontSans:   get('--font-sans', 'system-ui, sans-serif'),
-    fontMono:   get('--font-mono', 'ui-monospace, monospace'),
-    textXs:     get('--text-xs', '11px'),
+    bg: get("--surface-1", "#1f1f1f"),
+    border: get("--border", "#4d4d4d"),
+    borderSoft: get("--border-soft", "#2e2e2e"),
+    accent: get("--accent", "#cf418d"),
+    text: get("--text", "#f5f5f5"),
+    textDim: get("--text-dim", "#666"),
+    fontSans: get("--font-sans", "system-ui, sans-serif"),
+    fontMono: get("--font-mono", "ui-monospace, monospace"),
+    textXs: get("--text-xs", "11px"),
   };
 }
 
@@ -292,8 +296,8 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   const fontSize = parseInt(tokens.textXs, 10) || 11;
   ctx.fillStyle = tokens.textDim;
   ctx.font = `500 ${fontSize}px ${tokens.fontSans}`;
-  ctx.textBaseline = 'alphabetic';
-  ctx.textAlign = 'left';
+  ctx.textBaseline = "alphabetic";
+  ctx.textAlign = "left";
   const labelY = h - 3;
   for (let c = firstCycle; c <= t1 + 1e-9; c += 1) {
     const x = Math.round(timeToX(c));
@@ -339,9 +343,9 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   // strings (drum sounds) sort first so they anchor at the bottom of the
   // canvas after y-inversion; numbers (pitched notes) sort after, ascending.
   uniqueValues.sort((a, b) => {
-    if (typeof a === 'number' && typeof b === 'number') return a - b;
-    if (typeof a === 'number') return 1;  // numbers sort AFTER strings
-    if (typeof b === 'number') return -1; // strings sort BEFORE numbers
+    if (typeof a === "number" && typeof b === "number") return a - b;
+    if (typeof a === "number") return 1; // numbers sort AFTER strings
+    if (typeof b === "number") return -1; // strings sort BEFORE numbers
     return String(a).localeCompare(String(b));
   });
 
@@ -352,7 +356,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   const valueToY = (val) => {
     const idx = uniqueValues.indexOf(val);
     // Higher pitch = higher on screen → invert the slot index.
-    const slot = (slotCount - 1) - (idx >= 0 ? idx : 0);
+    const slot = slotCount - 1 - (idx >= 0 ? idx : 0);
     return noteAreaY + (slot / slotCount) * noteAreaH;
   };
 
@@ -402,9 +406,9 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   const px = Math.round(timeToX(time)) + 0.5;
   // Subtle accent glow behind the line.
   const glow = ctx.createLinearGradient(px - 6, 0, px + 6, 0);
-  glow.addColorStop(0, 'transparent');
+  glow.addColorStop(0, "transparent");
   glow.addColorStop(0.5, tokens.accent);
-  glow.addColorStop(1, 'transparent');
+  glow.addColorStop(1, "transparent");
   ctx.globalAlpha = 0.18;
   ctx.fillStyle = glow;
   ctx.fillRect(px - 6, noteAreaY, 12, noteAreaH);
@@ -422,10 +426,13 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   // Note name (C3, Eb4 …) for pitched rows; sound name (bd, sd …) for
   // drum rows. Font size scales with row height so dense fold layouts
   // shrink gracefully; floor of 8px keeps labels readable.
-  const gutterFontSize = Math.min(fontSize, Math.max(8, Math.floor(rowH * 0.65)));
+  const gutterFontSize = Math.min(
+    fontSize,
+    Math.max(8, Math.floor(rowH * 0.65)),
+  );
   ctx.font = `500 ${gutterFontSize}px ${tokens.fontMono}`;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'right';
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "right";
   ctx.globalAlpha = 1;
 
   for (let i = 0; i < uniqueValues.length; i++) {
@@ -442,9 +449,10 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
       ctx.globalAlpha = 1;
     }
 
-    const label = typeof val === 'number'
-      ? midi2note(Math.round(val))            // 60 → "C4", 69 → "A4"
-      : String(val).replace(/^_/, '');        // "_bd" → "bd"
+    const label =
+      typeof val === "number"
+        ? midi2note(Math.round(val)) // 60 → "C4", 69 → "A4"
+        : String(val).replace(/^_/, ""); // "_bd" → "bd"
 
     ctx.fillStyle = tokens.textDim;
     ctx.fillText(label, LEFT_GUTTER_W - 4, cy);
@@ -464,7 +472,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
 function drawNotePill(ctx, x, y, w, h, color, isActive, dynAlpha = 1) {
   const r = Math.max(0, Math.min(PILL_RADIUS, h / 2, w / 2));
   ctx.beginPath();
-  if (typeof ctx.roundRect === 'function') {
+  if (typeof ctx.roundRect === "function") {
     ctx.roundRect(x, y, w, h, r);
   } else {
     // Defensive fallback — every modern target supports roundRect, but
@@ -481,7 +489,7 @@ function drawNotePill(ctx, x, y, w, h, color, isActive, dynAlpha = 1) {
 }
 
 function bindClick(canvas, state) {
-  canvas.addEventListener('click', (e) => {
+  canvas.addEventListener("click", (e) => {
     const view = state.view;
     if (!view) return;
     const rect = canvas.getBoundingClientRect();
@@ -504,7 +512,7 @@ function bindClick(canvas, state) {
           });
           view.focus?.();
         } catch (err) {
-          console.warn('[strasbeat/piano-roll] dispatch failed:', err);
+          console.warn("[strasbeat/piano-roll] dispatch failed:", err);
         }
         return;
       }

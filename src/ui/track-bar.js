@@ -13,11 +13,11 @@
 // (PALETTE[i % 10]), which matches the insertion-order behavior of the piano
 // roll's colorForKey Map when labels are not reordered mid-session.
 
-import { StateEffect } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
-import { parseLabels, toggleMute, toggleSolo } from '../editor/track-labels.js';
-import { computeNewSelection } from '../editor/format.js';
-import { PALETTE } from './palette.js';
+import { StateEffect } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { parseLabels, toggleMute, toggleSolo } from "../editor/track-labels.js";
+import { computeNewSelection } from "../editor/format.js";
+import { PALETTE } from "./palette.js";
 
 export function mountTrackBar({ container, view, onEvaluate }) {
   function rebuild() {
@@ -39,33 +39,38 @@ export function mountTrackBar({ container, view, onEvaluate }) {
       const color = PALETTE[i % PALETTE.length];
       const displayName = label.displayName;
 
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'track-bar__entry';
-      if (label.muted) btn.classList.add('track-bar__entry--muted');
-      if (label.soloed) btn.classList.add('track-bar__entry--soloed');
-      btn.title = label.muted
-        ? `${displayName} (muted) — click to unmute, Shift+click to solo`
-        : `${displayName} — click to mute, Shift+click to solo`;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "track-bar__entry";
+      if (label.muted) btn.classList.add("track-bar__entry--muted");
+      if (label.soloed) btn.classList.add("track-bar__entry--soloed");
+      btn.title =
+        label.muted && label.soloed
+          ? `${displayName} (muted + soloed) — click to unmute, Shift+click to unsolo`
+          : label.muted
+            ? `${displayName} (muted) — click to unmute, Shift+click to solo`
+            : label.soloed
+              ? `${displayName} (soloed) — click to mute, Shift+click to unsolo`
+              : `${displayName} — click to mute, Shift+click to solo`;
 
-      const dot = document.createElement('span');
-      dot.className = 'track-bar__dot';
+      const dot = document.createElement("span");
+      dot.className = "track-bar__dot";
       dot.style.backgroundColor = color;
-      dot.setAttribute('aria-hidden', 'true');
+      dot.setAttribute("aria-hidden", "true");
 
-      const labelEl = document.createElement('span');
-      labelEl.className = 'track-bar__label';
+      const labelEl = document.createElement("span");
+      labelEl.className = "track-bar__label";
       labelEl.textContent = displayName;
 
       btn.appendChild(dot);
       btn.appendChild(labelEl);
 
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener("click", (e) => {
         const currentCode = view.state.doc.toString();
         const oldSelection = view.state.selection;
         const oldDoc = view.state.doc;
         const toggle = e.shiftKey ? toggleSolo : toggleMute;
-        const userEvent = e.shiftKey ? 'input.track-solo' : 'input.track-mute';
+        const userEvent = e.shiftKey ? "input.track-solo" : "input.track-mute";
         const nextCode = toggle(currentCode, displayName);
         if (nextCode === currentCode) return;
         try {
@@ -77,7 +82,7 @@ export function mountTrackBar({ container, view, onEvaluate }) {
           view.focus?.();
           onEvaluate?.();
         } catch (err) {
-          console.warn('[strasbeat/track-bar] toggle failed:', err);
+          console.warn("[strasbeat/track-bar] toggle failed:", err);
         }
       });
 
@@ -89,10 +94,21 @@ export function mountTrackBar({ container, view, onEvaluate }) {
   rebuild();
 
   // Re-render whenever the doc changes: mute/solo toggles, pattern loads, edits.
+  // Debounced to the next animation frame so rapid keystrokes batch into one rebuild.
+  let rebuildScheduled = false;
+  function scheduleRebuild() {
+    if (rebuildScheduled) return;
+    rebuildScheduled = true;
+    requestAnimationFrame(() => {
+      rebuildScheduled = false;
+      rebuild();
+    });
+  }
+
   view.dispatch({
     effects: StateEffect.appendConfig.of(
       EditorView.updateListener.of((update) => {
-        if (update.docChanged) rebuild();
+        if (update.docChanged) scheduleRebuild();
       }),
     ),
   });
