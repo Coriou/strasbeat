@@ -10,6 +10,13 @@
 export const EXPORT_SAMPLE_RATE = 48000;
 export const EXPORT_MAX_POLYPHONY = 1024;
 
+// Module-level export lock — prevents concurrent exports from corrupting
+// the global audio context / controller state.
+let _exportRunning = false;
+export function isExportRunning() {
+  return _exportRunning;
+}
+
 // ─── Pre-warm: force lazy sample/soundfont buffers to load ──────────────
 // Strudel loads audio buffers lazily: the first `superdough()` call for a
 // given sound triggers a `fetch → decodeAudioData` chain whose promise is
@@ -157,7 +164,9 @@ export async function renderPatternToBuffer(
   await prewarmSounds(haps, { getSound, getAudioContext });
 
   const live = getAudioContext();
-  await live.close();
+  if (live.state !== "closed") {
+    await live.close();
+  }
   const offline = new OfflineAudioContext(
     2,
     (cycles / cps) * sampleRate,
@@ -297,10 +306,17 @@ export async function renderPatternToBufferWithProgress(
     .sort((a, b) => a.whole.begin.valueOf() - b.whole.begin.valueOf());
 
   // Pre-warm: force all unique sound buffers to load using the live context.
+  // Await fully — if any sound fetch is still in-flight when we close the
+  // context, its decodeAudioData will reject and poison the cache forever.
   await prewarmSounds(haps, { getSound, getAudioContext });
 
   const live = getAudioContext();
-  await live.close();
+  // Guard: the context may already be closed if the user triggered a rapid
+  // double-export (the mutex in runExport prevents this, but
+  // renderPatternToBuffer is also used by probeRender).
+  if (live.state !== "closed") {
+    await live.close();
+  }
   const offline = new OfflineAudioContext(
     2,
     (cycles / cps) * sampleRate,
@@ -414,6 +430,16 @@ export async function runExport(options, ctx) {
     initAudio,
     superdough,
   } = ctx;
+
+  // ── Mutex: refuse if an export is already in flight ──
+  if (_exportRunning) {
+    const msg = "export already in progress — wait for it to finish";
+    status.textContent = msg;
+    consolePanel?.warn?.(msg);
+    throw new Error(msg);
+  }
+  _exportRunning = true;
+
   const webaudioCtx = {
     getAudioContext,
     getSound,
@@ -470,6 +496,13 @@ export async function runExport(options, ctx) {
 
     status.textContent = `pre-loading sounds for ${onsetHaps.length} events…`;
 
+    // Let any in-flight superdough/decode calls from previous playback
+    // settle against the still-alive live context. Without this pause,
+    // closing the context can reject mid-flight decodeAudioData promises
+    // whose rejections then poison Strudel's private loadCache forever
+    // (there's no public API to clear it).
+    await new Promise((r) => setTimeout(r, 120));
+
     const { rendered, scheduled } = await renderPatternToBufferWithProgress(
       pattern,
       cps,
@@ -489,14 +522,37 @@ export async function runExport(options, ctx) {
     downloadWav(wavArrayBuffer, filename);
 
     const errorCount = captured.filter((c) => c.type === "error").length;
-    if (errorCount)
+    if (errorCount) {
       console.warn(
         `[strasbeat/export] ${errorCount} strudel errors during render — see above`,
       );
+      consolePanel?.warn?.(
+        `export: ${errorCount} strudel error(s) during render — some sounds may be missing`,
+      );
+    }
 
     const stats = computeBufferStats(rendered);
     const duration = rendered.length / rendered.sampleRate;
     const fileSize = wavArrayBuffer.byteLength;
+
+    // Loud silent-export warning — the #1 export footgun.
+    if (stats.peakAmplitude <= 0) {
+      console.error(
+        "[strasbeat/export] SILENT OUTPUT — rendered WAV is all zeros. " +
+          "This usually means the audio controller was built against the " +
+          "wrong context. Check the lazy-init order in renderPatternToBuffer.",
+      );
+      consolePanel?.error?.(
+        "export produced a completely silent file — see console for details",
+      );
+    } else if (stats.peakAmplitude < 0.001) {
+      console.warn(
+        `[strasbeat/export] near-silent output: peak=${stats.peakAmplitude.toFixed(6)}`,
+      );
+      consolePanel?.warn?.(
+        `export: near-silent output (peak ${stats.peakAmplitude.toFixed(6)}) — some sounds may not have loaded`,
+      );
+    }
 
     status.textContent = `exported ${filename}.wav (${scheduled} events, ${cycles} cycle${cycles === 1 ? "" : "s"})`;
     try {
@@ -537,17 +593,55 @@ export async function runExport(options, ctx) {
   } finally {
     // Restore the default strudel logger.
     setLogger((msg) => console.log(msg));
-    // The render torn down the live audio context — restore it so the user
-    // can press play again without reloading.
+    // The render tore down the live audio context — restore it so the
+    // user can press play again without reloading.
     try {
       setAudioContext(null);
       setSuperdoughAudioController(null);
       resetGlobalEffects();
       await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
       editor.repl.scheduler.stop();
+
+      // Verify the restored context is actually usable — a closed or
+      // suspended context that slipped through would cause all subsequent
+      // playback to silently fail. Create a zero-gain oscillator and
+      // start/stop it; if this throws, the context is dead and we need
+      // a hard reset.
+      try {
+        const testCtx = getAudioContext();
+        if (testCtx.state === "closed")
+          throw new Error("context is closed after restore");
+        if (testCtx.state === "suspended") await testCtx.resume();
+        const testOsc = testCtx.createOscillator();
+        const testGain = testCtx.createGain();
+        testGain.gain.value = 0;
+        testOsc.connect(testGain).connect(testCtx.destination);
+        testOsc.start();
+        testOsc.stop(testCtx.currentTime + 0.001);
+        testGain.disconnect();
+      } catch (verifyErr) {
+        console.error(
+          "[strasbeat/export] restored context failed verification — " +
+            "forcing a full reset:",
+          verifyErr,
+        );
+        // Nuclear option: null everything and rebuild from scratch.
+        setAudioContext(null);
+        setSuperdoughAudioController(null);
+        resetGlobalEffects();
+        await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
+        status.textContent =
+          "audio restored after export (required full reset) — press play";
+      }
     } catch (err) {
       console.error("[strasbeat] failed to restore audio after export:", err);
+      status.textContent =
+        "audio restore failed after export — reload the page to continue";
+      consolePanel?.error?.(
+        "failed to restore audio after export — you may need to reload",
+      );
     }
+    _exportRunning = false;
     exportBtn.disabled = false;
     if (exportLabel) exportLabel.textContent = "wav";
   }

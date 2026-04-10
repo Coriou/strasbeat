@@ -30,7 +30,7 @@ import { prompt, confirm } from "./ui/modal.js";
 import { applyStoredAccent, applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
 import { createLocalStore } from "./store.js";
 import { readSharedFromHash, shareCurrent } from "./share.js";
-import { runExport, prewarmSounds } from "./export.js";
+import { runExport, prewarmSounds, isExportRunning } from "./export.js";
 import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate } from "./editor-actions.js"; // prettier-ignore
 import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
@@ -184,62 +184,99 @@ const editor = new StrudelMirror({
   onDraw: (haps, time) =>
     renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor }),
   prebake: async () => {
-    initAudioOnFirstClick();
-    setBootProgress(0.05, "loading modules…");
-    const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelExt); // prettier-ignore
-    await loadModules;
-    setBootProgress(0.15, "loading synth sounds…");
+    try {
+      initAudioOnFirstClick();
+      setBootProgress(0.05, "loading modules…");
+      const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelExt); // prettier-ignore
+      await loadModules;
+      setBootProgress(0.15, "loading synth sounds…");
 
-    const failures = [];
-    const safe = (label, p) =>
-      Promise.resolve(p).catch((e) => {
-        console.warn(`[strasbeat] failed to load ${label}:`, e);
-        failures.push(label);
-      });
+      const failures = [];
+      const safe = (label, p) =>
+        Promise.resolve(p).catch((e) => {
+          console.warn(`[strasbeat] failed to load ${label}:`, e);
+          failures.push(label);
+        });
 
-    // Phase 1: synth sounds (small, fast)
-    await safe("synth sounds", registerSynthSounds());
-    setBootProgress(0.3, "loading soundfonts…");
+      // Timeout wrapper — if a phase takes longer than `ms`, continue with
+      // whatever loaded rather than hanging the boot sequence forever. The
+      // CDN (strudel.cc, GitHub) can be slow or unreachable; the user
+      // should still get a working editor with degraded sound coverage.
+      const BOOT_TIMEOUT_MS = 15_000;
+      const withTimeout = (label, p, ms = BOOT_TIMEOUT_MS) =>
+        safe(
+          label,
+          Promise.race([
+            p,
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`${label}: timed out after ${ms}ms`)),
+                ms,
+              ),
+            ),
+          ]),
+        );
 
-    // Phase 2: soundfonts (medium)
-    await safe("soundfonts", registerSoundfonts());
-    setBootProgress(0.5, "loading samples…");
+      // Phase 1: synth sounds (small, fast — no timeout needed)
+      await safe("synth sounds", registerSynthSounds());
+      setBootProgress(0.3, "loading soundfonts…");
 
-    // Phase 3: sample banks (large, in parallel as they're independent)
-    // strudel.cc has no CORS headers, so we proxy via vite.config.js
-    await Promise.all([
-      safe("dirt-samples", samples("github:tidalcycles/dirt-samples")),
-      safe('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/')), // prettier-ignore
-    ]);
-    setBootProgress(1.0);
+      // Phase 2: soundfonts (medium — timeout protects against CDN issues)
+      await withTimeout("soundfonts", registerSoundfonts());
+      setBootProgress(0.5, "loading samples…");
 
-    // ── Finalize boot state ──
-    bootFailures = failures;
-    bootReady = true;
-    playBtn.disabled = false;
-    exportBtn.disabled = false;
-    shellEl.classList.remove("is-booting");
-    shellEl.classList.add("is-ready");
+      // Phase 3: sample banks (large, in parallel as they're independent)
+      // strudel.cc has no CORS headers, so we proxy via vite.config.js
+      await Promise.all([
+        withTimeout("dirt-samples", samples("github:tidalcycles/dirt-samples")),
+        withTimeout('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/')), // prettier-ignore
+      ]);
+      setBootProgress(1.0);
 
-    if (failures.length === 0) {
-      status.textContent = "ready · click play (or Ctrl/Cmd+Enter)";
-    } else {
-      const names = failures.join(", ");
-      status.textContent = `ready · ${failures.length} source(s) failed to load (${names})`;
-      console.warn("[strasbeat] boot completed with failures:", failures);
-    }
+      // ── Finalize boot state ──
+      bootFailures = failures;
+      bootReady = true;
+      playBtn.disabled = false;
+      exportBtn.disabled = false;
+      shellEl.classList.remove("is-booting");
+      shellEl.classList.add("is-ready");
 
-    // Fade out progress bar.
-    progressBar.classList.add("boot-progress--done");
-    setTimeout(() => progressBar.remove(), 600);
+      if (failures.length === 0) {
+        status.textContent = "ready · click play (or Ctrl/Cmd+Enter)";
+      } else {
+        const names = failures.join(", ");
+        status.textContent = `ready · ${failures.length} source(s) failed to load (${names})`;
+        console.warn("[strasbeat] boot completed with failures:", failures);
+      }
 
-    _bootResolve();
+      // Fade out progress bar.
+      progressBar.classList.add("boot-progress--done");
+      setTimeout(() => progressBar.remove(), 600);
 
-    // If the user tried to play during loading, fire now.
-    if (pendingPlay) {
-      pendingPlay = false;
-      editor.evaluate();
-      transport.kick();
+      _bootResolve();
+
+      // If the user tried to play during loading, fire now.
+      if (pendingPlay) {
+        pendingPlay = false;
+        editor.evaluate();
+        transport.kick();
+      }
+    } catch (fatalErr) {
+      // Top-level error boundary — boot must ALWAYS resolve so the
+      // editor is at least usable (even if sounds didn't load). Without
+      // this, an unhandled throw leaves play disabled and the boot
+      // promise hanging forever.
+      console.error("[strasbeat] fatal boot error:", fatalErr);
+      bootReady = true;
+      playBtn.disabled = false;
+      exportBtn.disabled = false;
+      shellEl.classList.remove("is-booting");
+      shellEl.classList.add("is-ready");
+      status.textContent =
+        "boot failed — some features may not work. Check console.";
+      progressBar.classList.add("boot-progress--done");
+      setTimeout(() => progressBar.remove(), 600);
+      _bootResolve();
     }
   },
 });
@@ -502,6 +539,9 @@ bootPromise.then(() => {
 
 // Wrap editor.evaluate to fire a console divider, rescan "in use" sounds,
 // refresh the reference panel on every eval entry point, and gate on boot.
+// The first evaluate after boot awaits prewarm so all instruments are ready
+// before the scheduler plays cycle 1; subsequent evals fire-and-forget.
+let _firstEvalDone = false;
 const _editorEvaluate = editor.evaluate.bind(editor);
 editor.evaluate = async function patchedEvaluate(...args) {
   // If prebake is still in progress, show feedback instead of hanging.
@@ -509,6 +549,25 @@ editor.evaluate = async function patchedEvaluate(...args) {
     transport.setStatus("waiting for sounds to finish loading…");
     await bootPromise;
   }
+
+  // Health-check: if the AudioContext is closed (e.g. post-export bug,
+  // tab backgrounded on iOS), restore it before evaluating. A suspended
+  // context is normal (autoplay policy) — resume will un-gate it.
+  try {
+    const ac = getAudioContext();
+    if (ac.state === "closed") {
+      console.warn("[strasbeat] AudioContext was closed — restoring");
+      setAudioContext(null);
+      setSuperdoughAudioController(null);
+      resetGlobalEffects();
+      await initAudio();
+    } else if (ac.state === "suspended") {
+      await ac.resume();
+    }
+  } catch (err) {
+    console.warn("[strasbeat] audio context health check failed:", err);
+  }
+
   try {
     consolePanel?.divider(currentName || "eval");
   } catch (err) {
@@ -526,18 +585,38 @@ editor.evaluate = async function patchedEvaluate(...args) {
     console.warn("[strasbeat/reference-panel] in-use scan failed:", err);
   }
 
-  // Pre-warm: after evaluation, trigger background loading of all sounds
-  // the pattern uses. This eliminates the "instruments appear gradually"
-  // artifact on first play — by the time cycle 2 rolls around, all buffers
-  // are cached. Fire-and-forget; errors are non-fatal.
+  // Pre-warm: trigger loading of all sounds the pattern uses.
+  // First play: AWAIT pre-warm so every instrument is ready before
+  // cycle 1 — eliminates the "sounds appear gradually" artifact.
+  // Subsequent plays: fire-and-forget (sounds are already cached).
   try {
     const pattern = editor.repl?.state?.pattern;
     const cps = editor.repl?.scheduler?.cps ?? 1;
     if (pattern) {
       const haps = pattern.queryArc(0, 4, { _cps: cps });
-      prewarmSounds(haps, { getSound, getAudioContext }).catch((err) =>
-        console.warn("[strasbeat/prewarm] background warm failed:", err),
-      );
+      if (!_firstEvalDone) {
+        _firstEvalDone = true;
+        transport.setStatus("loading instruments…");
+        const { warmed, failed } = await prewarmSounds(haps, {
+          getSound,
+          getAudioContext,
+        });
+        if (failed.length) {
+          console.warn(
+            `[strasbeat/prewarm] ${failed.length} sound(s) failed to warm:`,
+            failed,
+          );
+          transport.setStatus(
+            `playing · ${failed.length} sound(s) couldn't load`,
+          );
+        } else {
+          transport.setStatus(`playing · ${warmed} instruments ready`);
+        }
+      } else {
+        prewarmSounds(haps, { getSound, getAudioContext }).catch((err) =>
+          console.warn("[strasbeat/prewarm] background warm failed:", err),
+        );
+      }
     }
   } catch (err) {
     console.warn("[strasbeat/prewarm] failed to kick off pre-warm:", err);
@@ -572,6 +651,10 @@ mountTrackBar({
 
 // ─── Transport ───────────────────────────────────────────────────────────
 playBtn.addEventListener("click", async () => {
+  if (isExportRunning()) {
+    transport.setStatus("export in progress — wait for it to finish");
+    return;
+  }
   if (!bootReady) {
     // Sample banks still loading — queue playback so it auto-starts
     // the moment prebake resolves instead of hanging silently.
