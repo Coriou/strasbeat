@@ -2,19 +2,35 @@
 // Click the transport's roll-toggle button to collapse/expand. The shell
 // grid animates `--roll-h` between 0 and the current expanded value, so
 // the editor reclaims the freed vertical space.
+const STORAGE_KEY = "strasbeat:roll-collapsed";
+const TOGGLE_DEBOUNCE_MS = 200; // matches --t-panel transition duration
+
 export function mountPianoRollResize({
   shellEl,
   rollToggleBtn,
   rollDivider,
   resizeCanvas,
 }) {
-  let rollCollapsed = false;
+  let rollCollapsed = localStorage.getItem(STORAGE_KEY) === "true";
   let rollExpandedPx = 180; // matches tokens.css default --roll-h
+  let lastToggleTime = 0;
+
+  // Apply persisted state on mount.
+  if (rollCollapsed) {
+    shellEl.classList.add("shell--roll-collapsed");
+    rollToggleBtn.setAttribute("aria-expanded", "false");
+  }
+
   rollToggleBtn.addEventListener("click", toggleRoll);
   function toggleRoll() {
+    const now = performance.now();
+    if (now - lastToggleTime < TOGGLE_DEBOUNCE_MS) return;
+    lastToggleTime = now;
+
     rollCollapsed = !rollCollapsed;
     shellEl.classList.toggle("shell--roll-collapsed", rollCollapsed);
     rollToggleBtn.setAttribute("aria-expanded", String(!rollCollapsed));
+    localStorage.setItem(STORAGE_KEY, String(rollCollapsed));
     if (!rollCollapsed) {
       shellEl.style.setProperty("--roll-h", `${rollExpandedPx}px`);
     }
@@ -39,6 +55,8 @@ export function mountPianoRollResize({
     rollDivider.setPointerCapture(e.pointerId);
     e.preventDefault();
     document.body.style.cursor = "ns-resize";
+    document.addEventListener("pointerup", endRollDrag);
+    document.addEventListener("pointercancel", endRollDrag);
   });
   rollDivider.addEventListener("pointermove", (e) => {
     if (dragStartY == null) return;
@@ -57,6 +75,8 @@ export function mountPianoRollResize({
     if (e?.pointerId != null && rollDivider.hasPointerCapture?.(e.pointerId)) {
       rollDivider.releasePointerCapture(e.pointerId);
     }
+    document.removeEventListener("pointerup", endRollDrag);
+    document.removeEventListener("pointercancel", endRollDrag);
     requestAnimationFrame(resizeCanvas);
   }
   rollDivider.addEventListener("pointerup", endRollDrag);

@@ -27,19 +27,20 @@
 // wrapped in Prec.highest() upstream, so we can't override them by
 // accident — and we don't bind any of those keys here regardless.
 
-import { keymap } from '@codemirror/view';
+import { keymap } from "@codemirror/view";
 import {
   deleteLine,
   indentLess,
   indentMore,
   moveLineDown,
   moveLineUp,
+  selectLine,
   toggleComment,
-} from '@codemirror/commands';
+} from "@codemirror/commands";
 import {
   selectNextOccurrence,
   selectSelectionMatches,
-} from '@codemirror/search';
+} from "@codemirror/search";
 
 /**
  * Build the VSCode-style keymap extension.
@@ -58,7 +59,7 @@ export function createVscodeKeymap({ onEvaluate }) {
     // Prec.highest and overlaps with the browser's "find again previous"
     // shortcut on some platforms; the user has not requested it.
     {
-      key: 'Mod-Enter',
+      key: "Mod-Enter",
       preventDefault: true,
       run: () => {
         onEvaluate();
@@ -67,21 +68,24 @@ export function createVscodeKeymap({ onEvaluate }) {
     },
 
     // Multi-cursor / selection
-    { key: 'Mod-d', run: selectNextOccurrence },
+    { key: "Mod-d", run: selectNextOccurrence },
     // VSCode's Ctrl/Cmd+Shift+L is "select all occurrences of current
     // selection" — CM6's selectSelectionMatches is the equivalent.
-    { key: 'Mod-Shift-l', run: selectSelectionMatches },
+    { key: "Mod-Shift-l", run: selectSelectionMatches },
 
     // Line manipulation
-    { key: 'Mod-Shift-k', run: deleteLine },
-    { key: 'Alt-ArrowUp', run: moveLineUp },
-    { key: 'Alt-ArrowDown', run: moveLineDown },
+    { key: "Mod-Shift-k", run: deleteLine },
+    { key: "Alt-ArrowUp", run: moveLineUp },
+    { key: "Alt-ArrowDown", run: moveLineDown },
 
     // Comments
-    { key: 'Mod-/', run: toggleComment },
+    { key: "Mod-/", run: toggleComment },
+
+    // Select line (Mod-L), matching VSCode's Cmd+L behavior.
+    { key: "Mod-l", run: selectLine, preventDefault: true },
 
     // Indentation
-    { key: 'Mod-]', run: indentMore },
-    { key: 'Mod-[', run: indentLess },
+    { key: "Mod-]", run: indentMore },
+    { key: "Mod-[", run: indentLess },
   ]);
 }

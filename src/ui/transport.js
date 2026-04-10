@@ -24,18 +24,18 @@ const BEATS_PER_CYCLE = 4; // see comment above
  * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean, msg: string}) => void, setCaptureState: (s: {recording: boolean, count?: number}) => void, dispose: () => void }}
  */
 export function mountTransport({ getScheduler }) {
-  const bpmEl       = mustEl('bpm-readout');
-  const cycleEl     = mustEl('cycle-readout');
-  const playheadEl  = mustEl('playhead-dot');
+  const bpmEl = mustEl("bpm-readout");
+  const cycleEl = mustEl("cycle-readout");
+  const playheadEl = mustEl("playhead-dot");
   const playheadBar = playheadEl.parentElement;
-  const statusEl    = mustEl('status');
-  const midiPillEl  = mustEl('midi-status');
-  const captureBtn  = mustEl('capture');
-  const captureBadge = mustEl('capture-count');
+  const statusEl = mustEl("status");
+  const midiPillEl = mustEl("midi-status");
+  const captureBtn = mustEl("capture");
+  const captureBadge = mustEl("capture-count");
 
   // Last-rendered values, to skip unnecessary DOM writes.
   let lastBpm = NaN;
-  let lastCycleText = '';
+  let lastCycleText = "";
   let lastPct = -1;
   let lastIdle = null;
 
@@ -43,6 +43,9 @@ export function mountTransport({ getScheduler }) {
   // Safety-net poll: catches the case where the scheduler starts via the
   // editor's Cmd+Enter keymap, which doesn't go through our play button.
   // 4Hz is plenty — once we detect started, we promote to rAF (60Hz).
+  // Note: when the rAF chain is active, kick() no-ops because raf is
+  // kept non-null through the chain (see tick()). The poll is harmless
+  // while rAF is running.
   const POLL_INTERVAL_MS = 250;
   const poll = setInterval(() => {
     const sched = getScheduler();
@@ -59,18 +62,23 @@ export function mountTransport({ getScheduler }) {
   tick();
 
   function tick() {
-    raf = null;
+    // Don't null raf at the top — keep it non-null so kick()'s guard
+    // prevents the poll from spawning a second rAF chain (see Phase 3,
+    // design/work/11-ui-hardening.md).
     const sched = getScheduler();
     if (!sched) {
+      raf = null;
       writeReadouts({ cps: 0, cycle: 0, started: false });
       return;
     }
-    const cps = typeof sched.cps === 'number' ? sched.cps : 0;
-    const cycle = typeof sched.now === 'function' ? sched.now() : 0;
+    const cps = typeof sched.cps === "number" ? sched.cps : 0;
+    const cycle = typeof sched.now === "function" ? sched.now() : 0;
     const started = !!sched.started;
     writeReadouts({ cps, cycle, started });
     if (started) {
       raf = requestAnimationFrame(tick);
+    } else {
+      raf = null;
     }
   }
 
@@ -79,10 +87,10 @@ export function mountTransport({ getScheduler }) {
     const bpm = Math.round(cps * 60 * BEATS_PER_CYCLE);
     if (bpm !== lastBpm) {
       lastBpm = bpm;
-      bpmEl.textContent = bpm > 0 ? `${bpm} bpm` : '– bpm';
+      bpmEl.textContent = bpm > 0 ? `${bpm} bpm` : "– bpm";
     }
     // Cycle text — show 1 decimal so the eye sees motion.
-    const cycText = started ? `cyc ${cycle.toFixed(1)}` : 'cyc –';
+    const cycText = started ? `cyc ${cycle.toFixed(1)}` : "cyc –";
     if (cycText !== lastCycleText) {
       lastCycleText = cycText;
       cycleEl.textContent = cycText;
@@ -97,7 +105,7 @@ export function mountTransport({ getScheduler }) {
     const idle = !started;
     if (idle !== lastIdle) {
       lastIdle = idle;
-      playheadBar.classList.toggle('transport__playhead--idle', idle);
+      playheadBar.classList.toggle("transport__playhead--idle", idle);
     }
   }
 
@@ -112,15 +120,15 @@ export function mountTransport({ getScheduler }) {
 
   function setMidiStatus({ ok, msg }) {
     midiPillEl.textContent = msg;
-    midiPillEl.classList.toggle('is-ok', ok === true);
-    midiPillEl.classList.toggle('is-err', ok === false);
+    midiPillEl.classList.toggle("is-ok", ok === true);
+    midiPillEl.classList.toggle("is-err", ok === false);
   }
 
   function setCaptureState({ recording, count }) {
-    captureBtn.classList.toggle('recording', !!recording);
-    captureBtn.setAttribute('aria-pressed', recording ? 'true' : 'false');
+    captureBtn.classList.toggle("recording", !!recording);
+    captureBtn.setAttribute("aria-pressed", recording ? "true" : "false");
     if (count != null) captureBadge.textContent = String(count);
-    if (!recording) captureBadge.textContent = '';
+    if (!recording) captureBadge.textContent = "";
   }
 
   function dispose() {

@@ -81,15 +81,20 @@ hydrateIcons(document);
 applyStoredAccent();
 if (import.meta.env.DEV) document.body.classList.add("dev-mode");
 
-// HiDPI piano roll
-const dpr = window.devicePixelRatio || 1;
+// HiDPI piano roll — ResizeObserver handles window resize, right-rail
+// reflow, and DPR changes (e.g. dragging between monitors).
 const resizeCanvas = () => {
+  const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
+  const w = Math.round(rect.width * dpr);
+  const h = Math.round(rect.height * dpr);
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
 };
 resizeCanvas();
-window.addEventListener("resize", resizeCanvas);
+new ResizeObserver(() => resizeCanvas()).observe(canvas);
 const drawCtx = canvas.getContext("2d");
 const drawTime = [-2, 2]; // seconds before / after now to render
 
