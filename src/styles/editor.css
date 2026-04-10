@@ -32,7 +32,7 @@
 
 .editor .cm-gutters {
   background: var(--surface-0);
-  border-right: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border);
   color: var(--text-dim);
   font-family: var(--font-mono);
   /* Inherit font-size from the editor (set by StrudelMirror inline

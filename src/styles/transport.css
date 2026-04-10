@@ -286,6 +286,16 @@
 /* Capture button and preset picker have moved to the MIDI bar.
    See src/styles/midi-bar.css. */
 
+/* Keyboard shortcut badge inside transport buttons. */
+.transport__kbd {
+  font: 500 9px var(--font-mono);
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  opacity: 0.72;
+  pointer-events: none;
+  margin-left: var(--space-1);
+}
+
 @media (max-width: 1180px) {
   .transport__status {
     max-width: 22ch;
@@ -306,6 +316,10 @@
   }
 
   .transport__playhead {
+    display: none;
+  }
+
+  .transport__kbd {
     display: none;
   }
 }

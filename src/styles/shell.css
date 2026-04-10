@@ -138,10 +138,9 @@
 }
 .transport {
   border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
 }
 .roll-pane {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
 }
 
 /* All panels share the same elevated-by-darkness vocabulary. */
@@ -161,6 +160,9 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  /* Subtle depth cue — silent "you are here" on the canvas left edge
+     where it meets the left rail. */
+  box-shadow: inset 4px 0 8px oklch(0 0 0 / 0.15);
 }
 
 /* ─── Buttons (shared vocabulary across the shell) ─── */

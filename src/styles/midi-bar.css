@@ -11,7 +11,7 @@
   padding: 0 var(--space-2);
   height: 32px;
   background: var(--surface-1);
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   overflow: hidden;
 }
 

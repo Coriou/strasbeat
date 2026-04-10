@@ -88,6 +88,14 @@ applyStoredAccent();
 if (import.meta.env.DEV) document.body.classList.add("dev-mode");
 installDefaultStrudelLogger(setLogger);
 
+// Platform-aware keyboard shortcut label on the Play button.
+{
+  const kbd = playBtn.querySelector(".transport__kbd");
+  if (kbd && !/Mac|iPhone|iPad/.test(navigator.platform)) {
+    kbd.textContent = "Ctrl\u21B5";
+  }
+}
+
 // HiDPI piano roll — ResizeObserver handles window resize, right-rail
 // reflow, and DPR changes (e.g. dragging between monitors).
 let resizeTimer = null;

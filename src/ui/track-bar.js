@@ -43,7 +43,7 @@ export function mountTrackBar({ container, view, onEvaluate }) {
 
     const hint = document.createElement("span");
     hint.className = "track-bar__hint";
-    hint.textContent = "Click mute · Shift solo";
+    hint.textContent = "Click to mute · Shift\u2011click to solo";
 
     meta.append(title, hint);
     container.appendChild(meta);
