@@ -51,6 +51,47 @@
   transition: grid-template-rows var(--t-panel);
 }
 
+/* ─── Boot progress bar ─── */
+.boot-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  width: 100%;
+  height: 2px;
+  background: transparent;
+  pointer-events: none;
+}
+.boot-progress::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: var(--boot-pct, 0%);
+  background: var(--accent);
+  border-radius: 0 1px 1px 0;
+  transition: width 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.boot-progress--done::after {
+  opacity: 0;
+  transition:
+    width 200ms ease-out,
+    opacity 400ms 100ms ease-out;
+}
+
+/* ─── Boot loading state ─── */
+.shell.is-booting .transport__status {
+  animation: status-pulse 1.8s ease-in-out infinite;
+}
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 /* Collapsed state — toggled by JS on the body or shell. */
 .shell.shell--roll-collapsed {
   --roll-h: 0px;
