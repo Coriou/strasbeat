@@ -1,8 +1,4 @@
-// 01-hello — masked drums + multi-voice intro with a sweeping bass
-// concepts: .mask() per-cycle gating, multi-voice $: layers, signal-modulated lpf
-
-export default `
-setcpm(110/4)
+export default `setcpm(110/4)
 
 $: s("bd*4").mask("<1 1 1 0>")
 $: s("~ sd ~ sd").mask("<1 1 1 0>")
