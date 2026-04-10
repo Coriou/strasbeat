@@ -11,6 +11,8 @@ drums: stack(
 // F C Am G
 // Abm Gb Db Db
 // F Dm7 Gsus G
+// Dm7	G7	C^	C^
+// Cm7 G7 Cm7 G7
 const chords = 'Abm Gb Db Db'
 
 lead: progression(chords, {
@@ -18,12 +20,11 @@ lead: progression(chords, {
   rythm: "block",
 })
   .s("gm_lead_1_square")
-  .room("0.75")
+  .room("0.25")
   .decay("0.25")
   .sus("0.9")
   .lpf("800")
   .pan(sine.slow(1))
-  .gain("1")
 
 leadback: progression(chords, {
   bass: true,
@@ -33,7 +34,7 @@ leadback: progression(chords, {
   .room("0.5")
   .lpf("800")
   .pan(sine.slow(4))
-  .gain("0.5")
+  .mask("<1 1 1 0>")
   .rev()
 
 choirs: progression(chords, {
