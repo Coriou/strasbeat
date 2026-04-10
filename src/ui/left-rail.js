@@ -232,14 +232,18 @@ export function mount({
       deleteItem.addEventListener("click", async (e) => {
         e.stopPropagation();
         dismissContextMenu();
-        const ok = await confirm({
-          title: `Delete "${name}"?`,
-          message: "This can\u2019t be undone.",
-          confirmLabel: "Delete",
-          cancelLabel: "Cancel",
-          destructive: true,
-        });
-        if (ok) onDelete(name);
+        try {
+          const ok = await confirm({
+            title: `Delete "${name}"?`,
+            message: "This can\u2019t be undone.",
+            confirmLabel: "Delete",
+            cancelLabel: "Cancel",
+            destructive: true,
+          });
+          if (ok) onDelete(name);
+        } finally {
+          dismissContextMenu();
+        }
       });
       menu.appendChild(deleteItem);
     } else if (dirtySet.has(name)) {
@@ -252,14 +256,18 @@ export function mount({
       revertItem.addEventListener("click", async (e) => {
         e.stopPropagation();
         dismissContextMenu();
-        const ok = await confirm({
-          title: "Revert to original?",
-          message: `Your changes to "${name}" will be lost. This can\u2019t be undone.`,
-          confirmLabel: "Revert",
-          cancelLabel: "Cancel",
-          destructive: true,
-        });
-        if (ok) onRevert(name);
+        try {
+          const ok = await confirm({
+            title: "Revert to original?",
+            message: `Your changes to "${name}" will be lost. This can\u2019t be undone.`,
+            confirmLabel: "Revert",
+            cancelLabel: "Cancel",
+            destructive: true,
+          });
+          if (ok) onRevert(name);
+        } finally {
+          dismissContextMenu();
+        }
       });
       menu.appendChild(revertItem);
     } else {

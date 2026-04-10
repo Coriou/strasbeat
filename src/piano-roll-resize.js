@@ -3,6 +3,7 @@
 // grid animates `--roll-h` between 0 and the current expanded value, so
 // the editor reclaims the freed vertical space.
 const STORAGE_KEY = "strasbeat:roll-collapsed";
+const HEIGHT_KEY = "strasbeat:roll-height";
 const TOGGLE_DEBOUNCE_MS = 200; // matches --t-panel transition duration
 
 export function mountPianoRollResize({
@@ -12,7 +13,7 @@ export function mountPianoRollResize({
   resizeCanvas,
 }) {
   let rollCollapsed = localStorage.getItem(STORAGE_KEY) === "true";
-  let rollExpandedPx = 180; // matches tokens.css default --roll-h
+  let rollExpandedPx = Number(localStorage.getItem(HEIGHT_KEY)) || 180;
   let lastToggleTime = 0;
 
   // Apply persisted state on mount.
@@ -77,6 +78,7 @@ export function mountPianoRollResize({
     }
     document.removeEventListener("pointerup", endRollDrag);
     document.removeEventListener("pointercancel", endRollDrag);
+    localStorage.setItem(HEIGHT_KEY, String(rollExpandedPx));
     requestAnimationFrame(resizeCanvas);
   }
   rollDivider.addEventListener("pointerup", endRollDrag);

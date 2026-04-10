@@ -96,7 +96,7 @@ export function mountTransport({ getScheduler }) {
       cycleEl.textContent = cycText;
     }
     // Playhead position within the current cycle, in [0, 1).
-    const pos = ((cycle % 1) + 1) % 1;
+    const pos = Number.isFinite(cycle) ? ((cycle % 1) + 1) % 1 : 0;
     const pct = Math.round(pos * 1000) / 10; // 1-decimal % to keep DOM writes coarse
     if (pct !== lastPct) {
       lastPct = pct;

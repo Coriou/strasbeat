@@ -44,6 +44,7 @@ import { makeIcon } from './icons.js';
 
 const STORAGE_KEY_CYCLES = 'strasbeat:export-cycles';
 const STORAGE_KEY_RATE = 'strasbeat:export-rate';
+const STORAGE_KEY_FILENAME = 'strasbeat:export-filename';
 
 const DEFAULT_CYCLES = 4;
 const MIN_CYCLES = 1;
@@ -290,7 +291,7 @@ export function createExportPanel({
     // alone while a render is in flight or after a successful render,
     // so the user can still see what was just exported.
     if (mode === 'idle' && filenameInput) {
-      filenameInput.value = getPatternName() || 'untitled';
+      filenameInput.value = readStoredFilename() || getPatternName() || 'untitled';
     }
     if (filenameInput) {
       filenameInput.focus();
@@ -429,8 +430,18 @@ export function createExportPanel({
     startExport();
   }
 
+  function commitInputs() {
+    const fn = (filenameInput?.value || '').trim();
+    if (fn) writeStoredFilename(fn);
+    const c = parseCycles(cyclesInput?.value);
+    if (c != null) writeStoredCycles(c);
+    const r = parseInt(rateSelect?.value, 10);
+    if (SAMPLE_RATES.includes(r)) writeStoredRate(r);
+  }
+
   function startExport() {
     if (mode === 'running') return;
+    commitInputs();
 
     const rawFilename = (filenameInput.value || '').trim();
     const filename = rawFilename || getPatternName() || 'untitled';
@@ -707,6 +718,14 @@ function writeStoredRate(n) {
   } catch {
     /* ignore */
   }
+}
+
+function readStoredFilename() {
+  try { return localStorage.getItem(STORAGE_KEY_FILENAME) || null; } catch { return null; }
+}
+
+function writeStoredFilename(s) {
+  try { localStorage.setItem(STORAGE_KEY_FILENAME, s); } catch { /* ignore */ }
 }
 
 function parseCycles(raw) {

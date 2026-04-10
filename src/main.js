@@ -83,11 +83,17 @@ if (import.meta.env.DEV) document.body.classList.add("dev-mode");
 
 // HiDPI piano roll — ResizeObserver handles window resize, right-rail
 // reflow, and DPR changes (e.g. dragging between monitors).
+let resizeTimer = null;
 const resizeCanvas = () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(doResize, 50);
+};
+const doResize = () => {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   const w = Math.round(rect.width * dpr);
   const h = Math.round(rect.height * dpr);
+  if (w === 0 && h === 0) return; // collapsed — keep the old backing store
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w;
     canvas.height = h;
@@ -373,13 +379,15 @@ const exportPanel = createExportPanel({
 });
 rightRail.registerPanel(exportPanel);
 
+let accentSaveTimer;
 const settingsPanel = createSettingsPanel({
   onFocusEditor: () => editor.editor.focus(),
   getSettings: () => codemirrorSettings.get?.() ?? {},
   onChangeSetting: (key, value) => applyPanelSetting(editor, key, value),
   onAccentChange: (hue, lightness) => {
     applyAccent(hue, lightness);
-    saveStoredAccent(hue, lightness);
+    clearTimeout(accentSaveTimer);
+    accentSaveTimer = setTimeout(() => saveStoredAccent(hue, lightness), 100);
   },
   onAccentReset: () => {
     clearStoredAccent();

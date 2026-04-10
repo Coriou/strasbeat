@@ -51,6 +51,7 @@ export function prompt(opts) {
   if (active) closeActive(null);
 
   return new Promise((resolve) => {
+    const prevFocus = document.activeElement;
     const root = buildModal(opts, (value) => closeActive(value));
     document.body.appendChild(root);
 
@@ -64,7 +65,6 @@ export function prompt(opts) {
     input.focus();
     input.select();
 
-    const prevFocus = document.activeElement;
     const cleanup = installListeners(root, () => closeActive(null));
 
     active = { resolve, root, prevFocus, cleanup };
@@ -97,6 +97,7 @@ export function confirm(opts) {
   if (active) closeActive(null);
 
   return new Promise((resolve) => {
+    const prevFocus = document.activeElement;
     const root = buildConfirm(opts, (ok) => closeActive(ok));
     document.body.appendChild(root);
 
@@ -107,7 +108,6 @@ export function confirm(opts) {
     const confirmBtn = root.querySelector('.modal__confirm');
     confirmBtn.focus();
 
-    const prevFocus = document.activeElement;
     const cleanup = installListeners(root, () => closeActive(false));
 
     active = { resolve: (v) => resolve(v === true), root, prevFocus, cleanup };

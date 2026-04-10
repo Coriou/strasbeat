@@ -87,7 +87,7 @@
 .left-rail__list {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden auto;
   padding: var(--space-1) var(--space-2) var(--space-4);
   /* Slim, restrained scrollbar. */
   scrollbar-width: thin;

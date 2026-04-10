@@ -93,6 +93,8 @@ export function mountRightRail({
       resizeHandle.setPointerCapture(e.pointerId);
       e.preventDefault();
       document.body.style.cursor = 'ew-resize';
+      document.addEventListener('pointerup', endDrag);
+      document.addEventListener('pointercancel', endDrag);
     });
     resizeHandle.addEventListener('pointermove', (e) => {
       if (dragStartX == null) return;
@@ -108,6 +110,8 @@ export function mountRightRail({
       if (e?.pointerId != null && resizeHandle.hasPointerCapture?.(e.pointerId)) {
         resizeHandle.releasePointerCapture(e.pointerId);
       }
+      document.removeEventListener('pointerup', endDrag);
+      document.removeEventListener('pointercancel', endDrag);
       saveState();
     };
     resizeHandle.addEventListener('pointerup', endDrag);
@@ -284,9 +288,13 @@ export function mountRightRail({
       panel.slot.className = 'right-rail__panel-slot';
       panel.slot.dataset.panelId = id;
       panelContainer.appendChild(panel.slot);
-      try { panel.create(panel.slot); }
-      catch (err) { console.error(`[right-rail] panel "${id}" create() failed:`, err); }
-      panel.mounted = true;
+      try {
+        panel.create(panel.slot);
+        panel.mounted = true;
+      } catch (err) {
+        console.error(`[right-rail] panel "${id}" create() failed:`, err);
+        // Don't set mounted — next activate retries create().
+      }
     }
     panel.slot.hidden = false;
 

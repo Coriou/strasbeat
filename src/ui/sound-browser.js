@@ -171,8 +171,7 @@ export function createSoundBrowserPanel({
   }
 
   function deactivate() {
-    // No timers/listeners that need teardown — the panel keeps its DOM
-    // (and scroll position) so re-activate is fast.
+    clearTimeout(searchTimer);
   }
 
   // ─── Public helpers ───────────────────────────────────────────────────
