@@ -8,9 +8,12 @@ drums: stack(
 )
 
 // F7/G Am7 Dm Bb
-// Abm Gb Db Db
 // F C Am G
-lead: progression('Abm Gb Db Db', {
+// Abm Gb Db Db
+// F Dm7 Gsus G
+const chords = 'Abm Gb Db Db'
+
+lead: progression(chords, {
   bass: true,
   rythm: "block",
 })
@@ -22,7 +25,7 @@ lead: progression('Abm Gb Db Db', {
   .pan(sine.slow(1))
   .gain("1")
 
-choirs: progression('Abm Gb Db Db', {
+choirs: progression(chords, {
   bass: true,
   rythm: "strum",
 })
