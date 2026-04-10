@@ -49,11 +49,15 @@ import {
 } from "./track-labels.js";
 import { computeNewSelection } from "./format.js";
 
-function toggleLabelAtCursor(view, onEvaluate, toggleLabel, userEvent) {
+// Exported so command-palette.js can call mute/solo without simulating
+// keypresses. The view and onEvaluate are passed by the caller.
+export function toggleLabelAtCursor(view, onEvaluate, toggleLabel, userEvent) {
   const code = view.state.doc.toString();
   const oldSelection = view.state.selection;
   const oldDoc = view.state.doc;
-  const cursorLine = view.state.doc.lineAt(view.state.selection.main.head).number;
+  const cursorLine = view.state.doc.lineAt(
+    view.state.selection.main.head,
+  ).number;
   const label = labelAtLine(parseLabels(code), cursorLine);
   if (!label) return true;
   const nextCode = toggleLabel(code, label.displayName);
@@ -95,23 +99,13 @@ export function createVscodeKeymap({ onEvaluate }) {
       key: "Mod-m",
       preventDefault: true,
       run: (view) =>
-        toggleLabelAtCursor(
-          view,
-          onEvaluate,
-          toggleMute,
-          "input.track-mute",
-        ),
+        toggleLabelAtCursor(view, onEvaluate, toggleMute, "input.track-mute"),
     },
     {
       key: "Mod-Shift-s",
       preventDefault: true,
       run: (view) =>
-        toggleLabelAtCursor(
-          view,
-          onEvaluate,
-          toggleSolo,
-          "input.track-solo",
-        ),
+        toggleLabelAtCursor(view, onEvaluate, toggleSolo, "input.track-solo"),
     },
 
     // Multi-cursor / selection
@@ -125,8 +119,12 @@ export function createVscodeKeymap({ onEvaluate }) {
     { key: "Alt-ArrowUp", run: moveLineUp },
     { key: "Alt-ArrowDown", run: moveLineDown },
 
-    // Comments
+    // Comments — Mod-/ is the universal binding (QWERTY). On AZERTY macOS,
+    // "/" lives on Shift+: so Cmd+/ becomes Cmd+Shift+: → Cmd+?, which
+    // macOS intercepts as the Help menu shortcut. Mod-: gives AZERTY
+    // users an unshifted alternative that actually reaches CodeMirror.
     { key: "Mod-/", run: toggleComment },
+    { key: "Mod-:", run: toggleComment },
 
     // Select line (Mod-L), matching VSCode's Cmd+L behavior.
     { key: "Mod-l", run: selectLine, preventDefault: true },

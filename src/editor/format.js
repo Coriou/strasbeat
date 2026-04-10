@@ -22,17 +22,17 @@
 // string literal in a post-processing pass after Prettier has rewritten the
 // JS structure.
 
-import { keymap } from '@codemirror/view';
-import { EditorSelection } from '@codemirror/state';
+import { keymap } from "@codemirror/view";
+import { EditorSelection } from "@codemirror/state";
 
 let prettierModulesPromise = null;
 
 async function loadPrettier() {
   if (!prettierModulesPromise) {
     prettierModulesPromise = Promise.all([
-      import('prettier/standalone'),
-      import('prettier/plugins/babel'),
-      import('prettier/plugins/estree'),
+      import("prettier/standalone"),
+      import("prettier/plugins/babel"),
+      import("prettier/plugins/estree"),
     ]).then(([prettier, babel, estree]) => ({
       prettier,
       plugins: [babel, estree],
@@ -71,27 +71,27 @@ export function* iterateStringLiterals(source) {
     const c = source[i];
 
     // Line comment.
-    if (c === '/' && source[i + 1] === '/') {
-      while (i < n && source[i] !== '\n') i++;
+    if (c === "/" && source[i + 1] === "/") {
+      while (i < n && source[i] !== "\n") i++;
       continue;
     }
     // Block comment.
-    if (c === '/' && source[i + 1] === '*') {
+    if (c === "/" && source[i + 1] === "*") {
       i += 2;
-      while (i < n - 1 && !(source[i] === '*' && source[i + 1] === '/')) i++;
+      while (i < n - 1 && !(source[i] === "*" && source[i + 1] === "/")) i++;
       i += 2;
       continue;
     }
 
-    if (c === '"' || c === "'" || c === '`') {
+    if (c === '"' || c === "'" || c === "`") {
       const quote = c;
       const start = i;
       i++;
-      let body = '';
+      let body = "";
       while (i < n) {
         const ch = source[i];
-        if (ch === '\\') {
-          body += ch + (source[i + 1] ?? '');
+        if (ch === "\\") {
+          body += ch + (source[i + 1] ?? "");
           i += 2;
           continue;
         }
@@ -99,9 +99,9 @@ export function* iterateStringLiterals(source) {
           i++;
           break;
         }
-        if (quote === '`' && ch === '$' && source[i + 1] === '{') {
+        if (quote === "`" && ch === "$" && source[i + 1] === "{") {
           throw new Error(
-            '[strasbeat/format] template-literal interpolation is not supported by the quote-restoration walker',
+            "[strasbeat/format] template-literal interpolation is not supported by the quote-restoration walker",
           );
         }
         body += ch;
@@ -126,11 +126,11 @@ export function* iterateStringLiterals(source) {
  */
 function reQuote(body, from, to) {
   if (from === to) return from + body + from;
-  let out = '';
+  let out = "";
   let j = 0;
   while (j < body.length) {
     const ch = body[j];
-    if (ch === '\\') {
+    if (ch === "\\") {
       const next = body[j + 1];
       if (next === from) {
         // \" → "  when swapping " for '
@@ -139,12 +139,12 @@ function reQuote(body, from, to) {
         continue;
       }
       // Pass through any other escape sequence verbatim.
-      out += ch + (next ?? '');
+      out += ch + (next ?? "");
       j += 2;
       continue;
     }
     if (ch === to) {
-      out += '\\' + to;
+      out += "\\" + to;
       j++;
       continue;
     }
@@ -172,7 +172,7 @@ function reQuote(body, from, to) {
 function restoreOriginalQuotes(formatted, originalQuotes) {
   const literals = [];
   for (const lit of iterateStringLiterals(formatted)) {
-    if (lit.quote !== '`') literals.push(lit);
+    if (lit.quote !== "`") literals.push(lit);
   }
   if (literals.length !== originalQuotes.length) {
     throw new Error(
@@ -183,7 +183,7 @@ function restoreOriginalQuotes(formatted, originalQuotes) {
   // Build the result by stitching the formatted text together with rewritten
   // literal slices. Walking literals in order means each splice cursor moves
   // monotonically forward, so the result stays in O(n).
-  let result = '';
+  let result = "";
   let cursor = 0;
   for (let k = 0; k < literals.length; k++) {
     const lit = literals[k];
@@ -212,11 +212,11 @@ function restoreOriginalQuotes(formatted, originalQuotes) {
 export async function formatBuffer(code) {
   const { prettier, plugins } = await loadPrettier();
   const formatted = await prettier.format(code, {
-    parser: 'babel',
+    parser: "babel",
     plugins,
     printWidth: 80,
     semi: false,
-    trailingComma: 'all',
+    trailingComma: "all",
   });
 
   // Snapshot the original quote characters in source order so we can put
@@ -225,7 +225,7 @@ export async function formatBuffer(code) {
   // makes formatBuffer idempotent without external state.
   const originalQuotes = [];
   for (const lit of iterateStringLiterals(code)) {
-    if (lit.quote !== '`') originalQuotes.push(lit.quote);
+    if (lit.quote !== "`") originalQuotes.push(lit.quote);
   }
   return restoreOriginalQuotes(formatted, originalQuotes);
 }
@@ -238,7 +238,7 @@ export async function formatBuffer(code) {
 // independently and we collapse to single cursors (selections inside the
 // formatted region rarely make sense after a reformat anyway).
 export function computeNewSelection(oldSelection, oldDoc, formatted) {
-  const newLines = formatted.split('\n');
+  const newLines = formatted.split("\n");
   // Pre-compute line start offsets in the new doc for O(1) lookup per range.
   const lineStarts = new Array(newLines.length);
   lineStarts[0] = 0;
@@ -256,7 +256,7 @@ export function computeNewSelection(oldSelection, oldDoc, formatted) {
   return EditorSelection.create(newRanges);
 }
 
-const formatCommand = (view) => {
+export const formatCommand = (view) => {
   const code = view.state.doc.toString();
   const oldSelection = view.state.selection;
   const oldDoc = view.state.doc;
@@ -271,7 +271,7 @@ const formatCommand = (view) => {
       view.dispatch({
         changes: { from: 0, to: code.length, insert: formatted },
         selection: newSelection,
-        userEvent: 'input.format',
+        userEvent: "input.format",
       });
     })
     .catch((err) => {
@@ -279,11 +279,11 @@ const formatCommand = (view) => {
       // loudly" — Strudel patterns are unusual JS (template literals with
       // mini-notation) and a parser error here means the formatter saw
       // something it doesn't expect, which the user should know about.
-      console.warn('[strasbeat/format] prettier failed:', err);
+      console.warn("[strasbeat/format] prettier failed:", err);
     });
   return true;
 };
 
 export const formatExtension = keymap.of([
-  { key: 'Mod-Shift-f', run: formatCommand, preventDefault: true },
+  { key: "Mod-Shift-f", run: formatCommand, preventDefault: true },
 ]);

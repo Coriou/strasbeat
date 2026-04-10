@@ -36,10 +36,27 @@ import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
 import { discoverPatterns, computeDirtySet, getUserPatternNames, createAutosave, handleNewPatternClick } from "./patterns.js"; // prettier-ignore
 import { readStoredCmSettingsFromLocalStorage, applyInitialSettings, dispatchEditorExtensions, THEME_OPTIONS, applyPanelSetting } from "./editor-setup.js"; // prettier-ignore
+import { formatCommand } from "./editor/format.js";
 import {
   installDefaultStrudelLogger,
   shouldIgnoreStrudelLog,
 } from "./strudel-logger.js";
+import { mountCommandPalette, buildCommands } from "./ui/command-palette.js";
+import { toggleLabelAtCursor } from "./editor/keymap.js";
+import { toggleMute, toggleSolo } from "./editor/track-labels.js";
+import {
+  toggleComment,
+  deleteLine,
+  indentLess,
+  indentMore,
+  moveLineDown,
+  moveLineUp,
+  selectLine,
+} from "@codemirror/commands";
+import {
+  selectNextOccurrence,
+  selectSelectionMatches,
+} from "@codemirror/search";
 
 const { evalScope, controls } = strudelCore;
 const { getAudioContext, webaudioOutput, registerSynthSounds, initAudio, initAudioOnFirstClick, setLogger, samples, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
@@ -165,7 +182,7 @@ progressBar.className = "boot-progress";
 shellEl.prepend(progressBar);
 
 function setBootProgress(fraction, label) {
-  progressBar.style.setProperty("--boot-pct", `${Math.round(fraction * 100)}%`);
+  progressBar.style.setProperty("--boot-pct", fraction.toFixed(2));
   if (label) status.textContent = label;
 }
 
@@ -508,6 +525,19 @@ const settingsPanel = createSettingsPanel({
 });
 rightRail.registerPanel(settingsPanel);
 
+// ─── First-run orientation ───────────────────────────────────────────────
+// Auto-open the right rail to the sound browser on first visit so new users
+// discover that panels exist behind the collapsed icon strip. The flag is
+// cleared after the first visit; after that, the rail remembers the user's
+// choice.
+{
+  const FIRST_RUN_KEY = "strasbeat:first-run-done";
+  if (!localStorage.getItem(FIRST_RUN_KEY)) {
+    localStorage.setItem(FIRST_RUN_KEY, "1");
+    rightRail.activate("sounds");
+  }
+}
+
 // Strudel's `logger()` dispatches a `strudel.log` CustomEvent on document
 // for every internal log message — route into the console panel.
 document.addEventListener("strudel.log", (e) => {
@@ -678,6 +708,91 @@ document.addEventListener(
     ) {
       e.preventDefault();
       rightRail.toggle();
+    }
+  },
+  true,
+);
+
+// ─── Command palette (Cmd+Shift+P) ──────────────────────────────────────
+const palette = mountCommandPalette({
+  commands: buildCommands({
+    onEvaluate: () => editor.evaluate(),
+    onStop: () => editor.stop(),
+    onSave: () => saveBtn?.click(),
+    onExportWav: () => exportBtn?.click(),
+    onShare: () => shareBtn?.click(),
+    onFormatCode: () => formatCommand(editor.editor),
+    onToggleComment: () => {
+      editor.editor.focus();
+      toggleComment(editor.editor);
+    },
+    onMuteTrack: () =>
+      toggleLabelAtCursor(
+        editor.editor,
+        () => editor.evaluate(),
+        toggleMute,
+        "input.track-mute",
+      ),
+    onSoloTrack: () =>
+      toggleLabelAtCursor(
+        editor.editor,
+        () => editor.evaluate(),
+        toggleSolo,
+        "input.track-solo",
+      ),
+    onSelectNext: () => {
+      editor.editor.focus();
+      selectNextOccurrence(editor.editor);
+    },
+    onSelectAllOccurrences: () => {
+      editor.editor.focus();
+      selectSelectionMatches(editor.editor);
+    },
+    onSelectLine: () => {
+      editor.editor.focus();
+      selectLine(editor.editor);
+    },
+    onDeleteLine: () => {
+      editor.editor.focus();
+      deleteLine(editor.editor);
+    },
+    onMoveLineUp: () => {
+      editor.editor.focus();
+      moveLineUp(editor.editor);
+    },
+    onMoveLineDown: () => {
+      editor.editor.focus();
+      moveLineDown(editor.editor);
+    },
+    onIndent: () => {
+      editor.editor.focus();
+      indentMore(editor.editor);
+    },
+    onDedent: () => {
+      editor.editor.focus();
+      indentLess(editor.editor);
+    },
+    onOpenSounds: () => rightRail.activate("sounds"),
+    onOpenReference: () => rightRail.activate("reference"),
+    onOpenConsole: () => rightRail.activate("console"),
+    onOpenExport: () => rightRail.activate("export"),
+    onOpenSettings: () => rightRail.activate("settings"),
+    onClosePanel: () => rightRail.collapse(),
+    onFocusPatterns: () => leftRail.focusSearch(),
+  }),
+});
+
+document.addEventListener(
+  "keydown",
+  (e) => {
+    if (
+      (e.metaKey || e.ctrlKey) &&
+      e.shiftKey &&
+      !e.altKey &&
+      e.key.toLowerCase() === "p"
+    ) {
+      e.preventDefault();
+      palette.toggle();
     }
   },
   true,
