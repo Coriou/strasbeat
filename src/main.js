@@ -135,6 +135,30 @@ let currentName = initialName;
 // editor-setup.js for why.
 const INITIAL_STORED_CM_SETTINGS = readStoredCmSettingsFromLocalStorage();
 
+// ─── Boot state machine ─────────────────────────────────────────────────
+// Tracks prebake progress so the UI can gate play, show progress, and
+// surface partial failures rather than silently degrading.
+let bootReady = false;
+let bootFailures = [];
+let pendingPlay = false;
+let _bootResolve;
+const bootPromise = new Promise((r) => { _bootResolve = r; });
+
+// Progress bar — thin accent line across the top of the shell.
+const progressBar = document.createElement('div');
+progressBar.className = 'boot-progress';
+shellEl.prepend(progressBar);
+
+function setBootProgress(fraction, label) {
+  progressBar.style.setProperty('--boot-pct', `${Math.round(fraction * 100)}%`);
+  if (label) status.textContent = label;
+}
+
+// Gate play/export/share until boot completes.
+playBtn.disabled = true;
+exportBtn.disabled = true;
+shellEl.classList.add('is-booting');
+
 // Forward decl — panel mounted further down; onEvalError fires after boot.
 let consolePanel = null;
 
@@ -159,21 +183,62 @@ const editor = new StrudelMirror({
     renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor }),
   prebake: async () => {
     initAudioOnFirstClick();
+    setBootProgress(0.05, 'loading modules…');
     const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelExt); // prettier-ignore
-    // Wrap each sample bank load so a single failure doesn't kill the rest.
+    await loadModules;
+    setBootProgress(0.15, 'loading synth sounds…');
+
+    const failures = [];
     const safe = (label, p) =>
-      Promise.resolve(p).catch((e) =>
-        console.warn(`[strasbeat] failed to load ${label}:`, e),
-      );
+      Promise.resolve(p).catch((e) => {
+        console.warn(`[strasbeat] failed to load ${label}:`, e);
+        failures.push(label);
+      });
+
+    // Phase 1: synth sounds (small, fast)
+    await safe('synth sounds', registerSynthSounds());
+    setBootProgress(0.30, 'loading soundfonts…');
+
+    // Phase 2: soundfonts (medium)
+    await safe('soundfonts', registerSoundfonts());
+    setBootProgress(0.50, 'loading samples…');
+
+    // Phase 3: sample banks (large, in parallel as they're independent)
     // strudel.cc has no CORS headers, so we proxy via vite.config.js
     await Promise.all([
-      loadModules,
-      safe("synth sounds", registerSynthSounds()),
-      safe("soundfonts", registerSoundfonts()),
-      safe("dirt-samples", samples("github:tidalcycles/dirt-samples")),
-      safe("tidal-drum-machines", samples("/strudel-cc/tidal-drum-machines.json", "github:ritchse/tidal-drum-machines/main/machines/")), // prettier-ignore
+      safe('dirt-samples', samples('github:tidalcycles/dirt-samples')),
+      safe('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/')), // prettier-ignore
     ]);
-    status.textContent = "ready · click play (or Ctrl/Cmd+Enter)";
+    setBootProgress(1.0);
+
+    // ── Finalize boot state ──
+    bootFailures = failures;
+    bootReady = true;
+    playBtn.disabled = false;
+    exportBtn.disabled = false;
+    shellEl.classList.remove('is-booting');
+    shellEl.classList.add('is-ready');
+
+    if (failures.length === 0) {
+      status.textContent = 'ready · click play (or Ctrl/Cmd+Enter)';
+    } else {
+      const names = failures.join(', ');
+      status.textContent = `ready · ${failures.length} source(s) failed to load (${names})`;
+      console.warn('[strasbeat] boot completed with failures:', failures);
+    }
+
+    // Fade out progress bar.
+    progressBar.classList.add('boot-progress--done');
+    setTimeout(() => progressBar.remove(), 600);
+
+    _bootResolve();
+
+    // If the user tried to play during loading, fire now.
+    if (pendingPlay) {
+      pendingPlay = false;
+      editor.evaluate();
+      transport.kick();
+    }
   },
 });
 
@@ -419,33 +484,29 @@ document.addEventListener("strudel.log", (e) => {
   }
 });
 
-// Poll soundMap until prebake populates it, then refresh the sound browser.
-{
-  const start = performance.now();
-  const POLL_MS = 200;
-  const TIMEOUT_MS = 10000;
-  const interval = setInterval(() => {
-    const count = Object.keys(soundMap.get() ?? {}).length;
-    if (count > 0) {
-      clearInterval(interval);
-      soundBrowser.refresh();
-      // Seed the "in use" highlights with whatever's in the editor right
-      // now (even if the user hasn't pressed evaluate yet).
-      soundBrowser.setBufferText(editor.code ?? "");
-    } else if (performance.now() - start > TIMEOUT_MS) {
-      clearInterval(interval);
-      console.warn(
-        "[strasbeat/sound-browser] soundMap still empty after 10s — " +
-          "prebake may have failed; the panel will stay empty until reload",
-      );
-    }
-  }, POLL_MS);
-}
+// Refresh the sound browser once prebake completes and the soundMap is populated.
+bootPromise.then(() => {
+  const count = Object.keys(soundMap.get() ?? {}).length;
+  if (count > 0) {
+    soundBrowser.refresh();
+    soundBrowser.setBufferText(editor.code ?? '');
+  } else {
+    console.warn(
+      '[strasbeat/sound-browser] soundMap still empty after boot — ' +
+        'the panel will stay empty until reload',
+    );
+  }
+});
 
 // Wrap editor.evaluate to fire a console divider, rescan "in use" sounds,
-// and refresh the reference panel on every eval entry point.
+// refresh the reference panel on every eval entry point, and gate on boot.
 const _editorEvaluate = editor.evaluate.bind(editor);
 editor.evaluate = async function patchedEvaluate(...args) {
+  // If prebake is still in progress, show feedback instead of hanging.
+  if (!bootReady) {
+    transport.setStatus('waiting for sounds to finish loading…');
+    await bootPromise;
+  }
   try {
     consolePanel?.divider(currentName || "eval");
   } catch (err) {
@@ -490,11 +551,18 @@ mountTrackBar({
 });
 
 // ─── Transport ───────────────────────────────────────────────────────────
-playBtn.addEventListener("click", async () => {
+playBtn.addEventListener('click', async () => {
+  if (!bootReady) {
+    // Sample banks still loading — queue playback so it auto-starts
+    // the moment prebake resolves instead of hanging silently.
+    pendingPlay = true;
+    transport.setStatus('waiting for sounds to finish loading…');
+    return;
+  }
   await editor.evaluate();
   transport.kick(); // promote the readout loop to rAF immediately
 });
-stopBtn.addEventListener("click", () => editor.stop());
+stopBtn.addEventListener('click', () => editor.stop());
 
 // ─── Save current editor → patterns/<name>.js (dev-only) ────────────────
 if (import.meta.env.DEV) {

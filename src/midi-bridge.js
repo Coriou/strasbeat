@@ -479,8 +479,9 @@ export class MidiBridge {
     const prev = this.activeNotes.get(midi);
     if (prev?.timeout) clearTimeout(prev.timeout);
     const noteTimeout = setTimeout(() => {
+      const expired = this.activeNotes.get(midi);
       this.activeNotes.delete(midi);
-      this._emit("noteoff", { midi });
+      this._emit("noteoff", { midi, velocity: expired?.velocity ?? 0 });
     }, duration * 1000);
     this.activeNotes.set(midi, { velocity, timeout: noteTimeout });
 

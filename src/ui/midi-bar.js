@@ -19,8 +19,9 @@ import { superdough, getAudioContext } from "@strudel/webaudio";
 const KB_OCTAVES = 2;
 const KB_WHITE_KEYS = KB_OCTAVES * 7;
 const KB_NOTE_PATTERN = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]; // 0=white, 1=black
+const FADE_MS = 800; // key-release fade duration
 
-function drawKeyboard(canvas, activeNotes, octaveShift) {
+function drawKeyboard(canvas, activeNotes, fadingNotes, octaveShift) {
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
 
@@ -84,9 +85,15 @@ function drawKeyboard(canvas, activeNotes, octaveShift) {
   for (const k of keys) {
     if (k.black) continue;
     const active = activeNotes.has(k.midi);
-    const vel = active ? activeNotes.get(k.midi).velocity : 0;
+    const fading = !active && fadingNotes.has(k.midi);
     if (active) {
+      const vel = activeNotes.get(k.midi).velocity;
       ctx.globalAlpha = 0.4 + vel * 0.5;
+      ctx.fillStyle = accent;
+    } else if (fading) {
+      const { velocity: vel, startedAt } = fadingNotes.get(k.midi);
+      const t = Math.min((performance.now() - startedAt) / FADE_MS, 1);
+      ctx.globalAlpha = (1 - t) * (0.4 + vel * 0.5);
       ctx.fillStyle = accent;
     } else {
       ctx.globalAlpha = 1;
@@ -104,9 +111,15 @@ function drawKeyboard(canvas, activeNotes, octaveShift) {
   for (const k of keys) {
     if (!k.black) continue;
     const active = activeNotes.has(k.midi);
-    const vel = active ? activeNotes.get(k.midi).velocity : 0;
+    const fading = !active && fadingNotes.has(k.midi);
     if (active) {
+      const vel = activeNotes.get(k.midi).velocity;
       ctx.globalAlpha = 0.5 + vel * 0.4;
+      ctx.fillStyle = accent;
+    } else if (fading) {
+      const { velocity: vel, startedAt } = fadingNotes.get(k.midi);
+      const t = Math.min((performance.now() - startedAt) / FADE_MS, 1);
+      ctx.globalAlpha = (1 - t) * (0.5 + vel * 0.4);
       ctx.fillStyle = accent;
     } else {
       ctx.globalAlpha = 1;
@@ -384,18 +397,42 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   // Set initial state
   container.hidden = !midi.hasDevices();
 
-  // ─── Keyboard rendering ─────────────────────────────────────────────
+  // ─── Keyboard rendering (with progressive fade) ──────────────────────
+  /** @type {Map<number, {velocity: number, startedAt: number}>} */
+  const fadingNotes = new Map();
+  let fadeAnimId = null;
   let kbRafPending = false;
+
+  function _fadeFrame() {
+    const now = performance.now();
+    for (const [m, f] of fadingNotes) {
+      if (now - f.startedAt >= FADE_MS) fadingNotes.delete(m);
+    }
+    drawKeyboard(kbCanvas, midi.activeNotes, fadingNotes, midi.getOctaveShift());
+    if (fadingNotes.size > 0) {
+      fadeAnimId = requestAnimationFrame(_fadeFrame);
+    } else {
+      fadeAnimId = null;
+    }
+  }
+
+  function startFadeLoop() {
+    if (fadeAnimId === null) {
+      fadeAnimId = requestAnimationFrame(_fadeFrame);
+    }
+  }
+
   function redrawKeyboard() {
+    if (fadeAnimId !== null) return; // fade loop already redraws every frame
     if (kbRafPending) return;
     kbRafPending = true;
     requestAnimationFrame(() => {
       kbRafPending = false;
-      drawKeyboard(kbCanvas, midi.activeNotes, midi.getOctaveShift());
+      drawKeyboard(kbCanvas, midi.activeNotes, fadingNotes, midi.getOctaveShift());
     });
   }
   // Initial draw (synchronous, canvas is empty).
-  drawKeyboard(kbCanvas, midi.activeNotes, midi.getOctaveShift());
+  drawKeyboard(kbCanvas, midi.activeNotes, fadingNotes, midi.getOctaveShift());
 
   // ─── Persistence (localStorage) ─────────────────────────────────────
   const STORAGE_KEY = "strasbeat:midi-bar";

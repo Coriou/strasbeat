@@ -32,7 +32,9 @@ export function mountPianoRollResize({
     shellEl.classList.toggle("shell--roll-collapsed", rollCollapsed);
     rollToggleBtn.setAttribute("aria-expanded", String(!rollCollapsed));
     localStorage.setItem(STORAGE_KEY, String(rollCollapsed));
-    if (!rollCollapsed) {
+    if (rollCollapsed) {
+      shellEl.style.removeProperty("--roll-h");
+    } else {
       shellEl.style.setProperty("--roll-h", `${rollExpandedPx}px`);
     }
     // Keep the canvas backing-store sized to its new visible area.
