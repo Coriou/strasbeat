@@ -76,6 +76,7 @@ export function mountDebugHelpers({
         sampleRate,
         {
           getAudioContext,
+          getSound,
           setAudioContext,
           setSuperdoughAudioController,
           initAudio,

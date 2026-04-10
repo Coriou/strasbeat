@@ -10,6 +10,122 @@
 export const EXPORT_SAMPLE_RATE = 48000;
 export const EXPORT_MAX_POLYPHONY = 1024;
 
+// ─── Pre-warm: force lazy sample/soundfont buffers to load ──────────────
+// Strudel loads audio buffers lazily: the first `superdough()` call for a
+// given sound triggers a `fetch → decodeAudioData` chain whose promise is
+// cached forever. If we close the live AudioContext (to swap in an offline
+// one) while those fetches are in-flight, the `decodeAudioData` step fails
+// on the now-closed context, and the rejected promise stays cached — every
+// future attempt to play that sound gets the stale rejection.
+//
+// The fix: before closing the live context, iterate every unique sound in
+// the pattern's haps and call the same `onTrigger` callback that
+// `superdough()` would. This ensures all buffers are decoded and cached
+// using the still-alive live context. We schedule the trigger at time 0
+// with a dummy `onended`, wait for the promise, and then immediately
+// disconnect the resulting audio nodes so no stray sound leaks.
+//
+// For live playback, the same pre-warm eliminates the "sounds appear
+// gradually" artefact where the first cycle or two are missing instruments
+// that haven't finished loading yet.
+
+/**
+ * Pre-warm all unique sounds in a set of haps by triggering their
+ * `onTrigger` callbacks. Audio nodes are created then immediately
+ * disconnected; the valuable side-effect is that the buffer fetch/decode
+ * promises land in the module-level caches (`loadCache`, `bufferCache`,
+ * and the soundfont `bufferCache`) so subsequent calls are instant.
+ *
+ * Call BEFORE closing the live AudioContext for export, or after
+ * evaluate() for live playback.
+ *
+ * @param {Array} haps    Haps from pattern.queryArc()
+ * @param {object} deps   { getSound, getAudioContext }
+ * @param {object} [opts] { onProgress?: (loaded, total) => void }
+ * @returns {Promise<{ warmed: number, failed: string[] }>}
+ */
+export async function prewarmSounds(haps, deps, opts = {}) {
+  const { getSound, getAudioContext } = deps;
+  const { onProgress } = opts;
+
+  // Collect unique sound keys (with bank prefix, matching superdough's lookup).
+  const seen = new Map(); // soundKey → representative hap.value
+  for (const hap of haps) {
+    if (!hap.hasOnset?.()) continue;
+    const v = hap.value;
+    if (typeof v !== "object") continue;
+    let s = v.s ?? "triangle";
+    if (v.bank && s) s = `${v.bank}_${s}`;
+    if (["-", "~", "_"].includes(s)) continue;
+    if (!seen.has(s)) seen.set(s, v);
+  }
+
+  const total = seen.size;
+  let loaded = 0;
+  let warmed = 0;
+  const failed = [];
+
+  const warmOne = async ([soundKey, value]) => {
+    try {
+      const entry = getSound(soundKey);
+      if (!entry?.onTrigger) {
+        failed.push(soundKey);
+        return;
+      }
+      // Trigger with t=0 and a no-op onended. The callback will:
+      //   - For samples: fetch + decode the buffer, create a BufferSourceNode
+      //   - For soundfonts: fetch the font JS, decode per-pitch buffers
+      //   - For synths: create oscillator nodes (instant, no fetch)
+      // We await the trigger so the fetch/decode finishes, then discard.
+      const ac = getAudioContext();
+      const handle = await entry.onTrigger(
+        ac.currentTime + 0.5, // schedule slightly in the future to avoid "in the past" warnings
+        { ...value, duration: 0.1, gain: 0 }, // silent
+        () => {}, // onended no-op
+        0, // cps
+      );
+      // Immediately disconnect so no audio leaks through.
+      if (handle?.node) {
+        try {
+          handle.node.disconnect();
+        } catch {
+          /* already disconnected */
+        }
+      }
+      if (handle?.stop) {
+        try {
+          handle.stop(0);
+        } catch {
+          /* ignore */
+        }
+      }
+      warmed++;
+    } catch (err) {
+      console.warn(`[strasbeat/prewarm] failed to warm "${soundKey}":`, err);
+      failed.push(soundKey);
+    } finally {
+      loaded++;
+      if (onProgress) {
+        try {
+          onProgress(loaded, total);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  };
+
+  // Warm sounds in parallel batches to balance throughput vs. resource use.
+  const BATCH_SIZE = 8;
+  const entries = [...seen.entries()];
+  for (let i = 0; i < entries.length; i += BATCH_SIZE) {
+    const batch = entries.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(warmOne));
+  }
+
+  return { warmed, failed, total };
+}
+
 /**
  * Render a Strudel pattern to a stereo AudioBuffer offline.
  * Mirrors the strudel/webaudio renderPatternAudio setup but with lazy
@@ -24,11 +140,22 @@ export async function renderPatternToBuffer(
 ) {
   const {
     getAudioContext,
+    getSound,
     setAudioContext,
     setSuperdoughAudioController,
     initAudio,
     superdough,
   } = ctx;
+
+  // Query haps first so we can pre-warm while the live context is still open.
+  const haps = pattern
+    .queryArc(0, cycles, { _cps: cps })
+    .sort((a, b) => a.whole.begin.valueOf() - b.whole.begin.valueOf());
+
+  // Pre-warm: force all unique sound buffers to load using the live context.
+  // This prevents cache-poisoning from a mid-flight close (see prewarmSounds).
+  await prewarmSounds(haps, { getSound, getAudioContext });
+
   const live = getAudioContext();
   await live.close();
   const offline = new OfflineAudioContext(
@@ -41,10 +168,6 @@ export async function renderPatternToBuffer(
   // the controller against `offline` via getSuperdoughAudioController().
   setSuperdoughAudioController(null);
   await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
-
-  const haps = pattern
-    .queryArc(0, cycles, { _cps: cps })
-    .sort((a, b) => a.whole.begin.valueOf() - b.whole.begin.valueOf());
 
   let scheduled = 0;
   for (const hap of haps) {
@@ -161,11 +284,21 @@ export async function renderPatternToBufferWithProgress(
 ) {
   const {
     getAudioContext,
+    getSound,
     setAudioContext,
     setSuperdoughAudioController,
     initAudio,
     superdough,
   } = ctx;
+
+  // Query haps first so we can pre-warm while the live context is still open.
+  const haps = pattern
+    .queryArc(0, cycles, { _cps: cps })
+    .sort((a, b) => a.whole.begin.valueOf() - b.whole.begin.valueOf());
+
+  // Pre-warm: force all unique sound buffers to load using the live context.
+  await prewarmSounds(haps, { getSound, getAudioContext });
+
   const live = getAudioContext();
   await live.close();
   const offline = new OfflineAudioContext(
@@ -178,10 +311,6 @@ export async function renderPatternToBufferWithProgress(
   // the controller against `offline` via getSuperdoughAudioController().
   setSuperdoughAudioController(null);
   await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
-
-  const haps = pattern
-    .queryArc(0, cycles, { _cps: cps })
-    .sort((a, b) => a.whole.begin.valueOf() - b.whole.begin.valueOf());
 
   let scheduled = 0;
   for (const hap of haps) {
@@ -278,6 +407,7 @@ export async function runExport(options, ctx) {
     status,
     setLogger,
     getAudioContext,
+    getSound,
     setAudioContext,
     setSuperdoughAudioController,
     resetGlobalEffects,
@@ -286,6 +416,7 @@ export async function runExport(options, ctx) {
   } = ctx;
   const webaudioCtx = {
     getAudioContext,
+    getSound,
     setAudioContext,
     setSuperdoughAudioController,
     initAudio,
@@ -336,6 +467,8 @@ export async function runExport(options, ctx) {
       throw new Error(
         "pattern produced no onset haps for the requested cycle range",
       );
+
+    status.textContent = `pre-loading sounds for ${onsetHaps.length} events…`;
 
     const { rendered, scheduled } = await renderPatternToBufferWithProgress(
       pattern,
