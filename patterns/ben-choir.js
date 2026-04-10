@@ -43,9 +43,8 @@ bass: progression(chords)
   .lpenv(4)
 
 bassroom: progression(chords)
-  .s(
-    "[gm_acoustic_bass, gm_acoustic_guitar_steel, gm_acoustic_guitar_nylon, gm_alto_sax]",
-  )
+  .s("<[gm_acoustic_bass, gm_alto_sax]*8 [gm_acoustic_bass]*4>")
+  .rev()
   .room(0.25)
   .roomfade(1)
   .lpf(200)
@@ -55,6 +54,6 @@ bassroom: progression(chords)
   .lpenv(4)
   .attack("<0.25 0.5 0.25>")
   .sustain("<0.85 0.7 0.85>")
-  .gain(0.5)
+  .gain(0.75)
   .delay(1)
 `;
