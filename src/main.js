@@ -30,7 +30,7 @@ import { prompt, confirm } from "./ui/modal.js";
 import { applyStoredAccent, applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
 import { createLocalStore } from "./store.js";
 import { readSharedFromHash, shareCurrent } from "./share.js";
-import { runExport } from "./export.js";
+import { runExport, prewarmSounds } from "./export.js";
 import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate } from "./editor-actions.js"; // prettier-ignore
 import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
@@ -142,22 +142,24 @@ let bootReady = false;
 let bootFailures = [];
 let pendingPlay = false;
 let _bootResolve;
-const bootPromise = new Promise((r) => { _bootResolve = r; });
+const bootPromise = new Promise((r) => {
+  _bootResolve = r;
+});
 
 // Progress bar — thin accent line across the top of the shell.
-const progressBar = document.createElement('div');
-progressBar.className = 'boot-progress';
+const progressBar = document.createElement("div");
+progressBar.className = "boot-progress";
 shellEl.prepend(progressBar);
 
 function setBootProgress(fraction, label) {
-  progressBar.style.setProperty('--boot-pct', `${Math.round(fraction * 100)}%`);
+  progressBar.style.setProperty("--boot-pct", `${Math.round(fraction * 100)}%`);
   if (label) status.textContent = label;
 }
 
 // Gate play/export/share until boot completes.
 playBtn.disabled = true;
 exportBtn.disabled = true;
-shellEl.classList.add('is-booting');
+shellEl.classList.add("is-booting");
 
 // Forward decl — panel mounted further down; onEvalError fires after boot.
 let consolePanel = null;
@@ -183,10 +185,10 @@ const editor = new StrudelMirror({
     renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor }),
   prebake: async () => {
     initAudioOnFirstClick();
-    setBootProgress(0.05, 'loading modules…');
+    setBootProgress(0.05, "loading modules…");
     const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelExt); // prettier-ignore
     await loadModules;
-    setBootProgress(0.15, 'loading synth sounds…');
+    setBootProgress(0.15, "loading synth sounds…");
 
     const failures = [];
     const safe = (label, p) =>
@@ -196,17 +198,17 @@ const editor = new StrudelMirror({
       });
 
     // Phase 1: synth sounds (small, fast)
-    await safe('synth sounds', registerSynthSounds());
-    setBootProgress(0.30, 'loading soundfonts…');
+    await safe("synth sounds", registerSynthSounds());
+    setBootProgress(0.3, "loading soundfonts…");
 
     // Phase 2: soundfonts (medium)
-    await safe('soundfonts', registerSoundfonts());
-    setBootProgress(0.50, 'loading samples…');
+    await safe("soundfonts", registerSoundfonts());
+    setBootProgress(0.5, "loading samples…");
 
     // Phase 3: sample banks (large, in parallel as they're independent)
     // strudel.cc has no CORS headers, so we proxy via vite.config.js
     await Promise.all([
-      safe('dirt-samples', samples('github:tidalcycles/dirt-samples')),
+      safe("dirt-samples", samples("github:tidalcycles/dirt-samples")),
       safe('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/')), // prettier-ignore
     ]);
     setBootProgress(1.0);
@@ -216,19 +218,19 @@ const editor = new StrudelMirror({
     bootReady = true;
     playBtn.disabled = false;
     exportBtn.disabled = false;
-    shellEl.classList.remove('is-booting');
-    shellEl.classList.add('is-ready');
+    shellEl.classList.remove("is-booting");
+    shellEl.classList.add("is-ready");
 
     if (failures.length === 0) {
-      status.textContent = 'ready · click play (or Ctrl/Cmd+Enter)';
+      status.textContent = "ready · click play (or Ctrl/Cmd+Enter)";
     } else {
-      const names = failures.join(', ');
+      const names = failures.join(", ");
       status.textContent = `ready · ${failures.length} source(s) failed to load (${names})`;
-      console.warn('[strasbeat] boot completed with failures:', failures);
+      console.warn("[strasbeat] boot completed with failures:", failures);
     }
 
     // Fade out progress bar.
-    progressBar.classList.add('boot-progress--done');
+    progressBar.classList.add("boot-progress--done");
     setTimeout(() => progressBar.remove(), 600);
 
     _bootResolve();
@@ -440,7 +442,7 @@ rightRail.registerPanel(consolePanel);
 // prettier-ignore
 const exportPanel = createExportPanel({
   onFocusEditor: () => editor.editor.focus(),
-  onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough }),
+  onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough }),
   getPatternName: () => currentName || "untitled",
 });
 rightRail.registerPanel(exportPanel);
@@ -489,11 +491,11 @@ bootPromise.then(() => {
   const count = Object.keys(soundMap.get() ?? {}).length;
   if (count > 0) {
     soundBrowser.refresh();
-    soundBrowser.setBufferText(editor.code ?? '');
+    soundBrowser.setBufferText(editor.code ?? "");
   } else {
     console.warn(
-      '[strasbeat/sound-browser] soundMap still empty after boot — ' +
-        'the panel will stay empty until reload',
+      "[strasbeat/sound-browser] soundMap still empty after boot — " +
+        "the panel will stay empty until reload",
     );
   }
 });
@@ -504,7 +506,7 @@ const _editorEvaluate = editor.evaluate.bind(editor);
 editor.evaluate = async function patchedEvaluate(...args) {
   // If prebake is still in progress, show feedback instead of hanging.
   if (!bootReady) {
-    transport.setStatus('waiting for sounds to finish loading…');
+    transport.setStatus("waiting for sounds to finish loading…");
     await bootPromise;
   }
   try {
@@ -523,6 +525,24 @@ editor.evaluate = async function patchedEvaluate(...args) {
   } catch (err) {
     console.warn("[strasbeat/reference-panel] in-use scan failed:", err);
   }
+
+  // Pre-warm: after evaluation, trigger background loading of all sounds
+  // the pattern uses. This eliminates the "instruments appear gradually"
+  // artifact on first play — by the time cycle 2 rolls around, all buffers
+  // are cached. Fire-and-forget; errors are non-fatal.
+  try {
+    const pattern = editor.repl?.state?.pattern;
+    const cps = editor.repl?.scheduler?.cps ?? 1;
+    if (pattern) {
+      const haps = pattern.queryArc(0, 4, { _cps: cps });
+      prewarmSounds(haps, { getSound, getAudioContext }).catch((err) =>
+        console.warn("[strasbeat/prewarm] background warm failed:", err),
+      );
+    }
+  } catch (err) {
+    console.warn("[strasbeat/prewarm] failed to kick off pre-warm:", err);
+  }
+
   return result;
 };
 
@@ -551,18 +571,18 @@ mountTrackBar({
 });
 
 // ─── Transport ───────────────────────────────────────────────────────────
-playBtn.addEventListener('click', async () => {
+playBtn.addEventListener("click", async () => {
   if (!bootReady) {
     // Sample banks still loading — queue playback so it auto-starts
     // the moment prebake resolves instead of hanging silently.
     pendingPlay = true;
-    transport.setStatus('waiting for sounds to finish loading…');
+    transport.setStatus("waiting for sounds to finish loading…");
     return;
   }
   await editor.evaluate();
   transport.kick(); // promote the readout loop to rAF immediately
 });
-stopBtn.addEventListener('click', () => editor.stop());
+stopBtn.addEventListener("click", () => editor.stop());
 
 // ─── Save current editor → patterns/<name>.js (dev-only) ────────────────
 if (import.meta.env.DEV) {
