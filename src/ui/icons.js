@@ -20,13 +20,16 @@ import {
   Plus,
   Search,
   ChevronDown,
+  ChevronLeft,
   ChevronsDownUp,
   Save,
   Music2,
   BookOpen,
   Terminal,
   Eraser,
+  MoreHorizontal,
   Volume2,
+  X,
 } from "lucide";
 
 const ICONS = {
@@ -39,13 +42,16 @@ const ICONS = {
   plus: Plus,
   search: Search,
   "chevron-down": ChevronDown,
+  "chevron-left": ChevronLeft,
   "chevrons-down-up": ChevronsDownUp,
   save: Save,
   music: Music2,
   "book-open": BookOpen,
   terminal: Terminal,
   eraser: Eraser,
+  "more-horizontal": MoreHorizontal,
   "volume-2": Volume2,
+  x: X,
 };
 
 /**

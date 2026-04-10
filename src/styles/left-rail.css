@@ -15,12 +15,13 @@
 .left-rail__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: var(--space-4) var(--space-3) var(--space-3);
   gap: var(--space-2);
 }
 
 .left-rail__title {
+  flex: 1;
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
@@ -116,7 +117,7 @@
 
 .left-rail__item {
   display: grid;
-  grid-template-columns: 1px minmax(0, 1fr) 12px;
+  grid-template-columns: 1px minmax(0, 1fr) 20px;
   align-items: center;
   column-gap: var(--space-3);
   min-height: 30px;
@@ -178,10 +179,8 @@
   font-variant-numeric: tabular-nums;
 }
 .left-rail__item-meta {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 12px;
+  display: grid;
+  place-items: center;
 }
 
 .left-rail__item-match {
@@ -198,10 +197,103 @@
 
 /* ─── Dirty dot (modified indicator) ──────────────────────────────────── */
 .left-rail__dirty-dot {
+  grid-area: 1 / 1;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--accent-hi);
+  transition: opacity var(--t-hover);
+}
+.left-rail__item:hover .left-rail__dirty-dot {
+  opacity: 0;
+}
+
+/* ─── Hover-reveal action button ──────────────────────────────────────── */
+.left-rail__more-btn {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--t-hover),
+    color var(--t-hover),
+    background var(--t-hover);
+}
+.left-rail__item:hover .left-rail__more-btn,
+.left-rail__item:focus-within .left-rail__more-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.left-rail__more-btn:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.left-rail__more-btn:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.left-rail__more-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ─── Collapse toggle button ───────────────────────────────────────────── */
+.left-rail__collapse-btn {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  transition:
+    color var(--t-hover),
+    background var(--t-hover),
+    transform var(--t-panel);
+}
+.left-rail__collapse-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.left-rail__collapse-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.left-rail__collapse-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ─── Collapsed state ──────────────────────────────────────────────────── */
+.left-rail[data-collapsed="true"] .left-rail__title,
+.left-rail[data-collapsed="true"] .left-rail__plus {
+  display: none;
+}
+.left-rail[data-collapsed="true"] .left-rail__header {
+  justify-content: center;
+  padding: var(--space-2) var(--space-1);
+}
+.left-rail[data-collapsed="true"] .left-rail__collapse-btn {
+  transform: rotate(180deg);
+}
+.left-rail__search,
+.left-rail__list {
+  transition: opacity var(--t-panel);
+}
+.left-rail[data-collapsed="true"] .left-rail__search,
+.left-rail[data-collapsed="true"] .left-rail__list {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* ─── User patterns divider ───────────────────────────────────────────── */
@@ -302,7 +394,12 @@
   .left-rail__search-input,
   .left-rail__context-item,
   .left-rail__search-clear,
-  .left-rail__plus {
+  .left-rail__plus,
+  .left-rail__more-btn,
+  .left-rail__collapse-btn,
+  .left-rail__dirty-dot,
+  .left-rail__search,
+  .left-rail__list {
     transition: none;
   }
 }

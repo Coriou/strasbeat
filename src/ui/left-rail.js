@@ -54,6 +54,13 @@ export function mount({
   let listEl;
   let searchInput;
 
+  // ─── Collapse state ───────────────────────────────────────────────────
+  const COLLAPSE_KEY = "strasbeat:left-rail-collapsed";
+  const EXPANDED_W = 240;
+  const COLLAPSED_W = 36;
+  let isCollapsed = localStorage.getItem(COLLAPSE_KEY) === "true";
+  const shellEl = container.closest(".shell") ?? document.documentElement;
+
   // ─── Active context menu ──────────────────────────────────────────────
   let activeMenu = null;
   function dismissContextMenu() {
@@ -71,12 +78,43 @@ export function mount({
     if (e.key === "Escape") dismissContextMenu();
   }
 
+  // ─── Collapse ─────────────────────────────────────────────────────────
+  function toggleCollapse() {
+    isCollapsed = !isCollapsed;
+    localStorage.setItem(COLLAPSE_KEY, isCollapsed);
+    applyCollapseState();
+  }
+
+  function applyCollapseState() {
+    shellEl.style.setProperty(
+      "--left-rail-w",
+      isCollapsed ? `${COLLAPSED_W}px` : `${EXPANDED_W}px`,
+    );
+    container.setAttribute("data-collapsed", isCollapsed ? "true" : "false");
+    collapseBtn.setAttribute(
+      "aria-label",
+      isCollapsed ? "Expand patterns panel" : "Collapse patterns panel",
+    );
+  }
+
   // ─── Build the static structure once ──────────────────────────────────
   container.replaceChildren();
   container.classList.add("left-rail__section");
 
-  // Header: title + "+" button
+  // Header: collapse toggle + title + "+" button.
+  // Collapse button is first so it remains visible in the 36px collapsed strip.
   const header = el("div", "left-rail__header");
+
+  const collapseBtn = el("button", "btn btn--icon left-rail__collapse-btn");
+  collapseBtn.type = "button";
+  collapseBtn.setAttribute(
+    "aria-label",
+    isCollapsed ? "Expand patterns panel" : "Collapse patterns panel",
+  );
+  collapseBtn.appendChild(makeIcon("chevron-left", { size: 14 }));
+  collapseBtn.addEventListener("click", toggleCollapse);
+  header.appendChild(collapseBtn);
+
   const title = el("span", "left-rail__title", "Patterns");
   header.appendChild(title);
 
@@ -146,6 +184,7 @@ export function mount({
   container.appendChild(listEl);
 
   renderList();
+  applyCollapseState();
 
   // Scroll the active pattern into view after mount (no animation on first paint).
   requestAnimationFrame(() => {
@@ -158,11 +197,15 @@ export function mount({
     listEl.replaceChildren();
 
     const filteredShipped = query
-      ? shippedNames.filter((name) => name.toLowerCase().includes(query))
+      ? shippedNames.filter((name) =>
+          prettyName(name).toLowerCase().includes(query),
+        )
       : shippedNames;
 
     const filteredUser = query
-      ? userPatternNames.filter((name) => name.toLowerCase().includes(query))
+      ? userPatternNames.filter((name) =>
+          prettyName(name).toLowerCase().includes(query),
+        )
       : userPatternNames;
 
     if (!filteredShipped.length && !filteredUser.length) {
@@ -206,25 +249,26 @@ export function mount({
     row.appendChild(accentEl);
 
     const nameEl = el("span", "left-rail__item-name");
+    const display = prettyName(name);
     if (query) {
-      const lower = name.toLowerCase();
-      const idx = lower.indexOf(query);
+      const lowerDisplay = display.toLowerCase();
+      const idx = lowerDisplay.indexOf(query);
       if (idx >= 0) {
-        nameEl.appendChild(document.createTextNode(name.slice(0, idx)));
+        nameEl.appendChild(document.createTextNode(display.slice(0, idx)));
         const match = el(
           "span",
           "left-rail__item-match",
-          name.slice(idx, idx + query.length),
+          display.slice(idx, idx + query.length),
         );
         nameEl.appendChild(match);
         nameEl.appendChild(
-          document.createTextNode(name.slice(idx + query.length)),
+          document.createTextNode(display.slice(idx + query.length)),
         );
       } else {
-        nameEl.textContent = name;
+        nameEl.textContent = display;
       }
     } else {
-      nameEl.textContent = name;
+      nameEl.textContent = display;
     }
     row.appendChild(nameEl);
 
@@ -234,8 +278,22 @@ export function mount({
     // Modified dot for shipped patterns with working copies.
     if (!isUser && dirtySet.has(name)) {
       const dot = el("span", "left-rail__dirty-dot");
-      dot.title = "Modified — right-click to revert";
+      dot.title = "Modified";
       metaEl.appendChild(dot);
+    }
+
+    // Hover-reveal action button — visible alternative to right-click.
+    if (isUser || dirtySet.has(name)) {
+      const moreBtn = el("button", "left-rail__more-btn");
+      moreBtn.type = "button";
+      moreBtn.setAttribute("aria-label", "Pattern options");
+      moreBtn.appendChild(makeIcon("more-horizontal", { size: 12 }));
+      moreBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const rect = moreBtn.getBoundingClientRect();
+        showContextMenu(rect.right, rect.top, name, isUser);
+      });
+      metaEl.appendChild(moreBtn);
     }
 
     row.appendChild(metaEl);
@@ -429,4 +487,18 @@ function el(tag, className, text) {
   if (className) e.className = className;
   if (text != null) e.textContent = text;
   return e;
+}
+
+// ─── Pretty name ─────────────────────────────────────────────────────────
+// Strips leading numeric+letter prefixes (e.g. "25-", "G3-") and title-cases
+// the result so pattern names read like track titles, not filenames.
+//   "25-dub"              → "Dub"
+//   "G3-progression-demo" → "Progression Demo"
+//   "ben-choir"           → "Ben Choir"
+
+function prettyName(raw) {
+  const stripped = raw.replace(/^[a-zA-Z]*\d+[a-zA-Z]*-/, "");
+  const spaced = stripped.replace(/[-_]/g, " ");
+  const titled = spaced.replace(/\b\w/g, (c) => c.toUpperCase());
+  return titled.trim() || raw;
 }
