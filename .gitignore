@@ -5,3 +5,6 @@ dist
 
 # upstream Strudel source kept locally for reference / grep'ing
 strudel-source
+
+# Playwright MCP page snapshots
+.playwright-mcp/

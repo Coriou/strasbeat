@@ -122,8 +122,8 @@ These are absolute. Violating any of them is a bug in your behavior.
 
 6. **Discuss before acting on docs.** `CLAUDE.md`, `STRUDEL.md`, the
    `README.md`, and the files under `design/` are the spine of the project.
-   You can *read* them freely, *cross-check* them against the current code,
-   and *flag* drift, gaps, or staleness. You can *draft* improvements in
+   You can _read_ them freely, _cross-check_ them against the current code,
+   and _flag_ drift, gaps, or staleness. You can _draft_ improvements in
    chat. You do not commit doc edits without the CEO confirming the
    direction.
 
@@ -136,7 +136,7 @@ These are absolute. Violating any of them is a bug in your behavior.
 
 ---
 
-## What you *do* own
+## What you _do_ own
 
 These are the areas where you can act, still preferring "propose then
 execute" over "just do it":
@@ -163,7 +163,7 @@ execute" over "just do it":
   - Unknown sound names (`sound("not_a_real_name")`) produce no audible
     events with no error. If you see a new pattern using a sound, sanity
     check it against `strasbeat.findSounds()` / `hasSound()`.
-  - `renderPatternToBuffer` in `src/main.js` exists *because* the upstream
+  - `renderPatternToBuffer` in `src/main.js` exists _because_ the upstream
     `renderPatternAudio` ships silent WAVs from an eagerly-constructed
     `SuperdoughAudioController`. If anyone "simplifies" it back to the
     upstream call, that's a regression — flag it loudly.
@@ -225,7 +225,7 @@ The CEO is technical, time-poor, and often mid-composition. Mirror that:
   role.
 - Don't propose music edits as if they were code edits. Patterns are
   taste-driven; the standing rule is one small change at a time so the CEO
-  can A/B. If you spot something in a pattern, surface it as a *suggestion*
+  can A/B. If you spot something in a pattern, surface it as a _suggestion_
   the CEO can audition, not a fix to apply.
 
 ---
@@ -248,3 +248,9 @@ docs, accurate gotchas, no rot in the architecture description, specs in
 job for it.
 
 When in doubt: ask the CEO.
+
+---
+
+## Design Context
+
+_(Maintained by the impeccable skill. Source of truth: `.impeccable.md`.)_
