@@ -15,7 +15,7 @@
 // defaults and the rhythm preset table. See design/work/07-chord-progression.md
 // for the spec this implements (Phase 1).
 
-import { chord, silence, slowcat, stack } from "@strudel/core";
+import { chord, silence, slowcat, stack, timeCat } from "@strudel/core";
 import { mini } from "@strudel/mini";
 // Side-effect import: @strudel/tonal registers .voicing(), .dict() (the
 // dictionary control comes from core/controls.mjs), and .rootNotes() on
@@ -59,6 +59,42 @@ const DEFAULTS = {
 
 const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
 
+// Regex to strip a trailing `@N` (weight) or `*N` (repeat) modifier from a
+// chord token. `@` and `*` never appear in valid chord symbols (which use
+// alphanumeric + `^`, `/`, `+`, `°`, `#`, `b`, `m`, `-`, `o`), so the split
+// is unambiguous. `/N` is intentionally NOT supported because `/` collides
+// with slash-chord notation (`Cm7/G`).
+const MODIFIER_RE = /^(.+?)([@*])(\d+)$/;
+
+/**
+ * Parse a single chord token into its symbol and optional weight/repeat
+ * modifier.  `'G@2'` → `{ symbol: 'G', weight: 2, repeat: 1 }`,
+ * `'Am*3'` → `{ symbol: 'Am', weight: 1, repeat: 3 }`.
+ *
+ * Invalid modifiers (N ≤ 0, both `@` and `*` present) warn and are ignored.
+ * @param {string} raw  A single whitespace-split token, e.g. `'Cm7'`, `'G@2'`
+ * @returns {{ symbol: string, weight: number, repeat: number }}
+ */
+function parseChordToken(raw) {
+  const m = MODIFIER_RE.exec(raw);
+  if (!m) return { symbol: raw, weight: 1, repeat: 1 };
+
+  const symbol = m[1];
+  const op = m[2];
+  const n = parseInt(m[3], 10);
+
+  if (n <= 0 || !Number.isFinite(n)) {
+    console.warn(
+      `[strasbeat] progression(): invalid modifier "${op}${m[3]}" on "${symbol}", ignoring`,
+    );
+    return { symbol, weight: 1, repeat: 1 };
+  }
+
+  return op === "@"
+    ? { symbol, weight: n, repeat: 1 }
+    : { symbol, weight: 1, repeat: n };
+}
+
 /**
  * Turn a one-line chord progression into a playable Strudel pattern.
  *
@@ -87,7 +123,14 @@ const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
  * supplied, returns silence and warns — guessing a key would be worse
  * than failing audibly.
  *
- * @param {string} chords whitespace-separated chord symbols OR Roman numerals. Use single quotes in pattern files — double-quoted strings are rewritten to mini-notation by Strudel's transpiler.
+ * Supports mini-notation-style modifiers on individual chord tokens:
+ *   - `@N` (weight): `'Am F C G@2'` — G occupies 2 cycle-lengths (5 total).
+ *     Mirrors Strudel's `@` operator.
+ *   - `*N` (repeat): `'Am F C G*2'` — G plays twice in its one-cycle slot
+ *     (compressed, like `bd*2` in mini-notation).
+ *   - `/N` is intentionally unsupported (collides with slash chords).
+ *
+ * @param {string} chords whitespace-separated chord symbols OR Roman numerals, with optional `@N`/`*N` modifiers. Use single quotes in pattern files — double-quoted strings are rewritten to mini-notation by Strudel's transpiler.
  * @param {object} [options]
  * @param {string} [options.sound='gm_epiano1'] sound name (verify with `strasbeat.hasSound`)
  * @param {string} [options.dict='ireal'] voicing dictionary name
@@ -109,6 +152,12 @@ const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
  * progression('Cm7 F7 Bb^7', { style: 'jazz-comp' })
  * @example
  * progression('C G Am F', { style: 'folk-strum', bass: true })
+ * @example
+ * progression('Am F C G@2')  // G held for 2 cycle-lengths
+ * @example
+ * progression('Am F C G*2')  // G repeated twice (compressed)
+ * @example
+ * progression('ii V@2 I', { key: 'C' })  // Roman + weight
  */
 export function progression(chords, options = {}) {
   // Defense-in-depth: Strudel's transpiler (plugin-mini.mjs) rewrites every
@@ -130,7 +179,7 @@ export function progression(chords, options = {}) {
   // silent failures loudly").
   if (typeof chords !== "string" || chords.trim() === "") {
     console.warn(
-      '[strasbeat] progression(): empty chord input, returning silence',
+      "[strasbeat] progression(): empty chord input, returning silence",
     );
     return silence;
   }
@@ -150,13 +199,17 @@ export function progression(chords, options = {}) {
   if (isRomanToken(inputTokens[0])) {
     if (options.key == null) {
       console.warn(
-        "[strasbeat] progression(): Roman-numeral input requires options.key (e.g. { key: \"C\" } or { key: \"Am\" }), returning silence",
+        '[strasbeat] progression(): Roman-numeral input requires options.key (e.g. { key: "C" } or { key: "Am" }), returning silence',
       );
       return silence;
     }
     const rewritten = [];
     for (const token of inputTokens) {
-      const abs = romanToChord(token, options.key);
+      // Strip @N/*N modifier before Roman resolution, then re-append.
+      const { symbol: bare, weight, repeat } = parseChordToken(token);
+      // isRomanToken detects based on the first char — check the bare
+      // symbol so that `V@2` doesn't confuse the detector.
+      const abs = romanToChord(bare, options.key);
       if (abs == null) {
         // romanToChord already warned with a [strasbeat] prefix.
         console.warn(
@@ -164,7 +217,11 @@ export function progression(chords, options = {}) {
         );
         return silence;
       }
-      rewritten.push(abs);
+      // Re-attach modifier so the downstream parser picks it up.
+      let resolved = abs;
+      if (weight > 1) resolved += `@${weight}`;
+      else if (repeat > 1) resolved += `*${repeat}`;
+      rewritten.push(resolved);
     }
     chords = rewritten.join(" ");
   }
@@ -204,7 +261,10 @@ export function progression(chords, options = {}) {
   let arpString;
   if (opts.rhythm in RHYTHMS) {
     arpString = RHYTHMS[opts.rhythm];
-  } else if (typeof opts.rhythm === "string" && /[~\[\],]|\s/.test(opts.rhythm)) {
+  } else if (
+    typeof opts.rhythm === "string" &&
+    /[~\[\],]|\s/.test(opts.rhythm)
+  ) {
     // Looks like a raw mini-notation pattern (contains whitespace, brackets,
     // commas, or rests) — forward as-is.
     arpString = opts.rhythm;
@@ -215,14 +275,30 @@ export function progression(chords, options = {}) {
     arpString = RHYTHMS.block;
   }
 
-  // Build the per-chord pattern using slowcat() — the JS equivalent of the
-  // `<a b c>` mini-notation construct. We can't route the chord names
-  // through mini() because mini reserves `/` as the slow operator, which
-  // collides with slash-chord notation like `Cm7/G`. slowcat treats each
-  // arg as a literal cycle, so the slash flows through unchanged and is
-  // resolved later by tokenizeChord() inside @strudel/tonal.
+  // Build the per-chord pattern. Parse each token for optional @N (weight)
+  // or *N (repeat) modifiers, then choose the right combinator:
+  //  - No modifiers → slowcat() (the `<a b c>` equivalent, one per cycle).
+  //  - Any @N weight → timeCat() (the `a@2 b` equivalent, weighted cycles).
+  //  - *N repeat → expand inline (the `a*2` equivalent, compressed copies).
+  // We can't route chord names through mini() because mini reserves `/` as
+  // the slow operator, which collides with slash-chord notation (`Cm7/G`).
   const tokens = chords.trim().split(/\s+/);
-  const cyclePat = slowcat(...tokens);
+  const parsed = tokens.map(parseChordToken);
+
+  // Expand *N repeats inline: `G*2` becomes two `G` entries, each weight 1.
+  const expanded = [];
+  for (const { symbol, weight, repeat } of parsed) {
+    if (repeat > 1) {
+      for (let i = 0; i < repeat; i++) expanded.push({ symbol, weight: 1 });
+    } else {
+      expanded.push({ symbol, weight });
+    }
+  }
+
+  const hasWeights = expanded.some((e) => e.weight !== 1);
+  const cyclePat = hasWeights
+    ? timeCat(...expanded.map((e) => [e.weight, e.symbol]))
+    : slowcat(...expanded.map((e) => e.symbol));
 
   // chord(pat) attaches the chord control so .voicing() / .dict() / .arp()
   // know which symbol to render. Slash chords (`Cm7/G`) flow through

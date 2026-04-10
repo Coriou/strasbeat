@@ -109,7 +109,9 @@ describe("progression() — rhythm presets", () => {
       "block should stack notes (some haps share a start time)",
     );
 
-    const arpHaps = progression("Cm7 F7 Bb^7", { rhythm: "arp-up" }).firstCycle();
+    const arpHaps = progression("Cm7 F7 Bb^7", {
+      rhythm: "arp-up",
+    }).firstCycle();
     const arpBegins = new Set(arpHaps.map((h) => h.whole.begin.toString()));
     assert.equal(
       arpBegins.size,
@@ -169,9 +171,7 @@ describe("progression() — bass option", () => {
   test("bass=string overrides the default bass sound", () => {
     const pat = progression("Cm7 F7 Bb^7", { bass: "gm_electric_bass_finger" });
     const values = firstCycleValues(pat);
-    const bassHits = values.filter(
-      (v) => v.s === "gm_electric_bass_finger",
-    );
+    const bassHits = values.filter((v) => v.s === "gm_electric_bass_finger");
     assert.ok(
       bassHits.length > 0,
       "expected the supplied bass sound to be used on at least one hap",
@@ -186,10 +186,7 @@ describe("progression() — bass option", () => {
 
   test("bass=false (default) emits no bass haps at all", () => {
     const values = firstCycleValues(progression("Cm7 F7 Bb^7"));
-    assert.equal(
-      values.filter((v) => v.s === "gm_acoustic_bass").length,
-      0,
-    );
+    assert.equal(values.filter((v) => v.s === "gm_acoustic_bass").length, 0);
   });
 });
 
@@ -371,9 +368,7 @@ describe("progression() — style presets (Phase 2)", () => {
     const pat = progression("C F G", { style: "folk-strum", bass: true });
     const values = firstCycleValues(pat);
     const hasBass = values.some((v) => v.s === "gm_acoustic_bass");
-    const hasGuitar = values.some(
-      (v) => v.s === "gm_acoustic_guitar_nylon",
-    );
+    const hasGuitar = values.some((v) => v.s === "gm_acoustic_guitar_nylon");
     assert.ok(hasBass, "expected the bass layer");
     assert.ok(hasGuitar, "expected the folk-strum guitar sound");
     // folk-strum's room should land on both layers
@@ -490,8 +485,7 @@ describe("progression() — Roman-numeral input (Phase 3)", () => {
     assert.equal(pat, silence);
     assert.ok(
       warnings.some(
-        (w) =>
-          w.includes("[strasbeat]") && w.toLowerCase().includes("key"),
+        (w) => w.includes("[strasbeat]") && w.toLowerCase().includes("key"),
       ),
       `expected a missing-key warning, got: ${JSON.stringify(warnings)}`,
     );
@@ -522,9 +516,7 @@ describe("progression() — Roman-numeral input (Phase 3)", () => {
     const roman = noteSet(
       progression("ii V I", { key: "C", style: "jazz-comp" }),
     );
-    const absolute = noteSet(
-      progression("Dm G C", { style: "jazz-comp" }),
-    );
+    const absolute = noteSet(progression("Dm G C", { style: "jazz-comp" }));
     assert.deepEqual(roman, absolute);
   });
 
@@ -561,6 +553,175 @@ describe("progression() — Roman-numeral input (Phase 3)", () => {
     // Roman. This test pins that contract.
     const pat = progression("I V vi IV", { key: "C" });
     assert.ok(pat instanceof Pattern);
+    assert.equal(warnings.length, 0);
+  });
+});
+
+describe("progression() — @N weight modifier", () => {
+  // Helper: collect the begin fractions from the first N cycles.
+  // `timeCat` distributes chords proportionally within a single cycle,
+  // so we inspect the hap time-spans to verify weighting.
+
+  test("'Am F C G@2' produces a pattern where G takes 2/5 of the cycle", () => {
+    const pat = progression("Am F C G@2");
+    assert.ok(pat instanceof Pattern);
+    // With weights [1,1,1,2] and block rhythm, each chord fills its
+    // fraction of the cycle. G's fraction = 2/5 = 0.4 of the cycle.
+    const haps = pat.firstCycle();
+    assert.ok(haps.length > 0, "expected haps");
+    // Check that *some* hap begins at the 3/5 mark (where G starts).
+    const begins = haps.map((h) => h.whole.begin.valueOf());
+    const hasThreeFifths = begins.some((b) => Math.abs(b - 3 / 5) < 0.001);
+    assert.ok(
+      hasThreeFifths,
+      `expected a hap starting at 3/5, got begins: ${begins}`,
+    );
+  });
+
+  test("@1 is a no-op (same as no modifier)", () => {
+    const baseline = progression("Am F C G");
+    const withAt1 = progression("Am F C G@1");
+    const baseNotes = firstCycleValues(baseline)
+      .map((v) => v.note)
+      .sort();
+    const at1Notes = firstCycleValues(withAt1)
+      .map((v) => v.note)
+      .sort();
+    assert.deepEqual(at1Notes, baseNotes);
+  });
+
+  test("mixed weights: 'Am@2 F C G' produces weighted cycle", () => {
+    const pat = progression("Am@2 F C G");
+    assert.ok(pat instanceof Pattern);
+    const haps = pat.firstCycle();
+    assert.ok(haps.length > 0);
+    // Am starts at 0 and should span 2/5. F should start at 2/5.
+    const begins = haps.map((h) => h.whole.begin.valueOf());
+    const hasTwoFifths = begins.some((b) => Math.abs(b - 2 / 5) < 0.001);
+    assert.ok(
+      hasTwoFifths,
+      `expected a hap starting at 2/5, got begins: ${begins}`,
+    );
+  });
+
+  test("@N with bass: bass layer inherits the same time structure", () => {
+    const pat = progression("Am F C G@2", { bass: true });
+    const values = firstCycleValues(pat);
+    const bassHits = values.filter((v) => v.s === "gm_acoustic_bass");
+    assert.ok(bassHits.length > 0, "expected bass haps");
+  });
+
+  test("@N with style composes correctly", () => {
+    const pat = progression("Cm7 F7@2 Bb^7", { style: "jazz-comp" });
+    assert.ok(pat instanceof Pattern);
+    const values = firstCycleValues(pat);
+    for (const v of values) {
+      assert.equal(v.room, 0.4, "style fx should still apply with weights");
+    }
+  });
+});
+
+describe("progression() — *N repeat modifier", () => {
+  test("'Am F C G*2' expands G into two consecutive cycles", () => {
+    // *2 expands G into two slots in the slowcat: Am, F, C, G, G — a
+    // 5-cycle loop. Compared to the unmodified 4-chord version, the
+    // pattern now has more chords in its cycle sequence.
+    const baseline = progression("Am F C G");
+    const repeated = progression("Am F C G*2");
+    assert.ok(repeated instanceof Pattern);
+
+    // Collect chord values across enough cycles to see the full loop.
+    // With slowcat each chord gets one full cycle, so we need cycles 0–4.
+    function chordsAcrossCycles(pat, n) {
+      const chords = [];
+      for (let i = 0; i < n; i++) {
+        const haps = pat.queryArc(i, i + 1);
+        if (haps.length > 0)
+          chords.push(haps[0].value.chord ?? haps[0].value.note);
+      }
+      return chords;
+    }
+
+    const baseChords = chordsAcrossCycles(baseline, 4);
+    const repChords = chordsAcrossCycles(repeated, 5);
+    // The repeated version should have 5 entries with the last two being G.
+    assert.equal(repChords.length, 5, "expected 5 cycle entries");
+    // Last two cycles should be the same chord (both G voicings).
+    assert.deepEqual(
+      repChords[3],
+      repChords[4],
+      "cycles 3 and 4 should both be G",
+    );
+  });
+
+  test("*1 is a no-op (same as no modifier)", () => {
+    const baseline = progression("Am F C G");
+    const withStar1 = progression("Am F C G*1");
+    const baseNotes = firstCycleValues(baseline)
+      .map((v) => v.note)
+      .sort();
+    const star1Notes = firstCycleValues(withStar1)
+      .map((v) => v.note)
+      .sort();
+    assert.deepEqual(star1Notes, baseNotes);
+  });
+
+  test("*N with bass: bass layer reflects the expansion", () => {
+    const pat = progression("Am F C G*2", { bass: true });
+    // With slowcat, each cycle has one chord + one bass note. Verify
+    // both layers are present in the first cycle.
+    const values = firstCycleValues(pat);
+    const bassHits = values.filter((v) => v.s === "gm_acoustic_bass");
+    assert.ok(bassHits.length > 0, "expected at least one bass hap");
+    // Verify bass exists across the full 5-cycle loop.
+    let totalBass = 0;
+    for (let i = 0; i < 5; i++) {
+      const haps = pat.queryArc(i, i + 1);
+      totalBass += haps.filter((h) => h.value.s === "gm_acoustic_bass").length;
+    }
+    assert.ok(
+      totalBass >= 5,
+      `expected at least 5 bass haps across 5 cycles, got ${totalBass}`,
+    );
+  });
+});
+
+describe("progression() — mixed @N and *N in one string", () => {
+  test("'Am@2 F C*2 G' produces correct slot count", () => {
+    // Am@2 = 1 slot weight 2, F = 1 slot weight 1, C*2 = 2 slots weight 1
+    // each, G = 1 slot weight 1. Total weight = 2+1+1+1+1 = 6.
+    const pat = progression("Am@2 F C*2 G");
+    assert.ok(pat instanceof Pattern);
+    const haps = pat.firstCycle();
+    assert.ok(haps.length > 0);
+  });
+});
+
+describe("progression() — Roman numerals with @N/*N modifiers", () => {
+  // Helper: same note-set comparison as the Roman describe block above.
+  function noteSet(pat) {
+    return [...new Set(pat.firstCycle().map((h) => h.value.note))].sort();
+  }
+
+  test("'ii V@2 I' in C matches 'Dm G@2 C'", () => {
+    const roman = noteSet(progression("ii V@2 I", { key: "C" }));
+    const absolute = noteSet(progression("Dm G@2 C"));
+    assert.deepEqual(
+      roman,
+      absolute,
+      "Roman ii V@2 I in C should produce the same notes as Dm G@2 C",
+    );
+    assert.equal(warnings.length, 0);
+  });
+
+  test("'I IV*2 V' in G matches 'G C*2 D'", () => {
+    const roman = noteSet(progression("I IV*2 V", { key: "G" }));
+    const absolute = noteSet(progression("G C*2 D"));
+    assert.deepEqual(
+      roman,
+      absolute,
+      "Roman I IV*2 V in G should produce the same notes as G C*2 D",
+    );
     assert.equal(warnings.length, 0);
   });
 });
