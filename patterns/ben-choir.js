@@ -5,7 +5,7 @@ drums: stack(
   sound("bd ~ sd ~"),
   sound("~ [bd*2,bd] [bd*2] ~").s("808bd").pan(sine.slow(2)),
   sound("~ [sd*2,sd] [sd*2] ~").s("808sd").pan(sine.slow(2)),
-  sound("[hh*2, oh*2] hh [hh,hh] [hh, oh]*2")
+  sound("[hh*2] hh [hh,hh] [hh]*2")
     .pan(sine.slow(2))
     .hpf(800)
     .crush("<16 8 8 6 6 8 8 8>"),
@@ -42,8 +42,10 @@ bass: progression(chords)
   .lpf(1200)
   .lpenv(4)
 
-bassrev: progression(chords)
-  .s("gm_acoustic_bass")
+bassroom: progression(chords)
+  .s(
+    "[gm_acoustic_bass, gm_acoustic_guitar_steel, gm_acoustic_guitar_nylon, gm_alto_sax]",
+  )
   .room(0.25)
   .roomfade(1)
   .lpf(200)
@@ -53,6 +55,6 @@ bassrev: progression(chords)
   .lpenv(4)
   .attack("<0.25 0.5 0.25>")
   .sustain("<0.85 0.7 0.85>")
-  .gain(0.75)
-  .rev()
+  .gain(0.5)
+  .delay(1)
 `;
