@@ -577,7 +577,6 @@ const midiBar = mountMidiBar({
     currentPreset = key;
     midiBar.persistState();
   },
-  onCaptureStateChange: () => {},
 });
 
 // Hydrate icons inside the dynamically built MIDI bar.

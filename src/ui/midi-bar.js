@@ -125,16 +125,9 @@ function drawKeyboard(canvas, activeNotes, octaveShift) {
  * @param {import('../midi-bridge.js').MidiBridge} opts.midi
  * @param {() => string} opts.getPreset        current preset key
  * @param {(key: string) => void} opts.onPresetChange
- * @param {(s: {recording: boolean, count?: number}) => void} opts.onCaptureStateChange
  * @returns {{ dispose: () => void, setCaptureState: (s: {recording: boolean, count?: number}) => void }}
  */
-export function mountMidiBar({
-  container,
-  midi,
-  getPreset,
-  onPresetChange,
-  onCaptureStateChange,
-}) {
+export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   // ─── Build DOM ──────────────────────────────────────────────────────
   container.innerHTML = "";
 
@@ -545,6 +538,24 @@ export function mountMidiBar({
         ".midi-bar__preset-item.is-focused",
       );
       if (focused) focused.click();
+    }
+    // Tab focus trap — cycle within the popover when open.
+    if (e.key === "Tab") {
+      const focusable = [
+        ...popover.querySelectorAll(
+          'input, button:not([hidden]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => !el.hidden && el.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   });
 

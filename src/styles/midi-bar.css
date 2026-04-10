@@ -168,7 +168,7 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-1);
   transition: border-color var(--t-hover);
   white-space: nowrap;
 }
@@ -212,7 +212,7 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   color: var(--text);
-  font: var(--text-xs) var(--font-sans);
+  font: 500 var(--text-xs) var(--font-sans);
   outline: none;
 }
 .midi-bar__preset-filter:focus {
@@ -236,11 +236,11 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  padding: 3px var(--space-3);
+  padding: var(--space-1) var(--space-3);
   border: none;
   background: transparent;
   color: var(--text);
-  font: var(--text-xs) var(--font-sans);
+  font: 500 var(--text-xs) var(--font-sans);
   cursor: pointer;
   text-align: left;
 }
@@ -303,7 +303,7 @@
   display: none;
   min-width: 14px;
   height: 14px;
-  padding: 0 3px;
+  padding: 0 var(--space-1);
   background: var(--rec);
   color: var(--text);
   border-radius: 7px;
@@ -321,6 +321,7 @@
 @keyframes midi-capture-pulse {
   0%,
   100% {
+    /* --rec with alpha — matches oklch(0.65 0.22 25) */
     box-shadow: 0 0 0 0 oklch(0.65 0.22 25 / 0.45);
   }
   50% {
