@@ -23,7 +23,7 @@ lead: progression(chords, {
   .room("0.25")
   .decay("0.25")
   .sus("0.9")
-  .lpf("800")
+  .lpf("400")
   .pan(sine.slow(1))
 
 leadback: progression(chords, {
@@ -32,9 +32,10 @@ leadback: progression(chords, {
 })
   .s("gm_bassoon")
   .room("0.5")
-  .lpf("800")
+  .lpf("200")
   .pan(sine.slow(4))
   .mask("<1 1 1 0>")
+  .gain(0.75)
   .rev()
 
 choirs: progression(chords, {

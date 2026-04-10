@@ -1,21 +1,10 @@
-// 06-progression-demo — one-line chord progressions via progression()
-// concepts: progression() helper, rhythm presets (block / arp-up / comp), bass layer
-
-// progression() turns a string of chord symbols into a playable Strudel
-// pattern, with sensible defaults for voicing, sound, and rhythm. The
-// helper lives in src/strudel-ext/progression.js — see
-// design/work/07-chord-progression.md for the spec.
-//
-// Try editing the rhythm name (block / strum / comp / arp-up / arp-down /
-// alberti) to audition different feels on the same chord progression.
-
 export default `
 setcpm(110/4)
 
-// the 80% case: one line, one chord progression, audible chords.
-// NOTE: single quotes around the chord string are required — Strudel's
-// transpiler rewrites double-quoted strings into mini-notation, which
-// would silently break progression(). See progression.js header.
+drums: s("bd*2, ~ sd:1, hh*8")
+  .bank("RolandTR909")
+  .gain(0.7)
+
 keys: progression('Cm7 F7 Bb^7 Eb^7')
   .room(0.4)
   .gain(0.55)
@@ -35,8 +24,5 @@ bass_and_comp: progression('Cm7 F7 Bb^7 Eb^7', {
   bass: 'gm_electric_bass_finger',
 }).gain(0.6)
 
-// drums round it out
-drums: s("bd*2, ~ sd:1, hh*8")
-  .bank("RolandTR909")
-  .gain(0.7)
+
 `;
