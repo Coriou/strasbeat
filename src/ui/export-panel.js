@@ -40,11 +40,11 @@
 // src/ui/sound-browser.js, src/ui/reference-panel.js, and
 // src/ui/console-panel.js.
 
-import { makeIcon } from './icons.js';
+import { makeIcon } from "./icons.js";
 
-const STORAGE_KEY_CYCLES = 'strasbeat:export-cycles';
-const STORAGE_KEY_RATE = 'strasbeat:export-rate';
-const STORAGE_KEY_FILENAME = 'strasbeat:export-filename';
+const STORAGE_KEY_CYCLES = "strasbeat:export-cycles";
+const STORAGE_KEY_RATE = "strasbeat:export-rate";
+const STORAGE_KEY_FILENAME = "strasbeat:export-filename";
 
 const DEFAULT_CYCLES = 4;
 const MIN_CYCLES = 1;
@@ -68,16 +68,16 @@ const NEAR_SILENT_PEAK = 0.001;
 export function createExportPanel({
   onFocusEditor = () => {},
   onExport = async () => {
-    throw new Error('export-panel: onExport not wired');
+    throw new Error("export-panel: onExport not wired");
   },
-  getPatternName = () => 'untitled',
+  getPatternName = () => "untitled",
 }) {
   // ─── State ────────────────────────────────────────────────────────────
   // 'idle' — show inputs + Export button; progress/result/error hidden
   // 'running' — progress bar visible, inputs disabled, button → "Cancel"
   // 'done' — waveform + stats + download-again shown below progress
   // 'error' — error message + try-again shown below progress
-  let mode = 'idle';
+  let mode = "idle";
   /** @type {ExportResult | null} Last successful render — cached so the
    *  download-again button can redownload without re-rendering. */
   let lastResult = null;
@@ -107,9 +107,9 @@ export function createExportPanel({
   // ─── Right-rail panel spec ────────────────────────────────────────────
 
   return {
-    id: 'export',
-    icon: 'download',
-    label: 'Export',
+    id: "export",
+    icon: "download",
+    label: "Export",
     create,
     activate,
     deactivate,
@@ -124,43 +124,43 @@ export function createExportPanel({
 
   function create(container) {
     root = container;
-    root.classList.add('export-panel');
+    root.classList.add("export-panel");
 
     // ─── Controls block ────────────────────────────────────────────────
     // Three rows: filename, cycles, sample rate. Every row shares the
     // same label-then-control layout via grid so the control columns
     // line up regardless of label text.
-    const controls = el('div', 'export-panel__controls');
+    const controls = el("div", "export-panel__controls");
 
     // Filename — defaults to the current pattern name, refreshed on
     // every activate() so the input always reflects what's loaded. The
     // input never carries a `.wav` suffix; the host appends it.
-    const filenameRow = buildRow('Filename');
-    filenameInput = el('input', 'export-panel__input');
-    filenameInput.type = 'text';
-    filenameInput.placeholder = 'pattern';
-    filenameInput.setAttribute('aria-label', 'Filename');
+    const filenameRow = buildRow("Filename");
+    filenameInput = el("input", "export-panel__input");
+    filenameInput.type = "text";
+    filenameInput.placeholder = "pattern";
+    filenameInput.setAttribute("aria-label", "Filename");
     filenameInput.spellcheck = false;
-    filenameInput.autocomplete = 'off';
-    filenameInput.value = getPatternName() || 'untitled';
-    filenameInput.addEventListener('keydown', onInputKeydown);
+    filenameInput.autocomplete = "off";
+    filenameInput.value = getPatternName() || "untitled";
+    filenameInput.addEventListener("keydown", onInputKeydown);
     filenameRow.control.appendChild(filenameInput);
     controls.appendChild(filenameRow.row);
 
     // Cycles — number input with min/max validation deferred until the
     // user clicks Export (validating on every keystroke is obnoxious).
     // Persisted to localStorage so the last-used value survives reload.
-    const cyclesRow = buildRow('Cycles');
-    cyclesInput = el('input', 'export-panel__input export-panel__input--num');
-    cyclesInput.type = 'number';
+    const cyclesRow = buildRow("Cycles");
+    cyclesInput = el("input", "export-panel__input export-panel__input--num");
+    cyclesInput.type = "number";
     cyclesInput.min = String(MIN_CYCLES);
     cyclesInput.max = String(MAX_CYCLES);
-    cyclesInput.step = '1';
-    cyclesInput.inputMode = 'numeric';
-    cyclesInput.setAttribute('aria-label', 'Cycles to render');
+    cyclesInput.step = "1";
+    cyclesInput.inputMode = "numeric";
+    cyclesInput.setAttribute("aria-label", "Cycles to render");
     cyclesInput.value = String(readStoredCycles());
-    cyclesInput.addEventListener('keydown', onInputKeydown);
-    cyclesInput.addEventListener('change', () => {
+    cyclesInput.addEventListener("keydown", onInputKeydown);
+    cyclesInput.addEventListener("change", () => {
       // Persist whatever the user committed (blur/enter), not every
       // keystroke — otherwise half-typed values get saved.
       const parsed = parseCycles(cyclesInput.value);
@@ -174,106 +174,101 @@ export function createExportPanel({
     // Style the native select to match the other controls instead; it
     // blends in well enough and the options list is short. A future
     // custom picker can drop in without touching the rest of the panel.
-    const rateRow = buildRow('Rate');
-    rateSelect = el('select', 'export-panel__select');
-    rateSelect.setAttribute('aria-label', 'Sample rate');
+    const rateRow = buildRow("Rate");
+    rateSelect = el("select", "export-panel__select");
+    rateSelect.setAttribute("aria-label", "Sample rate");
     const storedRate = readStoredRate();
     for (const rate of SAMPLE_RATES) {
-      const opt = document.createElement('option');
+      const opt = document.createElement("option");
       opt.value = String(rate);
       opt.textContent = `${rate} Hz`;
       if (rate === storedRate) opt.selected = true;
       rateSelect.appendChild(opt);
     }
-    rateSelect.addEventListener('change', () => {
+    rateSelect.addEventListener("change", () => {
       const parsed = parseInt(rateSelect.value, 10);
       if (SAMPLE_RATES.includes(parsed)) writeStoredRate(parsed);
     });
-    rateSelect.addEventListener('keydown', onInputKeydown);
+    rateSelect.addEventListener("keydown", onInputKeydown);
     rateRow.control.appendChild(rateSelect);
     controls.appendChild(rateRow.row);
 
     root.appendChild(controls);
 
     // ─── Export button ─────────────────────────────────────────────────
-    exportBtn = el('button', 'export-panel__export');
-    exportBtn.type = 'button';
-    const btnIcon = el('span', 'export-panel__export-icon');
-    btnIcon.appendChild(makeIcon('download'));
+    exportBtn = el("button", "export-panel__export");
+    exportBtn.type = "button";
+    const btnIcon = el("span", "export-panel__export-icon");
+    btnIcon.appendChild(makeIcon("download"));
     exportBtn.appendChild(btnIcon);
-    const btnLabel = el('span', 'export-panel__export-label', 'Export');
+    const btnLabel = el("span", "export-panel__export-label", "Export");
     exportBtn.appendChild(btnLabel);
-    exportBtn.addEventListener('click', onExportClick);
+    exportBtn.addEventListener("click", onExportClick);
     root.appendChild(exportBtn);
 
     // ─── Progress row (hidden until a render starts) ──────────────────
-    progressRow = el('div', 'export-panel__progress');
+    progressRow = el("div", "export-panel__progress");
     progressRow.hidden = true;
-    const progressBar = el('div', 'export-panel__progress-bar');
-    progressFill = el('div', 'export-panel__progress-fill');
+    const progressBar = el("div", "export-panel__progress-bar");
+    progressFill = el("div", "export-panel__progress-fill");
     progressBar.appendChild(progressFill);
     progressRow.appendChild(progressBar);
-    progressLabel = el('div', 'export-panel__progress-label', '0%');
+    progressLabel = el("div", "export-panel__progress-label", "0%");
     progressRow.appendChild(progressLabel);
     root.appendChild(progressRow);
 
     // ─── Result section (hidden until a render succeeds) ──────────────
-    resultSection = el('div', 'export-panel__result');
+    resultSection = el("div", "export-panel__result");
     resultSection.hidden = true;
 
     // Waveform canvas. Size is set in CSS; the backing store is scaled
     // to dpr when we draw into it so HiDPI screens stay crisp.
-    const waveformWrap = el('div', 'export-panel__waveform');
-    waveformCanvas = document.createElement('canvas');
-    waveformCanvas.className = 'export-panel__waveform-canvas';
-    waveformCanvas.setAttribute('aria-label', 'Exported waveform');
+    const waveformWrap = el("div", "export-panel__waveform");
+    waveformCanvas = document.createElement("canvas");
+    waveformCanvas.className = "export-panel__waveform-canvas";
+    waveformCanvas.setAttribute("aria-label", "Exported waveform");
     waveformWrap.appendChild(waveformCanvas);
     resultSection.appendChild(waveformWrap);
 
     // Stats lines — two rows of dense mono text + a per-line peak read-
     // out. The spec shows peak dB with an "silent!" fallback when the
     // buffer is completely zero.
-    statsLine1 = el('div', 'export-panel__stats export-panel__stats--name');
-    statsLine2 = el('div', 'export-panel__stats');
-    statsPeak = el('div', 'export-panel__stats export-panel__stats--peak');
+    statsLine1 = el("div", "export-panel__stats export-panel__stats--name");
+    statsLine2 = el("div", "export-panel__stats");
+    statsPeak = el("div", "export-panel__stats export-panel__stats--peak");
     resultSection.appendChild(statsLine1);
     resultSection.appendChild(statsLine2);
     resultSection.appendChild(statsPeak);
 
     // Silent-export warning — hidden by default, filled in by showResult
     // when peak is near zero.
-    warningEl = el('div', 'export-panel__warning');
+    warningEl = el("div", "export-panel__warning");
     warningEl.hidden = true;
-    warningEl.textContent =
-      'This export appears silent — check your pattern.';
+    warningEl.textContent = "This export appears silent — check your pattern.";
     resultSection.appendChild(warningEl);
 
     // Download-again button — re-downloads the cached WAV bytes so the
     // user doesn't have to re-render just to save it to a different
     // folder.
     downloadAgainBtn = el(
-      'button',
-      'export-panel__download-again',
-      'Download again',
+      "button",
+      "export-panel__download-again",
+      "Download again",
     );
-    downloadAgainBtn.type = 'button';
-    downloadAgainBtn.addEventListener('click', onDownloadAgain);
+    downloadAgainBtn.type = "button";
+    downloadAgainBtn.addEventListener("click", onDownloadAgain);
     resultSection.appendChild(downloadAgainBtn);
 
     root.appendChild(resultSection);
 
     // ─── Error section (hidden until showError is called) ─────────────
-    errorSection = el('div', 'export-panel__error');
+    errorSection = el("div", "export-panel__error");
     errorSection.hidden = true;
-    errorMsgEl = el('div', 'export-panel__error-message');
+    errorMsgEl = el("div", "export-panel__error-message");
     errorSection.appendChild(errorMsgEl);
-    tryAgainBtn = el(
-      'button',
-      'export-panel__try-again',
-      'Try again',
-    );
-    tryAgainBtn.type = 'button';
-    tryAgainBtn.addEventListener('click', () => {
+    tryAgainBtn = el("button", "export-panel__try-again", "Try again");
+    tryAgainBtn.type = "button";
+    tryAgainBtn.addEventListener("click", () => {
       reset();
       filenameInput?.focus();
     });
@@ -285,13 +280,14 @@ export function createExportPanel({
 
   function activate() {
     if (!mounted) return;
-    // Spec says the filename must reflect the current pattern on every
-    // activate, so a user who switches patterns via the left rail and
-    // reopens the export tab doesn't have to retype. Leave the value
-    // alone while a render is in flight or after a successful render,
-    // so the user can still see what was just exported.
-    if (mode === 'idle' && filenameInput) {
-      filenameInput.value = readStoredFilename() || getPatternName() || 'untitled';
+    // Current pattern name wins — so switching patterns via the left rail
+    // always shows the right filename. Stored filename is a fallback only
+    // when no pattern is loaded. Leave the value alone while a render is
+    // in flight or after a successful render, so the user can still see
+    // what was just exported.
+    if (mode === "idle" && filenameInput) {
+      filenameInput.value =
+        getPatternName() || readStoredFilename() || "untitled";
     }
     if (filenameInput) {
       filenameInput.focus();
@@ -309,7 +305,7 @@ export function createExportPanel({
 
   function showProgress(ratio) {
     if (!mounted) return;
-    if (mode !== 'running') {
+    if (mode !== "running") {
       // A progress update while not running is a no-op: the host starts
       // polling before awaiting startRendering(), so `mode` is already
       // 'running' by the time ratio > 0 arrives.
@@ -322,14 +318,14 @@ export function createExportPanel({
 
   function showResult(result) {
     if (!mounted || !result) return;
-    mode = 'done';
+    mode = "done";
     lastResult = result;
     lastWavBytes = result.wavBytes ?? null;
 
     // Pin the progress bar at 100% so the transition from "rendering" to
     // "done" reads naturally — a jump back to 0% would look broken.
-    if (progressFill) progressFill.style.width = '100%';
-    if (progressLabel) progressLabel.textContent = '100%';
+    if (progressFill) progressFill.style.width = "100%";
+    if (progressLabel) progressLabel.textContent = "100%";
 
     renderWaveform(result.buffer);
 
@@ -343,17 +339,17 @@ export function createExportPanel({
 
     statsLine1.textContent = `${displayName} — ${fmtDuration(duration)}`;
     statsLine2.textContent =
-      `${scheduled} event${scheduled === 1 ? '' : 's'} · ` +
+      `${scheduled} event${scheduled === 1 ? "" : "s"} · ` +
       `${fmtRateKhz(rate)} · ${fmtFileSize(size)}`;
 
     // Peak — the spec asks for "-∞ dB (silent!)" in --rec when the
     // buffer is all zeros. Any non-zero sample at least earns a proper
     // dB number, but the near-silent warning below still fires if it's
     // below -60 dB.
-    statsPeak.classList.remove('export-panel__stats--silent');
+    statsPeak.classList.remove("export-panel__stats--silent");
     if (peak <= 0) {
-      statsPeak.textContent = 'Peak: -∞ dB (silent!)';
-      statsPeak.classList.add('export-panel__stats--silent');
+      statsPeak.textContent = "Peak: -∞ dB (silent!)";
+      statsPeak.classList.add("export-panel__stats--silent");
     } else {
       statsPeak.textContent = `Peak: ${fmtDb(peak)} dB`;
     }
@@ -372,13 +368,13 @@ export function createExportPanel({
     errorSection.hidden = true;
     // Re-enable inputs now that the render is done.
     setInputsDisabled(false);
-    setExportButtonState('done');
+    setExportButtonState("done");
   }
 
   function showError(message) {
     if (!mounted) return;
-    mode = 'error';
-    errorMsgEl.textContent = String(message ?? 'Export failed.');
+    mode = "error";
+    errorMsgEl.textContent = String(message ?? "Export failed.");
     errorSection.hidden = false;
     resultSection.hidden = true;
     // Leave the progress bar visible wherever it reached — the spec
@@ -386,11 +382,11 @@ export function createExportPanel({
     // at whatever ratio it reached)".
     progressRow.hidden = false;
     setInputsDisabled(false);
-    setExportButtonState('error');
+    setExportButtonState("error");
   }
 
   function reset() {
-    mode = 'idle';
+    mode = "idle";
     // Don't clear lastResult / lastWavBytes — the user may still want
     // to re-download the previous export. The download-again button is
     // inside resultSection, which gets hidden here, but we keep the
@@ -399,10 +395,10 @@ export function createExportPanel({
     progressRow.hidden = true;
     resultSection.hidden = true;
     errorSection.hidden = true;
-    if (progressFill) progressFill.style.width = '0%';
-    if (progressLabel) progressLabel.textContent = '0%';
+    if (progressFill) progressFill.style.width = "0%";
+    if (progressLabel) progressLabel.textContent = "0%";
     setInputsDisabled(false);
-    setExportButtonState('idle');
+    setExportButtonState("idle");
   }
 
   /**
@@ -415,8 +411,8 @@ export function createExportPanel({
   function autoExport() {
     if (!mounted) {
       console.warn(
-        '[export-panel] autoExport called before create() — did the host ' +
-          'forget to activate the tab first?',
+        "[export-panel] autoExport called before create() — did the host " +
+          "forget to activate the tab first?",
       );
       return;
     }
@@ -426,12 +422,12 @@ export function createExportPanel({
   // ─── Internal: export flow ────────────────────────────────────────────
 
   function onExportClick() {
-    if (mode === 'running') return; // defensive — button should be disabled
+    if (mode === "running") return; // defensive — button should be disabled
     startExport();
   }
 
   function commitInputs() {
-    const fn = (filenameInput?.value || '').trim();
+    const fn = (filenameInput?.value || "").trim();
     if (fn) writeStoredFilename(fn);
     const c = parseCycles(cyclesInput?.value);
     if (c != null) writeStoredCycles(c);
@@ -440,11 +436,11 @@ export function createExportPanel({
   }
 
   function startExport() {
-    if (mode === 'running') return;
+    if (mode === "running") return;
     commitInputs();
 
-    const rawFilename = (filenameInput.value || '').trim();
-    const filename = rawFilename || getPatternName() || 'untitled';
+    const rawFilename = (filenameInput.value || "").trim();
+    const filename = rawFilename || getPatternName() || "untitled";
 
     const cycles = parseCycles(cyclesInput.value);
     if (cycles == null) {
@@ -459,20 +455,20 @@ export function createExportPanel({
 
     const sampleRate = parseInt(rateSelect.value, 10);
     if (!SAMPLE_RATES.includes(sampleRate)) {
-      showError('Sample rate must be 44100, 48000, or 96000.');
+      showError("Sample rate must be 44100, 48000, or 96000.");
       return;
     }
 
     // Switch to running mode: hide old result/error, reset progress,
     // disable inputs, flip button label.
-    mode = 'running';
+    mode = "running";
     errorSection.hidden = true;
     resultSection.hidden = true;
     progressRow.hidden = false;
-    if (progressFill) progressFill.style.width = '0%';
-    if (progressLabel) progressLabel.textContent = '0%';
+    if (progressFill) progressFill.style.width = "0%";
+    if (progressLabel) progressLabel.textContent = "0%";
     setInputsDisabled(true);
-    setExportButtonState('running');
+    setExportButtonState("running");
 
     // Hand off to the host. The host is expected to call showProgress
     // during the render and either showResult or showError when done.
@@ -487,7 +483,7 @@ export function createExportPanel({
         else reset();
       })
       .catch((err) => {
-        console.error('[export-panel] onExport failed:', err);
+        console.error("[export-panel] onExport failed:", err);
         showError(err?.message || String(err));
       });
   }
@@ -500,32 +496,28 @@ export function createExportPanel({
 
   function setExportButtonState(state) {
     if (!exportBtn) return;
-    const label = exportBtn.querySelector('.export-panel__export-label');
-    exportBtn.classList.remove(
-      'is-running',
-      'is-done',
-      'is-error',
-    );
+    const label = exportBtn.querySelector(".export-panel__export-label");
+    exportBtn.classList.remove("is-running", "is-done", "is-error");
     switch (state) {
-      case 'running':
+      case "running":
         exportBtn.disabled = true;
-        exportBtn.classList.add('is-running');
-        if (label) label.textContent = 'Rendering…';
+        exportBtn.classList.add("is-running");
+        if (label) label.textContent = "Rendering…";
         break;
-      case 'done':
+      case "done":
         exportBtn.disabled = false;
-        exportBtn.classList.add('is-done');
-        if (label) label.textContent = 'Export';
+        exportBtn.classList.add("is-done");
+        if (label) label.textContent = "Export";
         break;
-      case 'error':
+      case "error":
         exportBtn.disabled = false;
-        exportBtn.classList.add('is-error');
-        if (label) label.textContent = 'Export';
+        exportBtn.classList.add("is-error");
+        if (label) label.textContent = "Export";
         break;
-      case 'idle':
+      case "idle":
       default:
         exportBtn.disabled = false;
-        if (label) label.textContent = 'Export';
+        if (label) label.textContent = "Export";
         break;
     }
   }
@@ -539,7 +531,7 @@ export function createExportPanel({
       // in case a future caller forgets — a missing cache is a bug, not
       // a panic, so log loudly and bail instead of silently no-op-ing.
       console.warn(
-        '[export-panel] download again: no cached bytes on lastResult',
+        "[export-panel] download again: no cached bytes on lastResult",
       );
       return;
     }
@@ -552,9 +544,9 @@ export function createExportPanel({
       // revoke the URL associated with the original blob after the
       // first click, and we want each "download again" to be a clean
       // download.
-      const blob = new Blob([bytes], { type: 'audio/wav' });
+      const blob = new Blob([bytes], { type: "audio/wav" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
       a.download = withWavSuffix(lastResult.filename);
       document.body.appendChild(a);
@@ -562,7 +554,7 @@ export function createExportPanel({
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.warn('[export-panel] download again failed:', err);
+      console.warn("[export-panel] download again failed:", err);
     }
   }
 
@@ -570,7 +562,7 @@ export function createExportPanel({
 
   function renderWaveform(buffer) {
     if (!waveformCanvas || !buffer) return;
-    const ctx = waveformCanvas.getContext('2d');
+    const ctx = waveformCanvas.getContext("2d");
     if (!ctx) return;
 
     // Size the backing store to the canvas's CSS box at devicePixelRatio
@@ -593,8 +585,8 @@ export function createExportPanel({
     // Pulling the computed CSS variable keeps the waveform in sync with
     // the user's accent theme without hardcoding any hex.
     const styles = getComputedStyle(root);
-    const bg = styles.getPropertyValue('--surface-2').trim() || '#222';
-    const accent = styles.getPropertyValue('--accent').trim() || '#cf418d';
+    const bg = styles.getPropertyValue("--surface-2").trim() || "#222";
+    const accent = styles.getPropertyValue("--accent").trim() || "#cf418d";
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
 
@@ -604,8 +596,7 @@ export function createExportPanel({
     // envelope line that's easier to read at panel width; the stereo
     // decorrelation isn't visually meaningful at ~300px wide.
     const ch0 = buffer.getChannelData(0);
-    const ch1 =
-      buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
+    const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
     const total = ch0.length;
     if (total === 0) return;
 
@@ -629,9 +620,7 @@ export function createExportPanel({
       let min = 0;
       let max = 0;
       for (let i = start; i < end; i++) {
-        const sample = ch1
-          ? (ch0[i] + ch1[i]) * 0.5
-          : ch0[i];
+        const sample = ch1 ? (ch0[i] + ch1[i]) * 0.5 : ch0[i];
         if (sample > max) max = sample;
         if (sample < min) min = sample;
       }
@@ -647,18 +636,18 @@ export function createExportPanel({
   // ─── Keyboard handlers ────────────────────────────────────────────────
 
   function onInputKeydown(e) {
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       e.preventDefault();
       onFocusEditor();
       return;
     }
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       // Enter in any input commits + starts the export, matching the
       // "press Enter to render" muscle memory the prompt() modal had.
       // The sample-rate <select> also forwards Enter here so the user
       // can tab-then-enter through the row without reaching for the
       // mouse.
-      if (mode === 'idle') {
+      if (mode === "idle") {
         e.preventDefault();
         startExport();
       }
@@ -668,10 +657,10 @@ export function createExportPanel({
   // ─── Internal: helpers ────────────────────────────────────────────────
 
   function buildRow(labelText) {
-    const row = el('label', 'export-panel__row');
-    const lbl = el('span', 'export-panel__row-label', labelText);
+    const row = el("label", "export-panel__row");
+    const lbl = el("span", "export-panel__row-label", labelText);
     row.appendChild(lbl);
-    const control = el('span', 'export-panel__row-control');
+    const control = el("span", "export-panel__row-control");
     row.appendChild(control);
     return { row, control };
   }
@@ -721,27 +710,35 @@ function writeStoredRate(n) {
 }
 
 function readStoredFilename() {
-  try { return localStorage.getItem(STORAGE_KEY_FILENAME) || null; } catch { return null; }
+  try {
+    return localStorage.getItem(STORAGE_KEY_FILENAME) || null;
+  } catch {
+    return null;
+  }
 }
 
 function writeStoredFilename(s) {
-  try { localStorage.setItem(STORAGE_KEY_FILENAME, s); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(STORAGE_KEY_FILENAME, s);
+  } catch {
+    /* ignore */
+  }
 }
 
 function parseCycles(raw) {
-  const n = parseInt(String(raw ?? ''), 10);
+  const n = parseInt(String(raw ?? ""), 10);
   if (!Number.isFinite(n)) return null;
   if (n < MIN_CYCLES || n > MAX_CYCLES) return null;
   return n;
 }
 
 function withWavSuffix(name) {
-  if (!name) return 'untitled.wav';
-  return name.toLowerCase().endsWith('.wav') ? name : `${name}.wav`;
+  if (!name) return "untitled.wav";
+  return name.toLowerCase().endsWith(".wav") ? name : `${name}.wav`;
 }
 
 function fmtDuration(seconds) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '0.0s';
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0.0s";
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   const m = Math.floor(seconds / 60);
   const s = seconds - m * 60;
@@ -749,7 +746,7 @@ function fmtDuration(seconds) {
 }
 
 function fmtRateKhz(rate) {
-  if (!Number.isFinite(rate) || rate <= 0) return '—';
+  if (!Number.isFinite(rate) || rate <= 0) return "—";
   const khz = rate / 1000;
   // 48 kHz, 44.1 kHz, 96 kHz — preserve the .1 for 44100 without
   // showing .0 on the round rates.
@@ -757,14 +754,14 @@ function fmtRateKhz(rate) {
 }
 
 function fmtFileSize(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function fmtDb(peak) {
-  if (!Number.isFinite(peak) || peak <= 0) return '-∞';
+  if (!Number.isFinite(peak) || peak <= 0) return "-∞";
   const db = 20 * Math.log10(peak);
   // One decimal place — matches the "Peak: -2.1 dB" example in the
   // spec. Negative values are the common case (peaks below 0 dBFS).
