@@ -455,8 +455,7 @@ export class MidiBridge {
       value = {
         s: preset.s,
         note: midi,
-        velocity,
-        gain: this._volume,
+        gain: this._volume * (0.5 + velocity * 0.5),
         ...(preset.attack != null && { attack: preset.attack }),
         ...(preset.decay != null && { decay: preset.decay }),
         ...(preset.sustain != null && { sustain: preset.sustain }),
