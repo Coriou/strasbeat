@@ -143,10 +143,31 @@ const signaturePlugin = ViewPlugin.fromClass(
       if (key === this.currentKey && this.pill) return;
       this.currentKey = key;
 
-      this.show(ctx);
+      // Defer show() — coordsAtPos reads layout, which is forbidden
+      // during the CM6 update cycle. requestMeasure runs after the
+      // update settles.
+      this._pendingCtx = ctx;
+      this.view.requestMeasure({
+        read: () => {
+          const c = this._pendingCtx;
+          if (!c) return null;
+          const p = this.view.state.selection.main.head;
+          const coords = this.view.coordsAtPos(p);
+          if (!coords) return null;
+          const parentRect = this.view.dom.getBoundingClientRect();
+          return { ctx: c, coords, parentRect };
+        },
+        write: (measured) => {
+          if (!measured) {
+            this.hide();
+            return;
+          }
+          this.show(measured.ctx, measured.coords, measured.parentRect);
+        },
+      });
     }
 
-    show({ name, entry, argIndex }) {
+    show({ name, entry, argIndex }, coords, parentRect) {
       if (!this.pill) {
         this.pill = document.createElement("div");
         this.pill.className = "sig-hint";
@@ -157,15 +178,6 @@ const signaturePlugin = ViewPlugin.fromClass(
 
       this.pill.innerHTML = renderPill(name, entry, argIndex);
 
-      // Position above the cursor
-      const pos = this.view.state.selection.main.head;
-      const coords = this.view.coordsAtPos(pos);
-      if (!coords) {
-        this.hide();
-        return;
-      }
-
-      const parentRect = this.view.dom.getBoundingClientRect();
       // Place above the line, offset by pill height + 4px gap
       const top = coords.top - parentRect.top - 28;
       const left = coords.left - parentRect.left;
