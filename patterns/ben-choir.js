@@ -43,7 +43,7 @@ bass: progression(chords)
   .lpenv(4)
 
 bassroom: progression(chords)
-  .s("<[gm_acoustic_bass, gm_alto_sax]*8 [gm_acoustic_bass]*4>")
+  .s("<[gm_acoustic_bass, gm_alto_sax/2]*8 [gm_acoustic_bass]*4>")
   .rev()
   .room(0.25)
   .roomfade(1)
