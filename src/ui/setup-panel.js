@@ -195,6 +195,92 @@ export function createSetupPanel({
     scriptSection.appendChild(scriptActions);
 
     root.appendChild(scriptSection);
+
+    // ─── OSC config section (visible when @strudel/osc is enabled) ────
+    const DEFAULT_OSC_URL = "ws://localhost:8080";
+    const oscEnabled = enabledSet.has("osc");
+    if (oscEnabled) {
+      const oscSection = el("div", "setup-panel__section");
+      const oscLabel = el("div", "setup-panel__section-label", "OSC Output");
+      oscSection.appendChild(oscLabel);
+
+      const oscDesc = el(
+        "div",
+        "setup-panel__desc",
+        "Strudel sends OSC messages via WebSocket. The bridge server must listen on the URL below.",
+      );
+      oscSection.appendChild(oscDesc);
+
+      // URL display (read-only — upstream hardcodes ws://localhost:8080)
+      const oscUrlRow = el("div", "setup-panel__osc-url-row");
+      const oscUrlLabel = el("span", "setup-panel__osc-url-label", "Target:");
+      const oscUrlValue = el(
+        "span",
+        "setup-panel__osc-url-value",
+        DEFAULT_OSC_URL,
+      );
+      oscUrlRow.append(oscUrlLabel, oscUrlValue);
+      oscSection.appendChild(oscUrlRow);
+
+      // Connection status
+      const oscStatusRow = el("div", "setup-panel__osc-status-row");
+      const oscDot = el("span", "setup-panel__osc-dot");
+      oscDot.dataset.status = "unknown";
+      const oscStatusText = el(
+        "span",
+        "setup-panel__osc-status-text",
+        "Not connected",
+      );
+      oscStatusRow.append(oscDot, oscStatusText);
+      oscSection.appendChild(oscStatusRow);
+
+      // Test button
+      const oscTestBtn = document.createElement("button");
+      oscTestBtn.type = "button";
+      oscTestBtn.className = "setup-panel__btn";
+      oscTestBtn.textContent = "Test connection";
+      oscTestBtn.addEventListener("click", async () => {
+        oscDot.dataset.status = "connecting";
+        oscStatusText.textContent = "Connecting…";
+        try {
+          const ws = new WebSocket(DEFAULT_OSC_URL);
+          await new Promise((resolve, reject) => {
+            ws.addEventListener("open", () => {
+              oscDot.dataset.status = "connected";
+              oscStatusText.textContent = "Connected";
+              // Send a test message
+              const msg = {
+                address: "/strasbeat/test",
+                args: ["hello"],
+                timestamp: 0,
+              };
+              ws.send(JSON.stringify(msg));
+              console.log("[setup] OSC test message sent to", DEFAULT_OSC_URL);
+              resolve();
+              setTimeout(() => ws.close(), 500);
+            });
+            ws.addEventListener("error", () => {
+              reject(new Error("Connection failed"));
+            });
+            ws.addEventListener("close", () => {
+              // Only mark as error if we never connected
+              if (oscDot.dataset.status === "connecting") {
+                reject(new Error("Connection closed"));
+              }
+            });
+            setTimeout(() => reject(new Error("Timeout")), 3000);
+          });
+        } catch (err) {
+          oscDot.dataset.status = "error";
+          oscStatusText.textContent = `Error: ${err.message}`;
+          console.warn("[setup] OSC test failed:", err.message);
+        }
+      });
+      oscSection.appendChild(oscTestBtn);
+
+      root.appendChild(oscSection);
+    }
+
     mounted = true;
     refreshBanks();
   }

@@ -17,9 +17,58 @@
 
 const PACKAGES_KEY = "strasbeat:enabled-packages";
 const SCRIPT_KEY = "strasbeat:setup-script";
+const MIDI_OUTPUT_KEY = "strasbeat:midi-output-device";
 const IDB_NAME = "strasbeat-user-samples";
 const IDB_VERSION = 1;
 const IDB_STORE = "banks";
+
+// ─── MIDI output state (populated after @strudel/midi loads) ────────────
+
+let _midiOutputModule = null; // { WebMidi, enableWebMidi }
+let _midiOutputReady = false;
+const _midiOutputListeners = new Set();
+
+/** Whether @strudel/midi has been loaded and WebMidi enabled. */
+export function isMidiOutputReady() {
+  return _midiOutputReady;
+}
+
+/** Returns WebMidi.outputs array, or [] if not ready. */
+export function getMidiOutputs() {
+  if (!_midiOutputReady || !_midiOutputModule) return [];
+  return Array.from(_midiOutputModule.WebMidi.outputs ?? []);
+}
+
+/** Get the persisted MIDI output device name. */
+export function getMidiOutputDevice() {
+  return localStorage.getItem(MIDI_OUTPUT_KEY) ?? "";
+}
+
+/** Persist the selected MIDI output device name. */
+export function setMidiOutputDevice(name) {
+  if (name) {
+    localStorage.setItem(MIDI_OUTPUT_KEY, name);
+  } else {
+    localStorage.removeItem(MIDI_OUTPUT_KEY);
+  }
+  _notifyMidiOutputListeners();
+}
+
+/** Subscribe to MIDI output state changes (device connect/disconnect). */
+export function onMidiOutputChange(fn) {
+  _midiOutputListeners.add(fn);
+  return () => _midiOutputListeners.delete(fn);
+}
+
+function _notifyMidiOutputListeners() {
+  for (const fn of _midiOutputListeners) {
+    try {
+      fn();
+    } catch (e) {
+      console.warn("[user-setup] midi output listener error:", e);
+    }
+  }
+}
 
 // ─── Opt-in package registry ────────────────────────────────────────────
 // Each entry describes one package that can be dynamically imported.
@@ -121,6 +170,31 @@ export async function runUserSetup({ evalScope, samples }) {
         if (mod) {
           await evalScope(mod);
           console.log(`[user-setup] loaded ${id}`);
+
+          // Proactively enable WebMidi when @strudel/midi loads so the
+          // output device selector can be populated immediately.
+          if (id === "midi" && mod.enableWebMidi && mod.WebMidi) {
+            _midiOutputModule = mod;
+            try {
+              await mod.enableWebMidi({
+                onConnected: () => {
+                  _notifyMidiOutputListeners();
+                },
+                onDisconnected: () => {
+                  _notifyMidiOutputListeners();
+                },
+              });
+              _midiOutputReady = true;
+              _notifyMidiOutputListeners();
+              const outputs = Array.from(mod.WebMidi.outputs ?? []);
+              console.log(
+                `[user-setup] WebMidi enabled, ${outputs.length} output(s):`,
+                outputs.map((o) => o.name).join(", ") || "(none)",
+              );
+            } catch (err) {
+              console.warn("[user-setup] enableWebMidi failed:", err);
+            }
+          }
         }
         return mod;
       }),

@@ -331,6 +331,30 @@ without patching internals — the trade-off is that truly key-up-released
 pads aren't supported. If a future feature needs key-up release, it has to
 either bypass superdough or extend it with a noteoff path.
 
+### MIDI/OSC output routing model
+
+strasbeat has two independent MIDI paths:
+
+```
+Input:  Web MIDI input device → MidiBridge → superdough (live play)
+Output: pattern → .midi() → @strudel/midi → Web MIDI output device
+```
+
+Both use the browser's `MIDIAccess`. The bridge reads inputs (no sysex);
+`@strudel/midi` (via the `webmidi` library) writes outputs (sysex: true).
+No conflict — `requestMIDIAccess()` returns the same shared object.
+
+**MIDI output** (`@strudel/midi`) is an opt-in package toggled in the
+Setup panel. When enabled, `user-setup.js` calls `enableWebMidi()`
+proactively at boot so the MIDI bar's output device selector is populated.
+The selected output device name is persisted to
+`localStorage("strasbeat:midi-output-device")`.
+
+**OSC output** (`@strudel/osc`) is also opt-in. It sends events over
+WebSocket to `ws://localhost:8080` (hardcoded in the upstream package —
+not configurable). The Setup panel shows the fixed URL and a connection
+test button. Users must run an OSC bridge server on that port.
+
 ### `setcps(...)` propagation
 
 `setcps(BPM/60/beats_per_cycle)` is the standard way to set tempo from

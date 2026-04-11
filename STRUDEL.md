@@ -392,6 +392,31 @@ mypreset: {
 
 The dropdown will rebuild automatically on save (Vite HMR).
 
+## MIDI/OSC output
+
+Both are opt-in packages enabled in the Setup panel. When enabled, pattern
+code can route events to external hardware/software.
+
+### `.midi()` — MIDI output
+
+```js
+note("c4 e4 g4").midi(); // default output device
+note("c4 e4 g4").midi("IAC Driver Bus 1"); // specific device by name
+```
+
+Requires `@strudel/midi` enabled in Setup. The MIDI bar shows an output
+device selector when enabled. Selected device is persisted across sessions.
+
+### `.osc()` — OSC output
+
+```js
+note("c4 e4 g4").osc();
+```
+
+Requires `@strudel/osc` enabled in Setup. Sends events via WebSocket to
+`ws://localhost:8080` (hardcoded — an OSC bridge server must listen there).
+Works with SuperCollider/SuperDirt or any OSC receiver.
+
 ## Where to look next
 
 - Search the function reference: <https://strudel.cc/learn/>

@@ -12,6 +12,14 @@ import {
   detectChord,
 } from "../midi-bridge.js";
 import { superdough, getAudioContext } from "@strudel/webaudio";
+import {
+  isMidiOutputReady,
+  getMidiOutputs,
+  getMidiOutputDevice,
+  setMidiOutputDevice,
+  onMidiOutputChange,
+  getEnabledPackages,
+} from "../user-setup.js";
 
 // ─── Mini-keyboard renderer ──────────────────────────────────────────────
 // 2-octave (24-key) piano visualization on a <canvas>.
@@ -155,6 +163,28 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   deviceGroup.appendChild(deviceSelect);
   container.appendChild(deviceGroup);
 
+  // ─── MIDI output device selector ────────────────────────────────────
+  // Visible only when @strudel/midi is enabled as an opt-in package.
+  const midiOutputEnabled = getEnabledPackages().includes("midi");
+  const outGroup = document.createElement("div");
+  outGroup.className = "midi-bar__output";
+  outGroup.hidden = !midiOutputEnabled;
+  const outLabel = document.createElement("span");
+  outLabel.className = "midi-bar__output-label";
+  outLabel.textContent = "Out";
+  const outSelect = document.createElement("select");
+  outSelect.className = "midi-bar__device-select";
+  outSelect.title = "MIDI output device";
+  outSelect.setAttribute("aria-label", "MIDI output device");
+  const outDot = document.createElement("span");
+  outDot.className = "midi-bar__output-dot";
+  outDot.title = "MIDI output status";
+  outGroup.append(outLabel, outSelect, outDot);
+  if (midiOutputEnabled) container.appendChild(outGroup);
+
+  // Sep (only if output is present)
+  if (midiOutputEnabled) container.appendChild(makeSep());
+
   // Mini-keyboard canvas
   const kbCanvas = document.createElement("canvas");
   kbCanvas.className = "midi-bar__keyboard";
@@ -255,12 +285,16 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   const presetLabelEl = presetBtn.querySelector(".midi-bar__preset-label");
 
   // Preset popover (initially hidden)
-  const popover = buildPresetPopover(getPreset, (key) => {
-    onPresetChange(key);
-    presetLabelEl.textContent = presets[key]?.label ?? key;
-    closePopover();
-    popover._updateFxSliders();
-  }, midi);
+  const popover = buildPresetPopover(
+    getPreset,
+    (key) => {
+      onPresetChange(key);
+      presetLabelEl.textContent = presets[key]?.label ?? key;
+      closePopover();
+      popover._updateFxSliders();
+    },
+    midi,
+  );
   popover.setAttribute("role", "listbox");
   popover.setAttribute("aria-label", "MIDI preset");
   document.body.appendChild(popover);
@@ -382,6 +416,47 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     persistState();
   });
 
+  // ─── MIDI output device selector ────────────────────────────────────
+  let unsubMidiOutput = null;
+  if (midiOutputEnabled) {
+    function rebuildOutputSelect() {
+      outSelect.innerHTML = "";
+      const outputs = getMidiOutputs();
+      if (outputs.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = isMidiOutputReady() ? "No outputs" : "Loading…";
+        outSelect.appendChild(opt);
+        outSelect.disabled = true;
+        outDot.classList.remove("is-active");
+        outGroup.hidden = false;
+        return;
+      }
+      outSelect.disabled = false;
+      outDot.classList.add("is-active");
+      outGroup.hidden = false;
+      const stored = getMidiOutputDevice();
+      for (const o of outputs) {
+        const opt = document.createElement("option");
+        opt.value = o.name;
+        opt.textContent = o.name;
+        outSelect.appendChild(opt);
+      }
+      // Restore persisted selection, or default to first IAC / first output
+      if (stored && outputs.some((o) => o.name === stored)) {
+        outSelect.value = stored;
+      } else {
+        const iac = outputs.find((o) => o.name.includes("IAC"));
+        outSelect.value = iac ? iac.name : (outputs[0]?.name ?? "");
+      }
+    }
+    rebuildOutputSelect();
+    outSelect.addEventListener("change", () => {
+      setMidiOutputDevice(outSelect.value);
+    });
+    unsubMidiOutput = onMidiOutputChange(rebuildOutputSelect);
+  }
+
   // Mod wheel indicator
   function onModWheel({ value }) {
     const pct = Math.round((value / 127) * 100);
@@ -402,14 +477,18 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     persistState();
   });
   // BPM adjustment via scroll on the BPM label
-  metBpmEl.addEventListener("wheel", (e) => {
-    if (!midi.isMetronomeEnabled()) return;
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? 1 : -1;
-    midi.setMetronomeBpm(midi.getMetronomeBpm() + delta);
-    updateMetUI();
-    persistState();
-  }, { passive: false });
+  metBpmEl.addEventListener(
+    "wheel",
+    (e) => {
+      if (!midi.isMetronomeEnabled()) return;
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 1 : -1;
+      midi.setMetronomeBpm(midi.getMetronomeBpm() + delta);
+      updateMetUI();
+      persistState();
+    },
+    { passive: false },
+  );
   midi.on("metronomechange", updateMetUI);
 
   // Preset popover open/close
@@ -518,7 +597,8 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
 
   // Auto-show/hide based on device connectivity
   function onDeviceChange({ devices }) {
-    container.hidden = devices.length === 0;
+    // Show bar if input devices are connected OR if MIDI output is enabled.
+    container.hidden = devices.length === 0 && !midiOutputEnabled;
     rebuildDeviceSelect(devices);
     // Clear stale visual state when all devices disconnect so the bar
     // doesn't re-show with ghost active notes / lit sustain lamp.
@@ -537,8 +617,8 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     }
   }
   midi.on("devicechange", onDeviceChange);
-  // Set initial state
-  container.hidden = !midi.hasDevices();
+  // Set initial state — show bar if input devices exist or MIDI output is enabled.
+  container.hidden = !midi.hasDevices() && !midiOutputEnabled;
 
   // ─── Keyboard rendering (with progressive fade) ──────────────────────
   /** @type {Map<number, {velocity: number, startedAt: number}>} */
@@ -551,7 +631,12 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     for (const [m, f] of fadingNotes) {
       if (now - f.startedAt >= FADE_MS) fadingNotes.delete(m);
     }
-    drawKeyboard(kbCanvas, midi.activeNotes, fadingNotes, midi.getOctaveShift());
+    drawKeyboard(
+      kbCanvas,
+      midi.activeNotes,
+      fadingNotes,
+      midi.getOctaveShift(),
+    );
     if (fadingNotes.size > 0) {
       fadeAnimId = requestAnimationFrame(_fadeFrame);
     } else {
@@ -571,7 +656,12 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     kbRafPending = true;
     requestAnimationFrame(() => {
       kbRafPending = false;
-      drawKeyboard(kbCanvas, midi.activeNotes, fadingNotes, midi.getOctaveShift());
+      drawKeyboard(
+        kbCanvas,
+        midi.activeNotes,
+        fadingNotes,
+        midi.getOctaveShift(),
+      );
     });
   }
   // Initial draw (synchronous, canvas is empty).
@@ -778,6 +868,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
       fadeAnimId = null;
     }
     if (popover.parentNode) popover.parentNode.removeChild(popover);
+    if (unsubMidiOutput) unsubMidiOutput();
   }
 
   return {
@@ -860,9 +951,31 @@ function buildPresetPopover(getPreset, onSelect, midi) {
   fxSection.className = "midi-bar__fx-section";
 
   const FX_DEFS = [
-    { param: "room", label: "Room", min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
-    { param: "delay", label: "Delay", min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
-    { param: "lpf", label: "LPF", min: 200, max: 20000, step: 100, fmt: (v) => v >= 10000 ? (v / 1000).toFixed(1) + "k" : Math.round(v) + "" },
+    {
+      param: "room",
+      label: "Room",
+      min: 0,
+      max: 1,
+      step: 0.01,
+      fmt: (v) => Math.round(v * 100) + "%",
+    },
+    {
+      param: "delay",
+      label: "Delay",
+      min: 0,
+      max: 1,
+      step: 0.01,
+      fmt: (v) => Math.round(v * 100) + "%",
+    },
+    {
+      param: "lpf",
+      label: "LPF",
+      min: 200,
+      max: 20000,
+      step: 100,
+      fmt: (v) =>
+        v >= 10000 ? (v / 1000).toFixed(1) + "k" : Math.round(v) + "",
+    },
   ];
 
   const fxSliders = {};
@@ -906,7 +1019,8 @@ function buildPresetPopover(getPreset, onSelect, midi) {
     const preset = presets[key];
     const overrides = midi.getPresetOverrides(key);
     for (const [param, fx] of Object.entries(fxSliders)) {
-      const base = param === "lpf" ? (preset?.[param] ?? 20000) : (preset?.[param] ?? 0);
+      const base =
+        param === "lpf" ? (preset?.[param] ?? 20000) : (preset?.[param] ?? 0);
       const val = overrides[param] ?? base;
       fx.slider.value = String(val);
       fx.valEl.textContent = fx.def.fmt(val);

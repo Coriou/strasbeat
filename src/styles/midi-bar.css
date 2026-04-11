@@ -442,6 +442,38 @@
   outline-offset: 1px;
 }
 
+/* ─── MIDI output device selector ─── */
+
+.midi-bar__output {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.midi-bar__output[hidden] {
+  display: none;
+}
+.midi-bar__output-label {
+  font: 500 var(--text-xs) var(--font-sans);
+  color: var(--text-muted);
+  user-select: none;
+}
+.midi-bar__output-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.4;
+  flex-shrink: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
+}
+.midi-bar__output-dot.is-active {
+  background: var(--accent);
+  opacity: 1;
+}
+
 /* ─── Velocity curve toggle ─── */
 
 .midi-bar__velocity-curve {
