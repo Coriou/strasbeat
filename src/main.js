@@ -14,7 +14,11 @@ import { EditorView } from "@codemirror/view";
 import { MidiBridge, presets as midiPresets } from "./midi-bridge.js";
 import { mountMidiBar } from "./ui/midi-bar.js";
 import { installSoundCompletion } from "./editor/completions/sounds.js";
-import { clearError, setError } from "./editor/error-marks.js";
+import {
+  clearError,
+  extractErrorLine,
+  setError,
+} from "./editor/error-marks.js";
 import strudelDocs from "./editor/strudel-docs.json";
 import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
@@ -210,6 +214,7 @@ shellEl.classList.add("is-booting");
 
 // Forward decl — panel mounted further down; onEvalError fires after boot.
 let consolePanel = null;
+let transport = null;
 
 const editor = new StrudelMirror({
   defaultOutput: webaudioOutput,
@@ -222,13 +227,21 @@ const editor = new StrudelMirror({
   // Eval failures routed into the console panel.
   onEvalError: (err) => {
     _lastEvalHadError = true;
-    setError(editor.editor, err);
-    if (!consolePanel) return;
+    const located = setError(editor.editor, err);
+    let entryId = null;
+    const message = err?.message || String(err);
     try {
-      consolePanel.error(err?.message || String(err), { error: err });
+      // When the content-based heuristic found a line, pass it as
+      // structured data so the console panel can render a [line N] badge
+      // even for errors that don't carry line numbers natively.
+      const data = { error: err };
+      if (located) data.line = located.line;
+      if (located?.column != null) data.column = located.column;
+      entryId = consolePanel?.error(message, data) ?? null;
     } catch (panelErr) {
       console.warn("[strasbeat/console] error() failed:", panelErr);
     }
+    registerEvalError(err, entryId, located);
   },
   onDraw: (haps, time) => {
     const mode = bottomModes.getMode();
@@ -347,6 +360,22 @@ const editor = new StrudelMirror({
   },
 });
 
+function focusEditorLocation({ line, column } = {}) {
+  const view = editor.editor;
+  if (!view || !Number.isInteger(line)) return;
+  if (line < 1 || line > view.state.doc.lines) return;
+  const lineInfo = view.state.doc.line(line);
+  const safeColumn =
+    typeof column === "number"
+      ? Math.max(0, Math.min(column, lineInfo.length))
+      : 0;
+  view.dispatch({
+    selection: { anchor: lineInfo.from + safeColumn },
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+
 // Strudel resets Drawer.drawTime to [0,0] after eval when the pattern has no
 // .onPaint()/.pianoroll() — intercept to preserve our 4-cycle window.
 const _setDrawTime = editor.drawer.setDrawTime.bind(editor.drawer);
@@ -443,14 +472,20 @@ const leftRail = mountLeftRail({
 });
 
 // ─── Transport bar ───────────────────────────────────────────────────────
-const transport = mountTransport({
+transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
   getAudioContext,
   onErrorBadgeClick: () => {
-    rightRail.activate("console");
-    if (firstRuntimeErrorEntryId != null) {
-      consolePanel?.scrollToEntry(firstRuntimeErrorEntryId);
+    if (activeTransportError?.entryId != null) {
+      rightRail.activate("console");
+      consolePanel?.scrollToEntry(activeTransportError.entryId);
+      return;
     }
+    if (activeTransportError?.location) {
+      focusEditorLocation(activeTransportError.location);
+      return;
+    }
+    rightRail.activate("console");
   },
 });
 let playbackRequestId = 0;
@@ -589,21 +624,8 @@ referencePanel.setBufferText(editor.code ?? "");
 
 consolePanel = createConsolePanel({
   onFocusEditor: () => editor.editor.focus(),
-  onJumpToLine: ({ line, column }) => {
-    const view = editor.editor;
-    if (!view || !Number.isInteger(line)) return;
-    if (line < 1 || line > view.state.doc.lines) return;
-    const lineInfo = view.state.doc.line(line);
-    const safeColumn =
-      typeof column === "number"
-        ? Math.max(0, Math.min(column, lineInfo.length))
-        : 0;
-    view.dispatch({
-      selection: { anchor: lineInfo.from + safeColumn },
-      scrollIntoView: true,
-    });
-    view.focus();
-  },
+  onJumpToLine: focusEditorLocation,
+  onClear: () => dismissRuntimeErrors(),
 });
 rightRail.registerPanel(consolePanel);
 
@@ -670,15 +692,32 @@ document.addEventListener("strudel.log", (e) => {
   if (shouldIgnoreStrudelLog(message)) return;
   try {
     if (type === "error") {
-      const entryId = consolePanel.error(message, data);
       // Only count as runtime error when NOT mid-eval. Eval-time errors
       // land in strudel.log too (logger fires before onEvalError), but
       // those are handled by onEvalError → inline marks, not the badge.
       if (!_evalInProgress && editor.repl?.scheduler?.started) {
-        registerRuntimeError(entryId);
         // Try to show inline mark for runtime errors that carry line data
         // (e.g. mini-notation parse errors that surface mid-playback).
-        setError(editor.editor, { message });
+        const located = setError(editor.editor, { message });
+        // Pass located line to the console so it can render a [line N]
+        // badge even for errors found via the content-based heuristic.
+        let entryData = data;
+        if (located) {
+          if (
+            entryData &&
+            typeof entryData === "object" &&
+            !Array.isArray(entryData)
+          ) {
+            entryData = { ...entryData, line: located.line };
+          } else {
+            entryData = { line: located.line };
+          }
+          if (located.column != null) entryData.column = located.column;
+        }
+        const entryId = consolePanel.error(message, entryData);
+        registerRuntimeError(entryId);
+      } else {
+        consolePanel.error(message, data);
       }
     } else if (type === "warning") consolePanel.warn(message, data);
     else consolePanel.log(message, data);
@@ -707,7 +746,7 @@ bootPromise.then(() => {
 // before the scheduler plays cycle 1; subsequent evals fire-and-forget.
 let _firstEvalDone = false;
 let runtimeErrorCount = 0;
-let firstRuntimeErrorEntryId = null;
+let activeTransportError = null;
 let lastWarnedUnknownSounds = new Set();
 // Flag set by onEvalError — lets the patched evaluate know whether
 // _editorEvaluate produced an error (it catches internally, never throws).
@@ -719,16 +758,94 @@ const _editorEvaluate = editor.evaluate.bind(editor);
 
 function resetRuntimeErrors() {
   runtimeErrorCount = 0;
-  firstRuntimeErrorEntryId = null;
-  transport.clearErrorCount();
+  activeTransportError = null;
+  transport?.clearErrorState();
+}
+
+function dismissRuntimeErrors() {
+  runtimeErrorCount = 0;
+  if (activeTransportError?.source === "runtime") {
+    activeTransportError = null;
+    transport?.clearErrorState();
+  }
+}
+
+function registerEvalError(err, entryId, located) {
+  const message = readErrorMessage(err);
+  const isSyntaxError =
+    err?.name === "SyntaxError" ||
+    Boolean(err?.loc) ||
+    /\[mini\]\s*parse error/i.test(message);
+
+  showTransportError({
+    source: "eval",
+    kind: isSyntaxError ? "parse" : "eval",
+    label: isSyntaxError ? "syntax error" : "eval error",
+    title: `Open console: ${firstLine(message) || "error"}`,
+    entryId,
+    location: located ?? extractErrorLine(err),
+  });
 }
 
 function registerRuntimeError(entryId) {
+  if (activeTransportError?.source === "eval") return;
+
   runtimeErrorCount += 1;
-  if (firstRuntimeErrorEntryId == null && Number.isInteger(entryId)) {
-    firstRuntimeErrorEntryId = entryId;
+  const firstEntryId =
+    activeTransportError?.source === "runtime" &&
+    Number.isInteger(activeTransportError.entryId)
+      ? activeTransportError.entryId
+      : Number.isInteger(entryId)
+        ? entryId
+        : null;
+  const label =
+    runtimeErrorCount === 1
+      ? "runtime error"
+      : `${runtimeErrorCount} runtime errors`;
+
+  showTransportError({
+    source: "runtime",
+    kind: "runtime",
+    label,
+    title: `Open console: ${label}`,
+    entryId: firstEntryId,
+  });
+}
+
+function showTransportError({
+  source,
+  kind,
+  label,
+  title,
+  entryId = null,
+  location = null,
+}) {
+  activeTransportError = {
+    source,
+    entryId: Number.isInteger(entryId) ? entryId : null,
+    location: normalizeTransportLocation(location),
+  };
+  transport?.setErrorState({ kind, label, title });
+}
+
+function normalizeTransportLocation(location) {
+  if (!location || !Number.isInteger(location.line) || location.line < 1) {
+    return null;
   }
-  transport.setErrorCount(runtimeErrorCount);
+  const next = { line: location.line };
+  if (typeof location.column === "number") next.column = location.column;
+  return next;
+}
+
+function readErrorMessage(err) {
+  if (typeof err === "string") return err;
+  return err?.message || String(err ?? "");
+}
+
+function firstLine(text) {
+  return String(text ?? "")
+    .split(/\r?\n/, 1)[0]
+    .trim();
 }
 
 function collectOnsets(haps) {

@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { extractErrorLine } from "./error-marks.js";
+import { extractErrorLine, setError } from "./error-marks.js";
 
 describe("extractErrorLine()", () => {
   test("reads acorn SyntaxError loc data", () => {
@@ -72,3 +72,58 @@ describe("extractErrorLine()", () => {
     assert.equal(extractErrorLine(new Error("Boom")), null);
   });
 });
+
+describe("setError() runtime fallback", () => {
+  test("matches whole identifiers (sin) instead of substrings (sine)", () => {
+    const view = createMockView([
+      's("hh*8").pan(sine.fast(4))',
+      's("hh*8").pan(sin.slow(2))',
+    ]);
+
+    const result = setError(view, { message: "sin is not defined" });
+
+    assert.equal(result?.line, 2);
+    assert.equal(view.dispatchCount, 1);
+  });
+
+  test("returns null when identifier appears on multiple lines", () => {
+    const view = createMockView([
+      's("hh*8").pan(sin.fast(2))',
+      's("hh*8").pan(sin.slow(2))',
+    ]);
+
+    const result = setError(view, { message: "sin is not defined" });
+
+    assert.equal(result, null);
+    assert.equal(view.dispatchCount, 0);
+  });
+});
+
+function createMockView(lines) {
+  const lineInfos = [];
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const text = lines[i];
+    const from = offset;
+    const to = from + text.length;
+    lineInfos.push({ number: i + 1, text, from, to });
+    offset = to + 1;
+  }
+
+  const doc = {
+    lines: lines.length,
+    line(number) {
+      return lineInfos[number - 1];
+    },
+  };
+
+  const view = {
+    state: { doc },
+    dispatchCount: 0,
+    dispatch() {
+      this.dispatchCount += 1;
+    },
+  };
+
+  return view;
+}

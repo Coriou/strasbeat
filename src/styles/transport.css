@@ -42,12 +42,17 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   font-weight: 600;
+  flex-shrink: 0;
   white-space: nowrap;
   cursor: pointer;
   transition:
     background var(--t-hover),
     color var(--t-hover),
     border-color var(--t-hover);
+}
+
+.transport__error-badge[hidden] {
+  display: none;
 }
 
 .transport__error-badge::before {
@@ -68,6 +73,10 @@
   background: color-mix(in oklch, var(--rec) 14%, var(--surface-3));
   color: var(--text);
   border-color: color-mix(in oklch, var(--rec) 38%, var(--border));
+}
+
+.transport__error-badge:active {
+  background: color-mix(in oklch, var(--rec) 18%, var(--surface-2));
 }
 
 .transport__error-badge:focus-visible {

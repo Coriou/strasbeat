@@ -166,17 +166,18 @@ export function extractErrorLine(err) {
 }
 
 export function setError(view, err) {
-  if (!view) return;
+  if (!view) return null;
   let extracted = extractErrorLine(err);
   // Fallback: if no line number in the error, try to locate the crashing
   // identifier in the editor content (handles runtime TypeErrors etc.).
   if (!extracted) {
     extracted = findErrorLineInSource(err, view.state.doc);
   }
-  if (!extracted) return;
+  if (!extracted) return null;
   const next = buildErrorState(view.state.doc, extracted);
-  if (!next) return;
+  if (!next) return null;
   view.dispatch({ effects: setErrorEffect.of(next) });
+  return extracted;
 }
 
 export function clearError(view) {
@@ -285,14 +286,31 @@ function findErrorLineInSource(err, doc) {
   const needle = extractCrashingIdentifier(message);
   if (!needle || needle.length < 2) return null;
 
+  // Use word-boundary matching so "sin" doesn't match inside "sine".
+  // Needles that start with "." (property access like ".foo(") are
+  // already precise — test them with plain includes.
+  const re = needle.startsWith(".") ? null : safeWordBoundaryRe(needle);
+
   let foundLine = null;
   for (let i = 1; i <= doc.lines; i++) {
-    if (doc.line(i).text.includes(needle)) {
+    const text = doc.line(i).text;
+    const hit = re ? re.test(text) : text.includes(needle);
+    if (hit) {
       if (foundLine !== null) return null; // ambiguous — bail
       foundLine = i;
     }
   }
   return foundLine ? { line: foundLine, message } : null;
+}
+
+function safeWordBoundaryRe(word) {
+  // Escape regex metacharacters, then wrap in \b.
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try {
+    return new RegExp(`\\b${escaped}(?=[^\\w]|$)`);
+  } catch {
+    return null; // degenerate input — caller falls back to includes
+  }
 }
 
 function extractCrashingIdentifier(message) {

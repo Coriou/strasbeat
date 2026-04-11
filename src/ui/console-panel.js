@@ -71,6 +71,7 @@ const LEVELS = [
 export function createConsolePanel({
   onFocusEditor = () => {},
   onJumpToLine = () => {},
+  onClear = () => {},
 } = {}) {
   // ─── State ────────────────────────────────────────────────────────────
   /** @type {Array<{id:number, level:string, message:string, timestamp:number, data:any}>} */
@@ -224,6 +225,7 @@ export function createConsolePanel({
       listEl.replaceChildren();
       updateCount();
     }
+    onClear();
   }
 
   // ─── Ring buffer + DOM updates ────────────────────────────────────────

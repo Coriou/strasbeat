@@ -24,8 +24,8 @@ const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
  * @param {object} opts
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
  * @param {() => AudioContext|null} [opts.getAudioContext]  returns the live AudioContext
- * @param {() => void} [opts.onErrorBadgeClick]  opens the console for runtime errors
- * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, setErrorCount: (count: number) => void, clearErrorCount: () => void, dispose: () => void }}
+ * @param {() => void} [opts.onErrorBadgeClick]  opens the current error context
+ * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, setErrorState: (s: {kind?: string, label: string, title?: string} | null) => void, clearErrorState: () => void, dispose: () => void }}
  */
 export function mountTransport({
   getScheduler,
@@ -57,7 +57,7 @@ export function mountTransport({
   let lastIdle = null;
   let playbackState = "idle";
   let lastAcWarning = ""; // debounce audio context health warnings
-  let lastErrorCount = 0;
+  let lastErrorSignature = "";
 
   let raf = null;
   // Safety-net poll: catches the case where the scheduler starts via the
@@ -177,28 +177,32 @@ export function mountTransport({
     midiPillEl.classList.toggle("is-err", ok === false);
   }
 
-  function setErrorCount(count) {
-    const nextCount = Math.max(
-      0,
-      Number.isFinite(count) ? Math.trunc(count) : 0,
-    );
-    if (nextCount === lastErrorCount) return;
-    lastErrorCount = nextCount;
-    errorBadgeEl.hidden = nextCount === 0;
-    if (nextCount === 0) {
-      errorBadgeEl.textContent = "";
-      errorBadgeEl.removeAttribute("aria-label");
-      errorBadgeEl.removeAttribute("title");
+  function setErrorState(errorState) {
+    const next = normalizeErrorState(errorState);
+    if (!next) {
+      clearErrorState();
       return;
     }
-    const label = `${nextCount} error${nextCount === 1 ? "" : "s"}`;
-    errorBadgeEl.textContent = label;
-    errorBadgeEl.setAttribute("aria-label", `Open console: ${label}`);
-    errorBadgeEl.title = `Open console: ${label}`;
+
+    const nextSignature = `${next.kind}|${next.label}|${next.title}`;
+    if (nextSignature === lastErrorSignature) return;
+    lastErrorSignature = nextSignature;
+
+    errorBadgeEl.hidden = false;
+    errorBadgeEl.dataset.errorKind = next.kind;
+    errorBadgeEl.textContent = next.label;
+    errorBadgeEl.setAttribute("aria-label", next.title);
+    errorBadgeEl.title = next.title;
   }
 
-  function clearErrorCount() {
-    setErrorCount(0);
+  function clearErrorState() {
+    if (!lastErrorSignature && errorBadgeEl.hidden) return;
+    lastErrorSignature = "";
+    errorBadgeEl.hidden = true;
+    errorBadgeEl.textContent = "";
+    errorBadgeEl.removeAttribute("data-error-kind");
+    errorBadgeEl.removeAttribute("aria-label");
+    errorBadgeEl.removeAttribute("title");
   }
 
   function syncPlaybackState(started) {
@@ -241,10 +245,29 @@ export function mountTransport({
     setStatus,
     setMidiStatus,
     setPlaybackState,
-    setErrorCount,
-    clearErrorCount,
+    setErrorState,
+    clearErrorState,
     dispose,
   };
+}
+
+function normalizeErrorState(errorState) {
+  if (!errorState || typeof errorState !== "object") return null;
+
+  const label =
+    typeof errorState.label === "string" ? errorState.label.trim() : "";
+  if (!label) return null;
+
+  const kind =
+    typeof errorState.kind === "string" && errorState.kind.trim()
+      ? errorState.kind.trim()
+      : "runtime";
+  const title =
+    typeof errorState.title === "string" && errorState.title.trim()
+      ? errorState.title.trim()
+      : `Open console: ${label}`;
+
+  return { kind, label, title };
 }
 
 function mustEl(id) {
