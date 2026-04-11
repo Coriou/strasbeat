@@ -4,7 +4,7 @@ drums: stack(
   sound("bd ~ sd ~"),
   sound("[mt ~ ht*2 ~]*2").pan(sine.slow(2)),
   sound("~ ~ sd ~").bank("akailinn").pan(sine.slow(2)),
-  sound("[hh hh*2 hh*2 ~]*2"),
+  sound("[hh hh*2 hh*2 ~]*2").gain(0.25),
 )
 
 // F7/G Am7 Dm Bb

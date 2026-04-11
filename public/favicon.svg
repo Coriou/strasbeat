@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+    <!--
+    strasbeat favicon.
+    Dark bg (#1c1c1c) + brand accent (#CF418D ≈ oklch(0.63 0.19 358)).
+    SVG is the primary favicon: scales perfectly, supports dark/light,
+    no .ico or multiple PNG sizes needed for modern browsers.
+  -->
+    <rect width="32" height="32" rx="6" fill="#1c1c1c" />
+    <text x="16" y="23" font-family="system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="21"
+        font-weight="700" text-anchor="middle" fill="#CF418D">s</text>
+</svg>
