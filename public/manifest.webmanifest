@@ -1,11 +1,17 @@
 {
+  "id": "/",
   "name": "strasbeat",
   "short_name": "strasbeat",
   "description": "Live code music in the browser. IDE-grade editor, piano roll, MIDI bridge, and offline WAV export — built on Strudel.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
   "background_color": "#1c1c1c",
   "theme_color": "#1c1c1c",
+  "lang": "en",
+  "categories": ["music", "entertainment", "productivity"],
   "icons": [
     {
       "src": "/favicon.svg",

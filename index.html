@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
 
     <!-- ─── Primary ──────────────────────────────────────────────────────── -->
     <title>strasbeat — live code music in the browser</title>
@@ -61,6 +64,13 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <!-- Browser chrome / tab bar colour on Android and iOS Safari.           -->
     <meta name="theme-color" content="#1c1c1c" />
+    <!-- Apple PWA: standalone mode, translucent status bar, app display name -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta name="apple-mobile-web-app-title" content="strasbeat" />
 
     <link rel="stylesheet" href="/src/style.css" />
   </head>

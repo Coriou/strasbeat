@@ -35,7 +35,7 @@
     "trackbar  trackbar trackbar"
     "midibar   midibar  midibar"
     "roll      roll    roll";
-  height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
   /* Animate roll collapse via grid-template-rows. The right-rail column
@@ -241,4 +241,78 @@
 .btn__label {
   font-size: var(--text-sm);
   letter-spacing: 0.01em;
+}
+
+/* ─── PWA display modes ────────────────────────────────────────────────────
+ *
+ * Standalone / fullscreen — iOS and Android installed PWA with
+ * viewport-fit=cover. The device's status bar and home indicator overlap the
+ * viewport, so we grow the top bar and transport to accommodate, then add
+ * padding inside them so the actual chrome stays in the safe area.
+ */
+@supports (padding: env(safe-area-inset-top, 0px)) {
+  @media (display-mode: standalone), (display-mode: fullscreen) {
+    :root {
+      --top-bar-h: calc(40px + env(safe-area-inset-top, 0px));
+      --transport-h: calc(32px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .top-bar {
+      padding-top: env(safe-area-inset-top, 0px);
+      align-items: flex-end;
+    }
+
+    .transport {
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+      align-items: flex-start;
+    }
+  }
+}
+
+/*
+ * Window Controls Overlay — desktop Chrome/Edge installed PWA.
+ * The OS title bar is removed and content fills the full window.
+ * titlebar-area-* env vars tell us exactly where the platform's
+ * window controls sit (close / min / max buttons) so we can paint
+ * the app's top bar into that strip without overlapping them.
+ *
+ * macOS: controls are on the LEFT  — titlebar-area-x ≈ 72px
+ * Windows: controls are on the RIGHT — titlebar-area-width < 100vw
+ */
+@supports (height: env(titlebar-area-height, 0px)) {
+  @media (display-mode: window-controls-overlay) {
+    :root {
+      /* Match the OS title bar height exactly so our grid row is flush. */
+      --top-bar-h: env(titlebar-area-height, 40px);
+    }
+
+    .top-bar {
+      /* The full bar is the drag region — lets the user move the window
+         by clicking any empty area in the top bar, exactly like a native app. */
+      -webkit-app-region: drag;
+      app-region: drag;
+
+      /* Left inset: clear macOS traffic-lights (or other left-side controls). */
+      padding-left: max(
+        calc(env(titlebar-area-x, 0px) + var(--space-4)),
+        var(--space-4)
+      );
+
+      /* Right inset: clear Windows close/min/max buttons. */
+      padding-right: max(
+        calc(
+          100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) +
+            var(--space-4)
+        ),
+        var(--space-4)
+      );
+    }
+
+    /* Every direct child must opt out — otherwise their click events
+       are eaten by the drag region and buttons/inputs stop working. */
+    .top-bar > * {
+      -webkit-app-region: no-drag;
+      app-region: no-drag;
+    }
+  }
 }
