@@ -14,6 +14,7 @@
 
     <!-- ─── Open Graph (Slack, Discord, LinkedIn, iMessage, WhatsApp …) ─── -->
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="strasbeat" />
     <meta
       property="og:title"
@@ -50,9 +51,10 @@
     />
 
     <!-- ─── Favicon & PWA ─────────────────────────────────────────────────── -->
-    <!-- SVG is the primary favicon for all modern browsers (Chrome, Edge,    -->
-    <!-- Firefox, Safari 15.4+). No .ico needed for a modern web deployment.  -->
+    <!-- SVG favicon for modern browsers, PNG + ICO fallbacks for everything else -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/favicon.ico" sizes="32x16" />
     <!-- Apple Touch Icon: used when adding to iOS home screen.               -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!-- Web App Manifest: powers Add-to-Home-Screen on Android/Chrome.       -->
