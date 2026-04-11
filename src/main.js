@@ -24,7 +24,12 @@ import { createReferencePanel } from "./ui/reference-panel.js";
 import { createConsolePanel } from "./ui/console-panel.js";
 import { createExportPanel } from "./ui/export-panel.js";
 import { createSettingsPanel } from "./ui/settings-panel.js";
+import { createLearnPanel } from "./ui/learn-panel.js";
+import { createSetupPanel } from "./ui/setup-panel.js";
+import { runUserSetup } from "./user-setup.js";
 import { renderRoll } from "./ui/piano-roll.js";
+import { createScope } from "./ui/scope.js";
+import { createBottomPanelModes } from "./ui/bottom-panel-modes.js";
 import { mountTrackBar } from "./ui/track-bar.js";
 import { prompt, confirm } from "./ui/modal.js";
 import { applyStoredAccent, applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
@@ -59,7 +64,7 @@ import {
 } from "@codemirror/search";
 
 const { evalScope, controls } = strudelCore;
-const { getAudioContext, webaudioOutput, registerSynthSounds, initAudio, initAudioOnFirstClick, setLogger, samples, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
+const { getAudioContext, webaudioOutput, registerSynthSounds, registerZZFXSounds, initAudio, initAudioOnFirstClick, setLogger, samples, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
 
 // Version strings surfaced in the settings panel's "About" section.
 // Keep in sync with `package.json`.
@@ -136,6 +141,18 @@ new ResizeObserver(() => resizeCanvas()).observe(canvas);
 const drawCtx = canvas.getContext("2d");
 const drawTime = [-2, 2]; // seconds before / after now to render
 
+// Bottom panel mode switcher (Roll / Scope / Custom)
+const scope = createScope();
+const bottomModes = createBottomPanelModes();
+bottomModes.mountTabBar(canvas.parentElement);
+bottomModes.setOnChange((mode) => {
+  if (mode === "scope") {
+    try {
+      scope.connect(getAudioContext());
+    } catch {}
+  }
+});
+
 // ─── Editor ──────────────────────────────────────────────────────────────
 // Boot sequence: share link > store lastOpen > first shipped pattern.
 const shared = readSharedFromHash();
@@ -210,8 +227,24 @@ const editor = new StrudelMirror({
       console.warn("[strasbeat/console] error() failed:", panelErr);
     }
   },
-  onDraw: (haps, time) =>
-    renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor }),
+  onDraw: (haps, time) => {
+    const mode = bottomModes.getMode();
+    if (mode === "scope") {
+      const dpr = window.devicePixelRatio || 1;
+      scope.render(drawCtx, canvas.width / dpr, canvas.height / dpr);
+    } else if (mode === "custom") {
+      const customFn = bottomModes.getCustomDraw();
+      if (customFn) {
+        try {
+          customFn(drawCtx, haps, time);
+        } catch (err) {
+          console.warn("[strasbeat] custom draw error:", err);
+        }
+      }
+    } else {
+      renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor });
+    }
+  },
   prebake: async () => {
     try {
       initAudioOnFirstClick();
@@ -246,8 +279,9 @@ const editor = new StrudelMirror({
           ]),
         );
 
-      // Phase 1: synth sounds (small, fast — no timeout needed)
+      // Phase 1: synth sounds + ZZFX (small, fast — no timeout needed)
       await safe("synth sounds", registerSynthSounds());
+      safe("ZZFX sounds", registerZZFXSounds());
       setBootProgress(0.3, "loading soundfonts…");
 
       // Phase 2: soundfonts (medium — timeout protects against CDN issues)
@@ -259,7 +293,19 @@ const editor = new StrudelMirror({
       await Promise.all([
         withTimeout("dirt-samples", samples("github:tidalcycles/dirt-samples")),
         withTimeout('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/')), // prettier-ignore
+        withTimeout(
+          "uzu-drumkit",
+          samples(
+            "https://raw.githubusercontent.com/tidalcycles/uzu-drumkit/main/strudel.json",
+          ),
+        ),
       ]);
+      setBootProgress(0.9, "running user setup…");
+
+      // Phase 4: user setup — opt-in packages, user samples, setup script.
+      // Runs after core prebake so everything the user's code might reference
+      // is already available.
+      await safe("user setup", runUserSetup({ evalScope, samples }));
       setBootProgress(1.0);
 
       // ── Finalize boot state ──
@@ -459,6 +505,43 @@ const rightRail = mountRightRail({
   onFocusEditor: () => editor.editor.focus(),
 });
 
+const learnPanel = createLearnPanel({
+  onTry: (code) =>
+    tryReferenceExample(code, {
+      editor,
+      patterns,
+      getCurrentName: () => currentName,
+      confirm,
+    }),
+  onCopyToNewPattern: async (code, title) => {
+    const before = currentName;
+    await handleNewPatternClick({
+      store,
+      patterns,
+      editor,
+      leftRail,
+      transport,
+      setCurrentName: (n) => {
+        currentName = n;
+      },
+      flushToStore,
+      prompt,
+      isDev: import.meta.env.DEV,
+    });
+    // If a new pattern was created, seed it with the learn content.
+    if (currentName !== before) {
+      editor.setCode(code);
+      saveBtn?.click();
+    }
+  },
+  onFocusEditor: () => editor.editor.focus(),
+  onOpenReference: (name) => {
+    rightRail.activate("reference");
+    referencePanel?.focusEntry?.(name);
+  },
+});
+rightRail.registerPanel(learnPanel);
+
 const soundBrowser = createSoundBrowserPanel({
   getSoundMap: () => soundMap.get(),
   onPreview: (name) =>
@@ -525,16 +608,25 @@ const settingsPanel = createSettingsPanel({
 });
 rightRail.registerPanel(settingsPanel);
 
+const setupPanel = createSetupPanel({
+  onFocusEditor: () => editor.editor.focus(),
+  onReloadRequired: () => {
+    status.textContent = "Reload to apply changes";
+  },
+  confirm,
+});
+rightRail.registerPanel(setupPanel);
+
 // ─── First-run orientation ───────────────────────────────────────────────
-// Auto-open the right rail to the sound browser on first visit so new users
-// discover that panels exist behind the collapsed icon strip. The flag is
+// Auto-open the right rail to the Learn panel on first visit so new users
+// discover the in-app learning surface and the panel system. The flag is
 // cleared after the first visit; after that, the rail remembers the user's
 // choice.
 {
   const FIRST_RUN_KEY = "strasbeat:first-run-done";
   if (!localStorage.getItem(FIRST_RUN_KEY)) {
     localStorage.setItem(FIRST_RUN_KEY, "1");
-    rightRail.activate("sounds");
+    rightRail.activate("learn");
   }
 }
 
@@ -772,13 +864,20 @@ const palette = mountCommandPalette({
       editor.editor.focus();
       indentLess(editor.editor);
     },
+    onOpenLearn: () => rightRail.activate("learn"),
     onOpenSounds: () => rightRail.activate("sounds"),
     onOpenReference: () => rightRail.activate("reference"),
     onOpenConsole: () => rightRail.activate("console"),
     onOpenExport: () => rightRail.activate("export"),
     onOpenSettings: () => rightRail.activate("settings"),
+    onOpenSetup: () => rightRail.activate("setup"),
     onClosePanel: () => rightRail.collapse(),
     onFocusPatterns: () => leftRail.focusSearch(),
+    onSwitchToRoll: () => bottomModes.setMode("roll"),
+    onSwitchToScope: () => {
+      bottomModes.enableScope();
+      bottomModes.setMode("scope");
+    },
   }),
 });
 

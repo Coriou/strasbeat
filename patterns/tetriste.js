@@ -59,4 +59,13 @@ bassrev: stack(bass)
   .delay(0.25)
   .sustain(0.75)
   .decay(0.75)
+
+bassplayful: stack(bass)
+  .s("sawtooth")
+  .lpf(sine.range(200, 2000).slow(8))
+  .lpq(12)
+  .decay(0.15)
+  .sustain(0)
+  .gain(0.7)
+  .pan(sine.slow(8))
 `;

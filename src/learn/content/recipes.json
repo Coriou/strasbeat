@@ -1,0 +1,98 @@
+[
+  {
+    "id": "rec-add-delay",
+    "type": "recipe",
+    "title": "Add a delay effect",
+    "summary": "Chain .delay(), .delaytime(), and .delayfeedback() on any pattern to add an echo effect. Time in seconds, feedback 0–1.",
+    "tags": ["delay", "effects", "echo"],
+    "code": "setcpm(120/4)\n\n$: note(\"c4 ~ e4 ~ g4 ~ e4 ~\").s(\"gm_vibraphone\")\n  .delay(0.5)\n  .delaytime(0.375)\n  .delayfeedback(0.4)\n  .room(0.2)"
+  },
+  {
+    "id": "rec-add-reverb",
+    "type": "recipe",
+    "title": "Add reverb",
+    "summary": "Use .room() for reverb amount (0–1) and .size() for the tail length. Combine with .lpf() to tame brightness.",
+    "tags": ["reverb", "room", "effects", "space"],
+    "code": "setcpm(100/4)\n\n$: note(\"c3 e3 g3 b3\").s(\"gm_electric_piano_1\")\n  .room(0.7)\n  .size(0.9)\n  .lpf(2000)\n  .gain(0.6)"
+  },
+  {
+    "id": "rec-drum-pattern",
+    "type": "recipe",
+    "title": "Build a drum pattern",
+    "summary": "Layer kick, snare, and hi-hats using $: labels. Use .bank() to pick a machine, * for repeats, ~ for rests.",
+    "tags": ["drums", "bank", "beat", "kick", "snare", "hi-hat"],
+    "code": "setcpm(120/4)\n\n$: s(\"bd*2\").bank(\"RolandTR909\").gain(0.9)\n$: s(\"~ sd ~ sd\").bank(\"RolandTR909\")\n$: s(\"hh*8\").bank(\"RolandTR909\").gain(0.45)\n$: s(\"~ ~ ~ oh\").bank(\"RolandTR909\").gain(0.3)"
+  },
+  {
+    "id": "rec-chord-progression",
+    "type": "recipe",
+    "title": "Make a chord progression",
+    "summary": "Use progression() with single-quoted chord symbols. Add rhythm presets, bass layers, and style presets for instant arrangements.",
+    "tags": ["chords", "progression", "voicing", "harmony"],
+    "code": "setcpm(110/4)\n\n// Simple block chords:\n$: progression('Dm7 G7 Cmaj7 Fmaj7')\n  .room(0.3).gain(0.5)\n\n// With arpeggiated rhythm and bass:\n$: progression('Dm7 G7 Cmaj7 Fmaj7', {\n  rhythm: 'arp-up',\n  bass: true,\n}).gain(0.4)"
+  },
+  {
+    "id": "rec-euclidean",
+    "type": "recipe",
+    "title": "Euclidean rhythms",
+    "summary": "Use (k,n) in mini-notation for Euclidean patterns: k hits spread evenly across n steps. Great for polyrhythms.",
+    "tags": ["euclidean", "rhythm", "polyrhythm"],
+    "code": "setcpm(120/4)\n\n// 3 hits in 8 steps = tresillo rhythm:\n$: s(\"bd(3,8)\").gain(0.9)\n\n// 5 in 8 = cinquillo:\n$: s(\"rim(5,8)\").gain(0.6)\n\n// 7 in 16 = complex pattern:\n$: s(\"hh(7,16)\").gain(0.4)\n\n// Combine for polyrhythmic texture:\n$: note(\"c3(3,8)\").s(\"gm_acoustic_bass\")"
+  },
+  {
+    "id": "rec-filter-sweep",
+    "type": "recipe",
+    "title": "Filter sweep with an LFO",
+    "summary": "Use sine.range() to sweep .lpf() over time. .slow() controls sweep speed. .lpq() adds resonance.",
+    "tags": ["filter", "lpf", "lfo", "sine", "sweep", "modulation"],
+    "code": "setcpm(120/4)\n\n$: note(\"c2 c2 eb2 g2\").s(\"sawtooth\")\n  .lpf(sine.range(200, 2000).slow(8))\n  .lpq(12)\n  .decay(0.15).sustain(0)\n  .gain(0.7)"
+  },
+  {
+    "id": "rec-stereo-width",
+    "type": "recipe",
+    "title": "Create stereo width",
+    "summary": "Use .jux() to split L/R and transform one side, or .pan() with a signal for auto-panning.",
+    "tags": ["stereo", "pan", "jux", "width", "spatial"],
+    "code": "setcpm(110/4)\n\n// .jux(rev) plays original left, reversed right:\n$: note(\"c4 e4 g4 b4\").s(\"triangle\")\n  .jux(rev)\n  .room(0.3)\n\n// .pan() with sine for smooth auto-pan:\n$: note(\"c3 e3 g3\").s(\"gm_vibraphone\")\n  .pan(sine.slow(4))\n  .room(0.4).gain(0.5)"
+  },
+  {
+    "id": "rec-probability",
+    "type": "recipe",
+    "title": "Add randomness and probability",
+    "summary": "Use ? in mini-notation for random drops, .sometimes() for random transforms, and .rand() / .choose() for variation.",
+    "tags": ["random", "probability", "sometimes", "degrade", "variation"],
+    "code": "setcpm(120/4)\n\n// ? drops a hit 50% of the time:\n$: s(\"hh hh? hh hh?\").gain(0.5)\n\n// .sometimes() applies a transform randomly:\n$: s(\"bd sd bd sd\")\n  .sometimes(x => x.speed(2))\n\n// randcat picks a random pattern each cycle:\n$: randcat(\n  s(\"bd sd bd sd\"),\n  s(\"bd bd sd sd\"),\n  s(\"bd*4\"),\n)"
+  },
+  {
+    "id": "rec-sample-chopping",
+    "type": "recipe",
+    "title": "Chop and slice samples",
+    "summary": "Use .chop() to granulate, .splice() for rearranging, and .begin()/.end() for precise sample playback.",
+    "tags": ["chop", "splice", "sample", "granular", "slice"],
+    "code": "setcpm(100/4)\n\n// .chop(N) slices a sample into N grains:\n$: s(\"break:0\").chop(16)\n\n// .begin() and .end() play a portion (0–1):\n$: s(\"break:1\").begin(0.25).end(0.5).fast(2)\n\n// .speed() changes playback rate:\n$: s(\"bd\").speed(\"<1 0.5 2 1.5>\")"
+  },
+  {
+    "id": "rec-evolving-pattern",
+    "type": "recipe",
+    "title": "Create evolving patterns",
+    "summary": "Use .every(), .slow(), and <> alternation to make patterns that change over time without manual arrangement.",
+    "tags": ["evolution", "every", "slow", "variation", "arrangement"],
+    "code": "setcpm(120/4)\n\n// .every() applies a transform periodically:\n$: s(\"bd sd bd sd\")\n  .every(4, x => x.fast(2))\n  .every(3, x => x.speed(1.5))\n\n// <> alternation changes each cycle:\n$: note(\"<c3 e3 g3 b3>\").s(\"gm_vibraphone\")\n  .room(0.4)\n\n// .slow() stretches across multiple cycles:\n$: note(\"c3 d3 e3 f3 g3 a3 b3 c4\")\n  .s(\"triangle\")\n  .slow(4)\n  .room(0.3).gain(0.5)"
+  },
+  {
+    "id": "rec-signal-modulation",
+    "type": "recipe",
+    "title": "Signal modulation (LFOs)",
+    "summary": "Use sine, saw, tri, square, and perlin as modulation sources. Chain .range() to set bounds and .slow()/.fast() for speed.",
+    "tags": ["lfo", "sine", "saw", "modulation", "signal", "automation"],
+    "code": "setcpm(100/4)\n\n$: note(\"c3 e3 g3 b3\").s(\"sawtooth\")\n  .lpf(sine.range(400, 2000).slow(4))\n  .lpq(8)\n  .gain(saw.range(0.3, 0.8).slow(2))\n  .pan(sine.slow(8))\n  .room(perlin.range(0.1, 0.6))\n  .decay(0.2).sustain(0)"
+  },
+  {
+    "id": "rec-breakdown",
+    "type": "recipe",
+    "title": "Build a breakdown with .mask()",
+    "summary": "Use .mask() with <> alternation to silence layers on specific cycles. Perfect for drop/build arrangements.",
+    "tags": ["mask", "arrangement", "breakdown", "structure", "drop"],
+    "code": "setcpm(130/4)\n\n// .mask(\"<1 1 1 0>\") silences every 4th cycle:\ndrum: s(\"bd*2, ~ sd:1, hh*8\")\n  .bank(\"RolandTR909\")\n  .mask(\"<1 1 1 0>\")\n\nbass: note(\"c2 c2 eb2 g2\").s(\"sawtooth\")\n  .lpf(600).decay(0.15).sustain(0)\n  .mask(\"<1 1 1 0>\")\n\n// Pad plays through the breakdown for continuity:\npad: note(\"<c3 eb3 g3 bb3>\").s(\"gm_pad_warm\")\n  .room(0.6).gain(0.4)"
+  }
+]

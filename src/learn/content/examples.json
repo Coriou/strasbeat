@@ -1,0 +1,82 @@
+[
+  {
+    "id": "ex-house-beat",
+    "type": "example",
+    "title": "Four-on-the-floor house",
+    "summary": "Classic house beat with 909 drums, acid bass line, and atmospheric pad.",
+    "tags": ["house", "four-on-the-floor", "909", "acid", "bass"],
+    "code": "setcpm(124/4)\n\n$: s(\"bd*4\").bank(\"RolandTR909\").gain(0.9)\n$: s(\"~ ~ ~ oh\").bank(\"RolandTR909\").gain(0.3)\n$: s(\"~ cp ~ ~\").bank(\"RolandTR909\")\n$: s(\"hh*8\").bank(\"RolandTR909\").gain(0.4)\n\n$: note(\"c2 ~ c2 [~ c3]\").s(\"sawtooth\")\n  .lpf(sine.range(300, 1200).slow(8))\n  .lpq(12)\n  .decay(0.12).sustain(0)\n  .gain(0.7)\n\n$: note(\"<c4 eb4 g4 bb4>\").s(\"gm_pad_warm\")\n  .room(0.6).gain(0.25)"
+  },
+  {
+    "id": "ex-ambient-pad",
+    "type": "example",
+    "title": "Ambient pad wash",
+    "summary": "Slow-moving chord pads with reverb, delay, and gentle filter modulation.",
+    "tags": ["ambient", "pad", "chords", "reverb", "atmospheric"],
+    "code": "setcpm(72/4)\n\n$: chord(\"<Cm9 Fm9 Bbmaj7 Ebmaj7>\")\n  .s(\"gm_pad_warm\")\n  .voicing()\n  .room(0.8).size(0.95)\n  .lpf(sine.range(800, 2000).slow(16))\n  .delay(0.4).delaytime(0.5).delayfeedback(0.5)\n  .gain(0.35)\n\n$: note(\"~ ~ c5 ~\").s(\"gm_vibraphone\")\n  .room(0.9).delay(0.6).gain(0.15)"
+  },
+  {
+    "id": "ex-breakbeat",
+    "type": "example",
+    "title": "Chopped breakbeat",
+    "summary": "Euclidean rhythms meet chopped breaks with filter automation.",
+    "tags": ["breakbeat", "euclidean", "chop", "drums", "glitch"],
+    "code": "setcpm(140/4)\n\n$: s(\"bd(3,8)\").gain(0.9)\n$: s(\"sd(2,8,1)\").gain(0.8)\n$: s(\"hh(5,8)\").gain(0.4)\n$: s(\"oh(1,8,3)\").gain(0.3)\n\n$: note(\"c2 [~ c2] eb2 ~\").s(\"sawtooth\")\n  .lpf(800)\n  .decay(0.1).sustain(0)\n  .gain(0.7)\n\n$: note(\"c4 eb4 g4 bb4\").s(\"triangle\")\n  .every(3, rev)\n  .jux(x => x.fast(2))\n  .room(0.3).gain(0.3)"
+  },
+  {
+    "id": "ex-lo-fi",
+    "type": "example",
+    "title": "Lo-fi hip hop",
+    "summary": "Chill dusty beat with jazzy chords, vinyl crackle texture, and swung hi-hats.",
+    "tags": ["lofi", "chill", "jazz", "hip-hop", "chords"],
+    "code": "setcpm(85/4)\n\n$: s(\"bd ~ [~ bd] ~, ~ sd ~ sd\")\n  .bank(\"RolandTR808\")\n  .gain(0.8)\n\n$: s(\"hh*8\").gain(0.3)\n  .speed(\"1 1.02 0.98 1.01 1 0.99 1.02 1\")\n\n$: progression('Dm9 G13 Cmaj9 Am7', { rhythm: 'comp' })\n  .lpf(1800)\n  .room(0.4)\n  .gain(0.45)\n\n$: note(\"<d3 g2 c3 a2>\").s(\"gm_acoustic_bass\")\n  .gain(0.55)"
+  },
+  {
+    "id": "ex-polyrhythm",
+    "type": "example",
+    "title": "Polyrhythmic exploration",
+    "summary": "Layered Euclidean patterns creating interlocking polyrhythmic grooves.",
+    "tags": ["polyrhythm", "euclidean", "rhythm", "percussion", "complex"],
+    "code": "setcpm(110/4)\n\n// 3 against 4 against 5:\n$: s(\"bd(3,8)\").gain(0.9)\n$: s(\"rim(5,8)\").gain(0.5)\n$: s(\"hh(7,16)\").gain(0.35)\n$: s(\"cp(2,8,3)\").room(0.5).gain(0.4)\n\n$: note(\"c3(3,8)\").s(\"gm_acoustic_bass\")\n  .gain(0.6)\n\n$: note(\"g4(5,8)\").s(\"gm_vibraphone\")\n  .room(0.5).delay(0.3)\n  .gain(0.3)"
+  },
+  {
+    "id": "ex-minimal-techno",
+    "type": "example",
+    "title": "Minimal techno",
+    "summary": "Stripped-back techno with evolving filter sweeps and sparse percussion.",
+    "tags": ["techno", "minimal", "filter", "evolving", "electronic"],
+    "code": "setcpm(132/4)\n\n$: s(\"bd*4\").gain(0.9)\n$: s(\"~ hh ~ hh\").gain(0.3)\n$: s(\"~ ~ ~ rim\").every(4, x => x.fast(2)).gain(0.5)\n\n$: note(\"c2*4\").s(\"sawtooth\")\n  .lpf(sine.range(200, 3000).slow(16))\n  .lpq(15)\n  .decay(0.08).sustain(0)\n  .gain(0.6)\n\n$: note(\"<c4 ~ eb4 ~>\").s(\"triangle\")\n  .room(0.4).delay(0.5).delaytime(0.375)\n  .gain(0.2)"
+  },
+  {
+    "id": "ex-jazz-standard",
+    "type": "example",
+    "title": "Jazz standard sketch",
+    "summary": "II-V-I progression with jazz-comp style, walking bass, and brushed drums.",
+    "tags": ["jazz", "progression", "ii-v-i", "walking-bass", "standard"],
+    "code": "setcpm(140/4)\n\n$: progression('Dm7 G7 Cmaj7 Cmaj7', {\n  style: 'jazz-comp',\n  bass: true,\n}).gain(0.5)\n\n$: s(\"bd ~ [~ bd] ~, ~ sd ~ ~, hh*4\")\n  .gain(0.5)\n  .room(0.3)"
+  },
+  {
+    "id": "ex-generative",
+    "type": "example",
+    "title": "Generative ambient",
+    "summary": "Perlin noise and probability create an ever-changing ambient texture that never quite repeats.",
+    "tags": ["generative", "ambient", "perlin", "random", "evolving"],
+    "code": "setcpm(60/4)\n\n$: note(\"c4 e4 g4 b4 d5 b4 g4 e4\")\n  .s(\"gm_vibraphone\")\n  .gain(perlin.range(0, 0.6))\n  .pan(perlin.range(0.2, 0.8).slow(3))\n  .room(0.8).delay(0.6).delayfeedback(0.6)\n  .slow(2)\n\n$: note(\"<c3 g2 a2 f2>\").s(\"gm_pad_warm\")\n  .room(0.9).gain(0.25)\n\n$: s(\"hh?\").gain(0.15).room(0.8)\n  .pan(rand)"
+  },
+  {
+    "id": "ex-strum-folk",
+    "type": "example",
+    "title": "Folk strum pattern",
+    "summary": "Acoustic guitar strum using the folk-strum progression style with a simple arrangement.",
+    "tags": ["folk", "strum", "acoustic", "guitar", "progression"],
+    "code": "setcpm(100/4)\n\n$: progression('G D Em C', { style: 'folk-strum' })\n  .room(0.3)\n  .gain(0.5)\n\n$: note(\"<g2 d2 e2 c2>\").s(\"gm_acoustic_bass\")\n  .gain(0.5)\n\n$: s(\"~ ~ ~ hh\").gain(0.2)"
+  },
+  {
+    "id": "ex-synthwave",
+    "type": "example",
+    "title": "Synthwave arpeggios",
+    "summary": "80s-style arpeggiated synths with gated reverb drums and pulsing bass.",
+    "tags": ["synthwave", "arpeggio", "80s", "retro", "synth"],
+    "code": "setcpm(118/4)\n\n$: s(\"bd*4\").gain(0.9)\n$: s(\"~ sd ~ sd\").room(0.4).gain(0.7)\n$: s(\"hh*8\").gain(0.3)\n\n$: progression('Am Fmaj7 C G', { rhythm: 'arp-up' })\n  .delay(0.3).delaytime(0.25).delayfeedback(0.3)\n  .gain(0.4)\n\n$: note(\"a1*4 f1*4 c2*4 g1*4\").s(\"sawtooth\")\n  .lpf(400)\n  .decay(0.1).sustain(0)\n  .gain(0.6)"
+  }
+]

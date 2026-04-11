@@ -26,6 +26,7 @@
 @import "./styles/right-rail.css";
 @import "./styles/sound-browser.css";
 @import "./styles/reference.css";
+@import "./styles/learn.css";
 @import "./styles/console.css";
 @import "./styles/export.css";
 @import "./styles/settings-panel.css";
@@ -33,9 +34,11 @@
 @import "./styles/track-bar.css";
 @import "./styles/midi-bar.css";
 @import "./styles/roll.css";
+@import "./styles/bottom-panel.css";
 @import "./styles/editor.css";
 @import "./styles/autocomplete.css";
 @import "./styles/scrubber.css";
 @import "./styles/modal.css";
 @import "./styles/command-palette.css";
 @import "./styles/settings.css";
+@import "./styles/setup.css";

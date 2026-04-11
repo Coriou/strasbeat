@@ -1,0 +1,439 @@
+[
+  {
+    "id": "ws-mini-basics",
+    "type": "workshop",
+    "title": "Mini-notation basics",
+    "summary": "The building blocks of Strudel patterns: events, rests, groups, repetition, and alternation.",
+    "tags": [
+      "mini-notation",
+      "basics",
+      "beginner"
+    ],
+    "chapter": 1,
+    "order": 1,
+    "code": "setcpm(120/4)\n\n// Each string is a mini-notation pattern.\n// Space-separated values split the cycle evenly:\n$: s(\"bd sd hh oh\")\n\n// * repeats inside the same step:\n$: s(\"hh*8\").gain(0.4)\n\n// ~ is a rest (silence for one step):\n$: s(\"bd ~ sd ~\")\n\n// [] groups values into a single step:\n$: s(\"bd [hh hh] sd [hh oh]\")\n\n// <> alternates one value per cycle:\n$: note(\"<c3 e3 g3 b3>\").s(\"gm_electric_piano_1\")"
+  },
+  {
+    "id": "ws-sounds-samples",
+    "type": "workshop",
+    "title": "Sounds and samples",
+    "summary": "Pick sounds by name, switch drum machines with .bank(), and use soundfont instruments with note().",
+    "tags": [
+      "sounds",
+      "samples",
+      "bank",
+      "soundfont",
+      "drum"
+    ],
+    "chapter": 2,
+    "order": 2,
+    "code": "setcpm(120/4)\n\n// s() triggers samples by name from the dirt-samples library:\n$: s(\"bd sd cp hh\")\n\n// .bank() switches to a specific drum machine:\n$: s(\"bd sd cp oh\").bank(\"RolandTR909\")\n\n// Soundfonts are pitched — use with note():\n$: note(\"c3 e3 g3 c4\").s(\"gm_electric_piano_1\")\n\n// :N picks a sample variation (0-indexed):\n$: s(\"hh:0 hh:1 hh:2 hh:3\")"
+  },
+  {
+    "id": "ws-effects",
+    "type": "workshop",
+    "title": "Effects and filters",
+    "summary": "Shape your sound with low-pass filters, reverb, delay, distortion, and envelope controls.",
+    "tags": [
+      "effects",
+      "filter",
+      "lpf",
+      "delay",
+      "reverb",
+      "room",
+      "gain"
+    ],
+    "chapter": 3,
+    "order": 3,
+    "code": "setcpm(100/4)\n\n// .lpf() is a low-pass filter (cutoff in Hz):\n$: s(\"sawtooth\").note(\"c2 eb2 g2 bb2\")\n  .lpf(800).lpq(8)\n\n// .room() adds reverb, .size() controls decay:\n$: s(\"cp*2\").room(0.8).size(0.9).gain(0.6)\n\n// .delay() with .delaytime() and .delayfeedback():\n$: note(\"c4 ~ e4 ~\").s(\"gm_vibraphone\")\n  .delay(0.5).delaytime(0.375).delayfeedback(0.4)\n\n// Envelope: .attack() .decay() .sustain() .release()\n$: note(\"c3 e3 g3 b3\").s(\"sawtooth\")\n  .attack(0.01).decay(0.2).sustain(0.3).release(0.5)\n  .lpf(1200).gain(0.5)"
+  },
+  {
+    "id": "ws-combinators",
+    "type": "workshop",
+    "title": "Pattern combinators",
+    "summary": "Layer patterns with $: labels, combine with stack() and cat(), and explore structural tools.",
+    "tags": [
+      "stack",
+      "cat",
+      "layer",
+      "structure",
+      "combinators"
+    ],
+    "chapter": 4,
+    "order": 4,
+    "code": "setcpm(120/4)\n\n// $: registers each layer independently (recommended):\n$: s(\"bd*4\").bank(\"RolandTR909\").gain(0.9)\n$: s(\"~ sd ~ sd\").bank(\"RolandTR909\")\n$: s(\"hh*8\").bank(\"RolandTR909\").gain(0.4)\n\n// stack() plays patterns simultaneously in one voice:\n$: stack(\n  note(\"c3 e3\"),\n  note(\"g3 b3\"),\n).s(\"gm_electric_piano_1\").room(0.4)\n\n// cat() sequences patterns across cycles:\n$: cat(\n  s(\"bd sd bd sd\"),\n  s(\"hh*8\"),\n)"
+  },
+  {
+    "id": "ws-tonal",
+    "type": "workshop",
+    "title": "Notes, scales, and chords",
+    "summary": "Work with pitched content: note names, scale patterns, chord voicings, and the .voicing() method.",
+    "tags": [
+      "note",
+      "scale",
+      "chord",
+      "voicing",
+      "tonal",
+      "pitch"
+    ],
+    "chapter": 5,
+    "order": 5,
+    "code": "setcpm(100/4)\n\n// note() with letter names:\n$: note(\"c3 e3 g3 b3\").s(\"gm_electric_piano_1\")\n\n// .scale() constrains numbers to a scale:\n$: n(\"0 2 4 6 3 5 7 4\").scale(\"C4:minor\")\n  .s(\"gm_vibraphone\").room(0.5)\n\n// chord() for block chords:\n$: chord(\"<Cm7 Fm7 Bbmaj7 Ebmaj7>\")\n  .s(\"gm_electric_piano_1\")\n  .voicing()\n  .room(0.4)\n\n// .add() transposes:\n$: note(\"c3 e3 g3\").add(\"<0 5 7 12>\").s(\"triangle\")"
+  },
+  {
+    "id": "ws-time-tempo",
+    "type": "workshop",
+    "title": "Time and tempo",
+    "summary": "Control speed with setcpm, transform time with .fast() and .slow(), and use .every() for periodic variation.",
+    "tags": [
+      "tempo",
+      "setcpm",
+      "fast",
+      "slow",
+      "every",
+      "time"
+    ],
+    "chapter": 6,
+    "order": 6,
+    "code": "// setcpm(BPM / beats_per_cycle) sets the tempo:\nsetcpm(130/4)\n\n// .fast() and .slow() change playback speed:\n$: s(\"bd sd bd sd\").bank(\"RolandTR909\")\n$: s(\"hh*4\").fast(2).gain(0.4)\n\n// .every(N, fn) applies a transformation every N cycles:\n$: note(\"c3 e3 g3 b3\").s(\"gm_vibraphone\")\n  .every(4, x => x.fast(2))\n  .room(0.3)\n\n// .sometimes() applies randomly (~50% of the time):\n$: s(\"bd sd bd sd\").sometimes(x => x.speed(1.5))\n\n// .rev() reverses the pattern:\n$: note(\"c3 d3 e3 f3 g3 a3 b3 c4\").s(\"triangle\")\n  .every(2, rev)"
+  },
+  {
+    "id": "ws-layering",
+    "type": "workshop",
+    "title": "Layering and structure",
+    "summary": "Build full arrangements with $: labels, use .mask() for breakdowns, and layer textures with .off() and .jux().",
+    "tags": [
+      "layer",
+      "mask",
+      "jux",
+      "off",
+      "structure",
+      "arrangement"
+    ],
+    "chapter": 7,
+    "order": 7,
+    "code": "setcpm(120/4)\n\n// Use $: labels for separate layers — mute/solo friendly:\ndrum: s(\"bd*2, ~ sd:1, hh*8\")\n  .bank(\"RolandTR909\").gain(0.8)\n\n// .mask() creates breakdowns by silencing on some cycles:\nbass: note(\"c2 c2 eb2 g2\").s(\"sawtooth\")\n  .lpf(600).decay(0.15).sustain(0)\n  .mask(\"<1 1 1 0>\")\n\n// .jux() splits stereo: left plays original, right plays transformed:\nlead: note(\"c4 eb4 g4 bb4\").s(\"triangle\")\n  .jux(rev)\n  .room(0.4).delay(0.3)\n\n// .off() overlays a delayed, modified copy:\npad: note(\"<c3 eb3 g3 bb3>\").s(\"gm_pad_warm\")\n  .off(1/8, x => x.add(7))\n  .room(0.6).gain(0.4)"
+  },
+  {
+    "id": "ws-progression",
+    "type": "workshop",
+    "title": "Chord progressions (strasbeat)",
+    "summary": "Use strasbeat's progression() helper for one-line chord progressions with rhythm presets, styles, and bass layers.",
+    "tags": [
+      "progression",
+      "strasbeat",
+      "chords",
+      "voicing",
+      "rhythm",
+      "bass"
+    ],
+    "chapter": 8,
+    "order": 8,
+    "code": "setcpm(110/4)\n\n// progression() is a strasbeat extension — use SINGLE QUOTES:\n$: progression('Cm7 F7 Bb^7 Eb^7')\n  .room(0.3).gain(0.5)\n\n// rhythm presets: block, strum, comp, arp-up, arp-down, alberti\n$: progression('Cm7 F7 Bb^7 Eb^7', { rhythm: 'arp-up' })\n  .delay(0.3).delaytime(0.375).gain(0.35)\n\n// bass: true adds a root-note bass layer:\n$: progression('Am7 Dm7 G7 Cmaj7', { rhythm: 'comp', bass: true })\n  .gain(0.5)\n\n// Style presets bundle sound + rhythm + FX:\n$: progression('Dm7 G7 Cmaj7 Fmaj7', { style: 'jazz-comp' })\n  .gain(0.5)\n\ndrum: s(\"bd*2, ~ sd:1, hh*8\")\n  .bank(\"RolandTR909\").gain(0.6)"
+  },
+  {
+    "id": "rec-add-delay",
+    "type": "recipe",
+    "title": "Add a delay effect",
+    "summary": "Chain .delay(), .delaytime(), and .delayfeedback() on any pattern to add an echo effect. Time in seconds, feedback 0–1.",
+    "tags": [
+      "delay",
+      "effects",
+      "echo"
+    ],
+    "code": "setcpm(120/4)\n\n$: note(\"c4 ~ e4 ~ g4 ~ e4 ~\").s(\"gm_vibraphone\")\n  .delay(0.5)\n  .delaytime(0.375)\n  .delayfeedback(0.4)\n  .room(0.2)"
+  },
+  {
+    "id": "rec-probability",
+    "type": "recipe",
+    "title": "Add randomness and probability",
+    "summary": "Use ? in mini-notation for random drops, .sometimes() for random transforms, and .rand() / .choose() for variation.",
+    "tags": [
+      "random",
+      "probability",
+      "sometimes",
+      "degrade",
+      "variation"
+    ],
+    "code": "setcpm(120/4)\n\n// ? drops a hit 50% of the time:\n$: s(\"hh hh? hh hh?\").gain(0.5)\n\n// .sometimes() applies a transform randomly:\n$: s(\"bd sd bd sd\")\n  .sometimes(x => x.speed(2))\n\n// randcat picks a random pattern each cycle:\n$: randcat(\n  s(\"bd sd bd sd\"),\n  s(\"bd bd sd sd\"),\n  s(\"bd*4\"),\n)"
+  },
+  {
+    "id": "rec-add-reverb",
+    "type": "recipe",
+    "title": "Add reverb",
+    "summary": "Use .room() for reverb amount (0–1) and .size() for the tail length. Combine with .lpf() to tame brightness.",
+    "tags": [
+      "reverb",
+      "room",
+      "effects",
+      "space"
+    ],
+    "code": "setcpm(100/4)\n\n$: note(\"c3 e3 g3 b3\").s(\"gm_electric_piano_1\")\n  .room(0.7)\n  .size(0.9)\n  .lpf(2000)\n  .gain(0.6)"
+  },
+  {
+    "id": "rec-breakdown",
+    "type": "recipe",
+    "title": "Build a breakdown with .mask()",
+    "summary": "Use .mask() with <> alternation to silence layers on specific cycles. Perfect for drop/build arrangements.",
+    "tags": [
+      "mask",
+      "arrangement",
+      "breakdown",
+      "structure",
+      "drop"
+    ],
+    "code": "setcpm(130/4)\n\n// .mask(\"<1 1 1 0>\") silences every 4th cycle:\ndrum: s(\"bd*2, ~ sd:1, hh*8\")\n  .bank(\"RolandTR909\")\n  .mask(\"<1 1 1 0>\")\n\nbass: note(\"c2 c2 eb2 g2\").s(\"sawtooth\")\n  .lpf(600).decay(0.15).sustain(0)\n  .mask(\"<1 1 1 0>\")\n\n// Pad plays through the breakdown for continuity:\npad: note(\"<c3 eb3 g3 bb3>\").s(\"gm_pad_warm\")\n  .room(0.6).gain(0.4)"
+  },
+  {
+    "id": "rec-drum-pattern",
+    "type": "recipe",
+    "title": "Build a drum pattern",
+    "summary": "Layer kick, snare, and hi-hats using $: labels. Use .bank() to pick a machine, * for repeats, ~ for rests.",
+    "tags": [
+      "drums",
+      "bank",
+      "beat",
+      "kick",
+      "snare",
+      "hi-hat"
+    ],
+    "code": "setcpm(120/4)\n\n$: s(\"bd*2\").bank(\"RolandTR909\").gain(0.9)\n$: s(\"~ sd ~ sd\").bank(\"RolandTR909\")\n$: s(\"hh*8\").bank(\"RolandTR909\").gain(0.45)\n$: s(\"~ ~ ~ oh\").bank(\"RolandTR909\").gain(0.3)"
+  },
+  {
+    "id": "rec-sample-chopping",
+    "type": "recipe",
+    "title": "Chop and slice samples",
+    "summary": "Use .chop() to granulate, .splice() for rearranging, and .begin()/.end() for precise sample playback.",
+    "tags": [
+      "chop",
+      "splice",
+      "sample",
+      "granular",
+      "slice"
+    ],
+    "code": "setcpm(100/4)\n\n// .chop(N) slices a sample into N grains:\n$: s(\"break:0\").chop(16)\n\n// .begin() and .end() play a portion (0–1):\n$: s(\"break:1\").begin(0.25).end(0.5).fast(2)\n\n// .speed() changes playback rate:\n$: s(\"bd\").speed(\"<1 0.5 2 1.5>\")"
+  },
+  {
+    "id": "rec-evolving-pattern",
+    "type": "recipe",
+    "title": "Create evolving patterns",
+    "summary": "Use .every(), .slow(), and <> alternation to make patterns that change over time without manual arrangement.",
+    "tags": [
+      "evolution",
+      "every",
+      "slow",
+      "variation",
+      "arrangement"
+    ],
+    "code": "setcpm(120/4)\n\n// .every() applies a transform periodically:\n$: s(\"bd sd bd sd\")\n  .every(4, x => x.fast(2))\n  .every(3, x => x.speed(1.5))\n\n// <> alternation changes each cycle:\n$: note(\"<c3 e3 g3 b3>\").s(\"gm_vibraphone\")\n  .room(0.4)\n\n// .slow() stretches across multiple cycles:\n$: note(\"c3 d3 e3 f3 g3 a3 b3 c4\")\n  .s(\"triangle\")\n  .slow(4)\n  .room(0.3).gain(0.5)"
+  },
+  {
+    "id": "rec-stereo-width",
+    "type": "recipe",
+    "title": "Create stereo width",
+    "summary": "Use .jux() to split L/R and transform one side, or .pan() with a signal for auto-panning.",
+    "tags": [
+      "stereo",
+      "pan",
+      "jux",
+      "width",
+      "spatial"
+    ],
+    "code": "setcpm(110/4)\n\n// .jux(rev) plays original left, reversed right:\n$: note(\"c4 e4 g4 b4\").s(\"triangle\")\n  .jux(rev)\n  .room(0.3)\n\n// .pan() with sine for smooth auto-pan:\n$: note(\"c3 e3 g3\").s(\"gm_vibraphone\")\n  .pan(sine.slow(4))\n  .room(0.4).gain(0.5)"
+  },
+  {
+    "id": "rec-euclidean",
+    "type": "recipe",
+    "title": "Euclidean rhythms",
+    "summary": "Use (k,n) in mini-notation for Euclidean patterns: k hits spread evenly across n steps. Great for polyrhythms.",
+    "tags": [
+      "euclidean",
+      "rhythm",
+      "polyrhythm"
+    ],
+    "code": "setcpm(120/4)\n\n// 3 hits in 8 steps = tresillo rhythm:\n$: s(\"bd(3,8)\").gain(0.9)\n\n// 5 in 8 = cinquillo:\n$: s(\"rim(5,8)\").gain(0.6)\n\n// 7 in 16 = complex pattern:\n$: s(\"hh(7,16)\").gain(0.4)\n\n// Combine for polyrhythmic texture:\n$: note(\"c3(3,8)\").s(\"gm_acoustic_bass\")"
+  },
+  {
+    "id": "rec-filter-sweep",
+    "type": "recipe",
+    "title": "Filter sweep with an LFO",
+    "summary": "Use sine.range() to sweep .lpf() over time. .slow() controls sweep speed. .lpq() adds resonance.",
+    "tags": [
+      "filter",
+      "lpf",
+      "lfo",
+      "sine",
+      "sweep",
+      "modulation"
+    ],
+    "code": "setcpm(120/4)\n\n$: note(\"c2 c2 eb2 g2\").s(\"sawtooth\")\n  .lpf(sine.range(200, 2000).slow(8))\n  .lpq(12)\n  .decay(0.15).sustain(0)\n  .gain(0.7)"
+  },
+  {
+    "id": "rec-chord-progression",
+    "type": "recipe",
+    "title": "Make a chord progression",
+    "summary": "Use progression() with single-quoted chord symbols. Add rhythm presets, bass layers, and style presets for instant arrangements.",
+    "tags": [
+      "chords",
+      "progression",
+      "voicing",
+      "harmony"
+    ],
+    "code": "setcpm(110/4)\n\n// Simple block chords:\n$: progression('Dm7 G7 Cmaj7 Fmaj7')\n  .room(0.3).gain(0.5)\n\n// With arpeggiated rhythm and bass:\n$: progression('Dm7 G7 Cmaj7 Fmaj7', {\n  rhythm: 'arp-up',\n  bass: true,\n}).gain(0.4)"
+  },
+  {
+    "id": "rec-signal-modulation",
+    "type": "recipe",
+    "title": "Signal modulation (LFOs)",
+    "summary": "Use sine, saw, tri, square, and perlin as modulation sources. Chain .range() to set bounds and .slow()/.fast() for speed.",
+    "tags": [
+      "lfo",
+      "sine",
+      "saw",
+      "modulation",
+      "signal",
+      "automation"
+    ],
+    "code": "setcpm(100/4)\n\n$: note(\"c3 e3 g3 b3\").s(\"sawtooth\")\n  .lpf(sine.range(400, 2000).slow(4))\n  .lpq(8)\n  .gain(saw.range(0.3, 0.8).slow(2))\n  .pan(sine.slow(8))\n  .room(perlin.range(0.1, 0.6))\n  .decay(0.2).sustain(0)"
+  },
+  {
+    "id": "ex-ambient-pad",
+    "type": "example",
+    "title": "Ambient pad wash",
+    "summary": "Slow-moving chord pads with reverb, delay, and gentle filter modulation.",
+    "tags": [
+      "ambient",
+      "pad",
+      "chords",
+      "reverb",
+      "atmospheric"
+    ],
+    "code": "setcpm(72/4)\n\n$: chord(\"<Cm9 Fm9 Bbmaj7 Ebmaj7>\")\n  .s(\"gm_pad_warm\")\n  .voicing()\n  .room(0.8).size(0.95)\n  .lpf(sine.range(800, 2000).slow(16))\n  .delay(0.4).delaytime(0.5).delayfeedback(0.5)\n  .gain(0.35)\n\n$: note(\"~ ~ c5 ~\").s(\"gm_vibraphone\")\n  .room(0.9).delay(0.6).gain(0.15)"
+  },
+  {
+    "id": "ex-breakbeat",
+    "type": "example",
+    "title": "Chopped breakbeat",
+    "summary": "Euclidean rhythms meet chopped breaks with filter automation.",
+    "tags": [
+      "breakbeat",
+      "euclidean",
+      "chop",
+      "drums",
+      "glitch"
+    ],
+    "code": "setcpm(140/4)\n\n$: s(\"bd(3,8)\").gain(0.9)\n$: s(\"sd(2,8,1)\").gain(0.8)\n$: s(\"hh(5,8)\").gain(0.4)\n$: s(\"oh(1,8,3)\").gain(0.3)\n\n$: note(\"c2 [~ c2] eb2 ~\").s(\"sawtooth\")\n  .lpf(800)\n  .decay(0.1).sustain(0)\n  .gain(0.7)\n\n$: note(\"c4 eb4 g4 bb4\").s(\"triangle\")\n  .every(3, rev)\n  .jux(x => x.fast(2))\n  .room(0.3).gain(0.3)"
+  },
+  {
+    "id": "ex-strum-folk",
+    "type": "example",
+    "title": "Folk strum pattern",
+    "summary": "Acoustic guitar strum using the folk-strum progression style with a simple arrangement.",
+    "tags": [
+      "folk",
+      "strum",
+      "acoustic",
+      "guitar",
+      "progression"
+    ],
+    "code": "setcpm(100/4)\n\n$: progression('G D Em C', { style: 'folk-strum' })\n  .room(0.3)\n  .gain(0.5)\n\n$: note(\"<g2 d2 e2 c2>\").s(\"gm_acoustic_bass\")\n  .gain(0.5)\n\n$: s(\"~ ~ ~ hh\").gain(0.2)"
+  },
+  {
+    "id": "ex-house-beat",
+    "type": "example",
+    "title": "Four-on-the-floor house",
+    "summary": "Classic house beat with 909 drums, acid bass line, and atmospheric pad.",
+    "tags": [
+      "house",
+      "four-on-the-floor",
+      "909",
+      "acid",
+      "bass"
+    ],
+    "code": "setcpm(124/4)\n\n$: s(\"bd*4\").bank(\"RolandTR909\").gain(0.9)\n$: s(\"~ ~ ~ oh\").bank(\"RolandTR909\").gain(0.3)\n$: s(\"~ cp ~ ~\").bank(\"RolandTR909\")\n$: s(\"hh*8\").bank(\"RolandTR909\").gain(0.4)\n\n$: note(\"c2 ~ c2 [~ c3]\").s(\"sawtooth\")\n  .lpf(sine.range(300, 1200).slow(8))\n  .lpq(12)\n  .decay(0.12).sustain(0)\n  .gain(0.7)\n\n$: note(\"<c4 eb4 g4 bb4>\").s(\"gm_pad_warm\")\n  .room(0.6).gain(0.25)"
+  },
+  {
+    "id": "ex-generative",
+    "type": "example",
+    "title": "Generative ambient",
+    "summary": "Perlin noise and probability create an ever-changing ambient texture that never quite repeats.",
+    "tags": [
+      "generative",
+      "ambient",
+      "perlin",
+      "random",
+      "evolving"
+    ],
+    "code": "setcpm(60/4)\n\n$: note(\"c4 e4 g4 b4 d5 b4 g4 e4\")\n  .s(\"gm_vibraphone\")\n  .gain(perlin.range(0, 0.6))\n  .pan(perlin.range(0.2, 0.8).slow(3))\n  .room(0.8).delay(0.6).delayfeedback(0.6)\n  .slow(2)\n\n$: note(\"<c3 g2 a2 f2>\").s(\"gm_pad_warm\")\n  .room(0.9).gain(0.25)\n\n$: s(\"hh?\").gain(0.15).room(0.8)\n  .pan(rand)"
+  },
+  {
+    "id": "ex-jazz-standard",
+    "type": "example",
+    "title": "Jazz standard sketch",
+    "summary": "II-V-I progression with jazz-comp style, walking bass, and brushed drums.",
+    "tags": [
+      "jazz",
+      "progression",
+      "ii-v-i",
+      "walking-bass",
+      "standard"
+    ],
+    "code": "setcpm(140/4)\n\n$: progression('Dm7 G7 Cmaj7 Cmaj7', {\n  style: 'jazz-comp',\n  bass: true,\n}).gain(0.5)\n\n$: s(\"bd ~ [~ bd] ~, ~ sd ~ ~, hh*4\")\n  .gain(0.5)\n  .room(0.3)"
+  },
+  {
+    "id": "ex-lo-fi",
+    "type": "example",
+    "title": "Lo-fi hip hop",
+    "summary": "Chill dusty beat with jazzy chords, vinyl crackle texture, and swung hi-hats.",
+    "tags": [
+      "lofi",
+      "chill",
+      "jazz",
+      "hip-hop",
+      "chords"
+    ],
+    "code": "setcpm(85/4)\n\n$: s(\"bd ~ [~ bd] ~, ~ sd ~ sd\")\n  .bank(\"RolandTR808\")\n  .gain(0.8)\n\n$: s(\"hh*8\").gain(0.3)\n  .speed(\"1 1.02 0.98 1.01 1 0.99 1.02 1\")\n\n$: progression('Dm9 G13 Cmaj9 Am7', { rhythm: 'comp' })\n  .lpf(1800)\n  .room(0.4)\n  .gain(0.45)\n\n$: note(\"<d3 g2 c3 a2>\").s(\"gm_acoustic_bass\")\n  .gain(0.55)"
+  },
+  {
+    "id": "ex-minimal-techno",
+    "type": "example",
+    "title": "Minimal techno",
+    "summary": "Stripped-back techno with evolving filter sweeps and sparse percussion.",
+    "tags": [
+      "techno",
+      "minimal",
+      "filter",
+      "evolving",
+      "electronic"
+    ],
+    "code": "setcpm(132/4)\n\n$: s(\"bd*4\").gain(0.9)\n$: s(\"~ hh ~ hh\").gain(0.3)\n$: s(\"~ ~ ~ rim\").every(4, x => x.fast(2)).gain(0.5)\n\n$: note(\"c2*4\").s(\"sawtooth\")\n  .lpf(sine.range(200, 3000).slow(16))\n  .lpq(15)\n  .decay(0.08).sustain(0)\n  .gain(0.6)\n\n$: note(\"<c4 ~ eb4 ~>\").s(\"triangle\")\n  .room(0.4).delay(0.5).delaytime(0.375)\n  .gain(0.2)"
+  },
+  {
+    "id": "ex-polyrhythm",
+    "type": "example",
+    "title": "Polyrhythmic exploration",
+    "summary": "Layered Euclidean patterns creating interlocking polyrhythmic grooves.",
+    "tags": [
+      "polyrhythm",
+      "euclidean",
+      "rhythm",
+      "percussion",
+      "complex"
+    ],
+    "code": "setcpm(110/4)\n\n// 3 against 4 against 5:\n$: s(\"bd(3,8)\").gain(0.9)\n$: s(\"rim(5,8)\").gain(0.5)\n$: s(\"hh(7,16)\").gain(0.35)\n$: s(\"cp(2,8,3)\").room(0.5).gain(0.4)\n\n$: note(\"c3(3,8)\").s(\"gm_acoustic_bass\")\n  .gain(0.6)\n\n$: note(\"g4(5,8)\").s(\"gm_vibraphone\")\n  .room(0.5).delay(0.3)\n  .gain(0.3)"
+  },
+  {
+    "id": "ex-synthwave",
+    "type": "example",
+    "title": "Synthwave arpeggios",
+    "summary": "80s-style arpeggiated synths with gated reverb drums and pulsing bass.",
+    "tags": [
+      "synthwave",
+      "arpeggio",
+      "80s",
+      "retro",
+      "synth"
+    ],
+    "code": "setcpm(118/4)\n\n$: s(\"bd*4\").gain(0.9)\n$: s(\"~ sd ~ sd\").room(0.4).gain(0.7)\n$: s(\"hh*8\").gain(0.3)\n\n$: progression('Am Fmaj7 C G', { rhythm: 'arp-up' })\n  .delay(0.3).delaytime(0.25).delayfeedback(0.3)\n  .gain(0.4)\n\n$: note(\"a1*4 f1*4 c2*4 g1*4\").s(\"sawtooth\")\n  .lpf(400)\n  .decay(0.1).sustain(0)\n  .gain(0.6)"
+  }
+]

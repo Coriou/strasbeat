@@ -21,6 +21,7 @@ import {
   Search,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   ChevronsDownUp,
   Save,
   Music2,
@@ -30,6 +31,10 @@ import {
   MoreHorizontal,
   Volume2,
   X,
+  GraduationCap,
+  Copy,
+  Wrench,
+  Waves,
 } from "lucide";
 
 const ICONS = {
@@ -47,6 +52,11 @@ const ICONS = {
   save: Save,
   music: Music2,
   "book-open": BookOpen,
+  "graduation-cap": GraduationCap,
+  "chevron-right": ChevronRight,
+  copy: Copy,
+  wrench: Wrench,
+  waves: Waves,
   terminal: Terminal,
   eraser: Eraser,
   "more-horizontal": MoreHorizontal,

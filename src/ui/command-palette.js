@@ -294,13 +294,17 @@ export function buildCommands({
   onMoveLineDown,
   onIndent,
   onDedent,
+  onOpenLearn,
   onOpenSounds,
   onOpenReference,
   onOpenConsole,
   onOpenExport,
   onOpenSettings,
+  onOpenSetup,
   onClosePanel,
   onFocusPatterns,
+  onSwitchToRoll,
+  onSwitchToScope,
 }) {
   return [
     // ─── Transport ────────────────
@@ -378,6 +382,12 @@ export function buildCommands({
 
     // ─── Panels ───────────────────
     {
+      id: "learn",
+      label: "Open Learn Panel",
+      shortcut: null,
+      run: onOpenLearn,
+    },
+    {
       id: "sounds",
       label: "Open Sound Browser",
       shortcut: null,
@@ -408,6 +418,12 @@ export function buildCommands({
       run: onOpenSettings,
     },
     {
+      id: "setup",
+      label: "Open Setup Panel",
+      shortcut: null,
+      run: onOpenSetup,
+    },
+    {
       id: "closePanel",
       label: "Close Panel",
       shortcut: null,
@@ -424,5 +440,19 @@ export function buildCommands({
     { id: "save", label: "Save Pattern", shortcut: `${MOD}S`, run: onSave },
     { id: "exportWav", label: "Export WAV", shortcut: null, run: onExportWav },
     { id: "share", label: "Copy Share Link", shortcut: null, run: onShare },
+
+    // ─── Visualization ────────────
+    {
+      id: "switchRoll",
+      label: "Switch to Piano Roll",
+      shortcut: null,
+      run: onSwitchToRoll,
+    },
+    {
+      id: "switchScope",
+      label: "Switch to Scope",
+      shortcut: null,
+      run: onSwitchToScope,
+    },
   ];
 }

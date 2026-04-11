@@ -1,0 +1,59 @@
+/* Bottom panel mode switcher — thin tab bar above the roll/scope/custom canvas.
+   Hidden when only the default Roll mode is active. */
+
+.bottom-panel__modes {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  height: 24px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border-soft);
+  flex: 0 0 auto;
+}
+
+.bottom-panel__modes[hidden] {
+  display: none;
+}
+
+.bottom-panel__mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 var(--space-2);
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.bottom-panel__mode-btn:hover {
+  color: var(--text-mut);
+  background: color-mix(in oklch, var(--surface-2) 60%, var(--surface-1));
+}
+
+.bottom-panel__mode-btn.is-active {
+  color: var(--text);
+  background: color-mix(in oklch, var(--accent) 10%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--border-soft));
+  font-weight: 600;
+}
+
+.bottom-panel__mode-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.bottom-panel__mode-btn[hidden] {
+  display: none;
+}

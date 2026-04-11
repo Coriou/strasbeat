@@ -1,0 +1,254 @@
+/* Setup panel — user configuration for opt-in packages, samples, and
+   setup scripts. See src/ui/setup-panel.js. Matches the design system
+   tokens and rhythm of the other right-rail panels. */
+
+.setup-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3);
+  gap: var(--space-4);
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--surface-2) 16%, var(--surface-1)),
+    transparent 96px
+  );
+}
+
+/* ─── Sections ──────────────────────────────────────────────────────── */
+
+.setup-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.setup-panel__section-label {
+  font-size: 9px;
+  line-height: 12px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.setup-panel__desc {
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+}
+
+/* ─── Package toggles ───────────────────────────────────────────────── */
+
+.setup-panel__pkg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.setup-panel__toggle {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.setup-panel__pkg-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.setup-panel__pkg-name {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.setup-panel__pkg-desc {
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--text-dim);
+}
+
+/* ─── User samples ──────────────────────────────────────────────────── */
+
+.setup-panel__import-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.setup-panel__url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: color-mix(in oklch, var(--surface-2) 92%, var(--surface-0));
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  outline: none;
+  transition:
+    border-color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+.setup-panel__url-input:focus {
+  border-color: color-mix(in oklch, var(--accent) 62%, var(--border-soft));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+.setup-panel__url-input::placeholder {
+  color: var(--text-dim);
+}
+
+.setup-panel__banks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.setup-panel__bank-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: color-mix(in oklch, var(--surface-2) 88%, var(--surface-1));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.setup-panel__bank-name {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-panel__bank-del {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover);
+}
+
+.setup-panel__bank-del:hover {
+  background: color-mix(in oklch, oklch(0.6 0.2 25) 14%, var(--surface-2));
+  color: oklch(0.7 0.2 25);
+}
+
+.setup-panel__empty {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  padding: var(--space-1) 0;
+}
+
+/* ─── Buttons ───────────────────────────────────────────────────────── */
+
+.setup-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: color-mix(in oklch, var(--surface-2) 92%, var(--surface-1));
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover);
+}
+
+.setup-panel__btn:hover {
+  background: color-mix(in oklch, var(--surface-3) 82%, var(--surface-2));
+  border-color: var(--border);
+}
+
+.setup-panel__btn--primary {
+  background: color-mix(in oklch, var(--accent) 13%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 54%, var(--border-soft));
+  font-weight: 600;
+}
+
+.setup-panel__btn--primary:hover {
+  background: color-mix(in oklch, var(--accent) 22%, var(--surface-3));
+  border-color: var(--accent);
+}
+
+.setup-panel__btn--danger {
+  color: oklch(0.7 0.15 25);
+}
+
+.setup-panel__btn--danger:hover {
+  background: color-mix(in oklch, oklch(0.6 0.2 25) 12%, var(--surface-2));
+  border-color: color-mix(in oklch, oklch(0.6 0.2 25) 44%, var(--border-soft));
+}
+
+.setup-panel__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ─── Setup script textarea ─────────────────────────────────────────── */
+
+.setup-panel__script {
+  width: 100%;
+  min-height: 120px;
+  padding: var(--space-2);
+  background: color-mix(in oklch, var(--surface-0) 88%, var(--surface-1));
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  resize: vertical;
+  outline: none;
+  transition:
+    border-color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+.setup-panel__script::placeholder {
+  color: var(--text-dim);
+}
+
+.setup-panel__script:focus {
+  border-color: color-mix(in oklch, var(--accent) 62%, var(--border-soft));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+.setup-panel__script-actions {
+  display: flex;
+  gap: var(--space-2);
+}

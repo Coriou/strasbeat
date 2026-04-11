@@ -1,0 +1,82 @@
+[
+  {
+    "id": "ws-mini-basics",
+    "type": "workshop",
+    "title": "Mini-notation basics",
+    "summary": "The building blocks of Strudel patterns: events, rests, groups, repetition, and alternation.",
+    "tags": ["mini-notation", "basics", "beginner"],
+    "chapter": 1,
+    "order": 1,
+    "code": "setcpm(120/4)\n\n// Each string is a mini-notation pattern.\n// Space-separated values split the cycle evenly:\n$: s(\"bd sd hh oh\")\n\n// * repeats inside the same step:\n$: s(\"hh*8\").gain(0.4)\n\n// ~ is a rest (silence for one step):\n$: s(\"bd ~ sd ~\")\n\n// [] groups values into a single step:\n$: s(\"bd [hh hh] sd [hh oh]\")\n\n// <> alternates one value per cycle:\n$: note(\"<c3 e3 g3 b3>\").s(\"gm_electric_piano_1\")"
+  },
+  {
+    "id": "ws-sounds-samples",
+    "type": "workshop",
+    "title": "Sounds and samples",
+    "summary": "Pick sounds by name, switch drum machines with .bank(), and use soundfont instruments with note().",
+    "tags": ["sounds", "samples", "bank", "soundfont", "drum"],
+    "chapter": 2,
+    "order": 2,
+    "code": "setcpm(120/4)\n\n// s() triggers samples by name from the dirt-samples library:\n$: s(\"bd sd cp hh\")\n\n// .bank() switches to a specific drum machine:\n$: s(\"bd sd cp oh\").bank(\"RolandTR909\")\n\n// Soundfonts are pitched — use with note():\n$: note(\"c3 e3 g3 c4\").s(\"gm_electric_piano_1\")\n\n// :N picks a sample variation (0-indexed):\n$: s(\"hh:0 hh:1 hh:2 hh:3\")"
+  },
+  {
+    "id": "ws-effects",
+    "type": "workshop",
+    "title": "Effects and filters",
+    "summary": "Shape your sound with low-pass filters, reverb, delay, distortion, and envelope controls.",
+    "tags": ["effects", "filter", "lpf", "delay", "reverb", "room", "gain"],
+    "chapter": 3,
+    "order": 3,
+    "code": "setcpm(100/4)\n\n// .lpf() is a low-pass filter (cutoff in Hz):\n$: s(\"sawtooth\").note(\"c2 eb2 g2 bb2\")\n  .lpf(800).lpq(8)\n\n// .room() adds reverb, .size() controls decay:\n$: s(\"cp*2\").room(0.8).size(0.9).gain(0.6)\n\n// .delay() with .delaytime() and .delayfeedback():\n$: note(\"c4 ~ e4 ~\").s(\"gm_vibraphone\")\n  .delay(0.5).delaytime(0.375).delayfeedback(0.4)\n\n// Envelope: .attack() .decay() .sustain() .release()\n$: note(\"c3 e3 g3 b3\").s(\"sawtooth\")\n  .attack(0.01).decay(0.2).sustain(0.3).release(0.5)\n  .lpf(1200).gain(0.5)"
+  },
+  {
+    "id": "ws-combinators",
+    "type": "workshop",
+    "title": "Pattern combinators",
+    "summary": "Layer patterns with $: labels, combine with stack() and cat(), and explore structural tools.",
+    "tags": ["stack", "cat", "layer", "structure", "combinators"],
+    "chapter": 4,
+    "order": 4,
+    "code": "setcpm(120/4)\n\n// $: registers each layer independently (recommended):\n$: s(\"bd*4\").bank(\"RolandTR909\").gain(0.9)\n$: s(\"~ sd ~ sd\").bank(\"RolandTR909\")\n$: s(\"hh*8\").bank(\"RolandTR909\").gain(0.4)\n\n// stack() plays patterns simultaneously in one voice:\n$: stack(\n  note(\"c3 e3\"),\n  note(\"g3 b3\"),\n).s(\"gm_electric_piano_1\").room(0.4)\n\n// cat() sequences patterns across cycles:\n$: cat(\n  s(\"bd sd bd sd\"),\n  s(\"hh*8\"),\n)"
+  },
+  {
+    "id": "ws-tonal",
+    "type": "workshop",
+    "title": "Notes, scales, and chords",
+    "summary": "Work with pitched content: note names, scale patterns, chord voicings, and the .voicing() method.",
+    "tags": ["note", "scale", "chord", "voicing", "tonal", "pitch"],
+    "chapter": 5,
+    "order": 5,
+    "code": "setcpm(100/4)\n\n// note() with letter names:\n$: note(\"c3 e3 g3 b3\").s(\"gm_electric_piano_1\")\n\n// .scale() constrains numbers to a scale:\n$: n(\"0 2 4 6 3 5 7 4\").scale(\"C4:minor\")\n  .s(\"gm_vibraphone\").room(0.5)\n\n// chord() for block chords:\n$: chord(\"<Cm7 Fm7 Bbmaj7 Ebmaj7>\")\n  .s(\"gm_electric_piano_1\")\n  .voicing()\n  .room(0.4)\n\n// .add() transposes:\n$: note(\"c3 e3 g3\").add(\"<0 5 7 12>\").s(\"triangle\")"
+  },
+  {
+    "id": "ws-time-tempo",
+    "type": "workshop",
+    "title": "Time and tempo",
+    "summary": "Control speed with setcpm, transform time with .fast() and .slow(), and use .every() for periodic variation.",
+    "tags": ["tempo", "setcpm", "fast", "slow", "every", "time"],
+    "chapter": 6,
+    "order": 6,
+    "code": "// setcpm(BPM / beats_per_cycle) sets the tempo:\nsetcpm(130/4)\n\n// .fast() and .slow() change playback speed:\n$: s(\"bd sd bd sd\").bank(\"RolandTR909\")\n$: s(\"hh*4\").fast(2).gain(0.4)\n\n// .every(N, fn) applies a transformation every N cycles:\n$: note(\"c3 e3 g3 b3\").s(\"gm_vibraphone\")\n  .every(4, x => x.fast(2))\n  .room(0.3)\n\n// .sometimes() applies randomly (~50% of the time):\n$: s(\"bd sd bd sd\").sometimes(x => x.speed(1.5))\n\n// .rev() reverses the pattern:\n$: note(\"c3 d3 e3 f3 g3 a3 b3 c4\").s(\"triangle\")\n  .every(2, rev)"
+  },
+  {
+    "id": "ws-layering",
+    "type": "workshop",
+    "title": "Layering and structure",
+    "summary": "Build full arrangements with $: labels, use .mask() for breakdowns, and layer textures with .off() and .jux().",
+    "tags": ["layer", "mask", "jux", "off", "structure", "arrangement"],
+    "chapter": 7,
+    "order": 7,
+    "code": "setcpm(120/4)\n\n// Use $: labels for separate layers — mute/solo friendly:\ndrum: s(\"bd*2, ~ sd:1, hh*8\")\n  .bank(\"RolandTR909\").gain(0.8)\n\n// .mask() creates breakdowns by silencing on some cycles:\nbass: note(\"c2 c2 eb2 g2\").s(\"sawtooth\")\n  .lpf(600).decay(0.15).sustain(0)\n  .mask(\"<1 1 1 0>\")\n\n// .jux() splits stereo: left plays original, right plays transformed:\nlead: note(\"c4 eb4 g4 bb4\").s(\"triangle\")\n  .jux(rev)\n  .room(0.4).delay(0.3)\n\n// .off() overlays a delayed, modified copy:\npad: note(\"<c3 eb3 g3 bb3>\").s(\"gm_pad_warm\")\n  .off(1/8, x => x.add(7))\n  .room(0.6).gain(0.4)"
+  },
+  {
+    "id": "ws-progression",
+    "type": "workshop",
+    "title": "Chord progressions (strasbeat)",
+    "summary": "Use strasbeat's progression() helper for one-line chord progressions with rhythm presets, styles, and bass layers.",
+    "tags": ["progression", "strasbeat", "chords", "voicing", "rhythm", "bass"],
+    "chapter": 8,
+    "order": 8,
+    "code": "setcpm(110/4)\n\n// progression() is a strasbeat extension — use SINGLE QUOTES:\n$: progression('Cm7 F7 Bb^7 Eb^7')\n  .room(0.3).gain(0.5)\n\n// rhythm presets: block, strum, comp, arp-up, arp-down, alberti\n$: progression('Cm7 F7 Bb^7 Eb^7', { rhythm: 'arp-up' })\n  .delay(0.3).delaytime(0.375).gain(0.35)\n\n// bass: true adds a root-note bass layer:\n$: progression('Am7 Dm7 G7 Cmaj7', { rhythm: 'comp', bass: true })\n  .gain(0.5)\n\n// Style presets bundle sound + rhythm + FX:\n$: progression('Dm7 G7 Cmaj7 Fmaj7', { style: 'jazz-comp' })\n  .gain(0.5)\n\ndrum: s(\"bd*2, ~ sd:1, hh*8\")\n  .bank(\"RolandTR909\").gain(0.6)"
+  }
+]
