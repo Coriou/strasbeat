@@ -185,6 +185,46 @@
   font-style: italic;
 }
 
+/* ─── Sound override dropdown ─────────────────────────────────────────── */
+
+.midi-import__sound-select {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.midi-import__sound-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ─── Velocity checkbox ───────────────────────────────────────────────── */
+
+.midi-import__velocity-section {
+  margin-top: var(--space-1);
+}
+
+.midi-import__velocity-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.midi-import__velocity-cb {
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
 /* ─── Grid selector ───────────────────────────────────────────────────── */
 
 .midi-import__grid-section {

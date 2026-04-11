@@ -14,6 +14,7 @@ import {
   sanitizePatternName,
   gridSubdivisionLabel,
 } from "../midi-to-strudel.js";
+import { GM_FAMILY_FALLBACK, GM_INSTRUMENT_MAP } from "../midi-gm.js";
 import {
   validatePatternName,
   patternNameExists,
@@ -293,12 +294,13 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
   metaEl.textContent = `${tsNum}/${tsDenom} at ${input.bpm} BPM · ${preAnalysis.totalBars} bars · ${totalNotes} notes`;
   dialog.appendChild(metaEl);
 
-  // Track checkboxes.
+  // Track checkboxes + instrument overrides.
   const tracksSection = el("div", "midi-import__tracks");
   const tracksLabel = el("div", "midi-import__section-label", "Tracks");
   tracksSection.appendChild(tracksLabel);
 
   const trackCheckboxes = [];
+  const soundSelects = new Map(); // trackIndex → <select>
 
   for (let i = 0; i < input.tracks.length; i++) {
     const track = input.tracks[i];
@@ -342,8 +344,26 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
       if (pitchRange) details.textContent += `  ${pitchRange}`;
       info.appendChild(details);
 
-      const soundBadge = el("span", "midi-import__badge", `→ ${sound}`);
-      info.appendChild(soundBadge);
+      if (!track.isDrum && sound) {
+        // Instrument override dropdown.
+        const select = el("select", "midi-import__sound-select");
+        const alternatives = getSoundAlternatives(track.gmProgram ?? 0);
+        for (const alt of alternatives) {
+          const opt = el("option");
+          opt.value = alt;
+          opt.textContent = `→ ${alt}`;
+          if (alt === sound) opt.selected = true;
+          select.appendChild(opt);
+        }
+        // Click on select shouldn't toggle the checkbox.
+        select.addEventListener("click", (e) => e.stopPropagation());
+        select.addEventListener("mousedown", (e) => e.stopPropagation());
+        info.appendChild(select);
+        soundSelects.set(i, select);
+      } else {
+        const soundBadge = el("span", "midi-import__badge", `→ ${sound}`);
+        info.appendChild(soundBadge);
+      }
     }
 
     row.appendChild(info);
@@ -387,6 +407,20 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 
   gridSection.appendChild(gridRow);
   dialog.appendChild(gridSection);
+
+  // Velocity checkbox.
+  const velocitySection = el("div", "midi-import__velocity-section");
+  const velocityLabel = el("label", "midi-import__velocity-label");
+  const velocityCb = el("input");
+  velocityCb.type = "checkbox";
+  velocityCb.className = "midi-import__velocity-cb";
+  velocityCb.checked = true;
+  velocityLabel.appendChild(velocityCb);
+  velocityLabel.appendChild(
+    document.createTextNode(" Preserve velocity dynamics"),
+  );
+  velocitySection.appendChild(velocityLabel);
+  dialog.appendChild(velocitySection);
 
   // Warnings.
   const warningsEl = el("div", "midi-import__warnings");
@@ -457,12 +491,26 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
     const gridSubdivision =
       selectedGrid === "auto" ? undefined : Number(selectedGrid);
 
+    // Build sound overrides from dropdowns.
+    const soundOverrides = {};
+    for (const [trackIndex, select] of soundSelects) {
+      const analyzed = preAnalysis.tracks.find(
+        (t) => t.originalIndex === trackIndex,
+      );
+      if (analyzed && select.value !== analyzed.strudelSound) {
+        soundOverrides[trackIndex] = select.value;
+      }
+    }
+
     let result;
     try {
       result = midiFileToPattern(buffer, {
         patternName: name,
         trackIndices: selectedIndices,
         gridSubdivision,
+        preserveVelocity: velocityCb.checked,
+        soundOverrides:
+          Object.keys(soundOverrides).length > 0 ? soundOverrides : undefined,
       });
     } catch (err) {
       nameError.textContent = `Import failed: ${err.message}`;
@@ -502,6 +550,59 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
+
+// GM family names indexed by program range (8 instruments per family).
+const GM_FAMILY_NAMES = [
+  "piano",
+  "chromatic percussion",
+  "organ",
+  "guitar",
+  "bass",
+  "strings",
+  "ensemble",
+  "brass",
+  "reed",
+  "pipe",
+  "synth lead",
+  "synth pad",
+  "synth effects",
+  "ethnic",
+  "percussive",
+  "sound effects",
+];
+
+function getSoundAlternatives(gmProgram) {
+  const primary = GM_INSTRUMENT_MAP[gmProgram] ?? "gm_piano";
+  const familyIndex = Math.floor(gmProgram / 8);
+  const familyName = GM_FAMILY_NAMES[familyIndex] ?? "piano";
+
+  // Collect unique sounds from the same GM family (8 programs).
+  const familyStart = familyIndex * 8;
+  const seen = new Set();
+  const alternatives = [primary];
+  seen.add(primary);
+
+  for (let p = familyStart; p < familyStart + 8; p++) {
+    const sound = GM_INSTRUMENT_MAP[p];
+    if (sound && !seen.has(sound)) {
+      seen.add(sound);
+      alternatives.push(sound);
+    }
+  }
+
+  // Add the family fallback if not already included.
+  const fallback = GM_FAMILY_FALLBACK[familyName];
+  if (fallback && !seen.has(fallback)) {
+    alternatives.push(fallback);
+  }
+
+  // Always include gm_piano as a safe default.
+  if (!seen.has("gm_piano")) {
+    alternatives.push("gm_piano");
+  }
+
+  return alternatives;
+}
 
 function el(tag, className, text) {
   const e = document.createElement(tag);

@@ -152,11 +152,11 @@ export function analyzeTranslationInput(input, options = {}) {
       }
       return track.notes.length > 0;
     })
-    .map(({ track }) => track);
+    .map(({ track, index }) => ({ track, originalIndex: index }));
 
   // Build analyzed tracks
   const usedIdentifiers = new Set();
-  const analyzedTracks = selectedTracks.map((track) => {
+  const analyzedTracks = selectedTracks.map(({ track, originalIndex }) => {
     const identifier = sanitizeIdentifier(track.name, usedIdentifiers);
     usedIdentifiers.add(identifier);
 
@@ -268,6 +268,12 @@ export function analyzeTranslationInput(input, options = {}) {
         ? `${midiToName(minMidi)}–${midiToName(maxMidi)}`
         : "";
 
+    // Velocity variation
+    const vels = quantized.length >= 2 ? quantized.map((n) => n.velocity) : [];
+    const velMin = vels.length ? Math.min(...vels) : 0;
+    const velMax = vels.length ? Math.max(...vels) : 0;
+    const hasVelocityVariation = velMax - velMin > 0.2;
+
     return {
       name: track.name,
       channel: track.channel,
@@ -280,18 +286,19 @@ export function analyzeTranslationInput(input, options = {}) {
       quantizationAccuracy: accuracy,
       identifier,
       slotsPerBar,
+      originalIndex,
+      hasVelocityVariation,
+      velMin,
+      velMax,
     };
   });
 
   // Check for velocity variation
   for (const track of analyzedTracks) {
-    if (track.notes.length < 2) continue;
-    const vels = track.notes.map((n) => n.velocity);
-    const min = Math.min(...vels);
-    const max = Math.max(...vels);
-    if (max - min > 0.2) {
+    if (!track.hasVelocityVariation) continue;
+    if (options.preserveVelocity === false) {
       warnings.push(
-        `Track "${track.name}" has meaningful velocity variation (${Math.round(min * 127)}–${Math.round(max * 127)}) that is not preserved in the generated pattern. Dynamic nuance support is planned for Phase 2.`,
+        `Track "${track.name}" has meaningful velocity variation (${Math.round(track.velMin * 127)}–${Math.round(track.velMax * 127)}) that is not preserved in the generated pattern.`,
       );
     }
   }
@@ -326,8 +333,11 @@ export function generatePatternDraft(analysis, options = {}) {
   const { bpm, timeSignature, totalBars, tracks } = analysis;
   const [tsNum, tsDenom] = timeSignature;
   const beatsPerCycle = tsNum * (4 / tsDenom);
+  const preserveVelocity = options.preserveVelocity !== false;
 
   const lines = [];
+  const usedVarNames = new Set();
+  const trackVelocityBars = new Map(); // identifier → velocityBars[]
 
   // Tempo
   lines.push(`setcpm(${cleanNumber(bpm)}/${cleanNumber(beatsPerCycle)})`);
@@ -335,20 +345,37 @@ export function generatePatternDraft(analysis, options = {}) {
 
   // Generate const declarations for each track
   for (const track of tracks) {
+    let result;
     if (track.isDrum) {
-      lines.push(...generateDrumTrack(track, totalBars));
+      result = generateDrumTrack(track, totalBars, usedVarNames);
     } else {
-      lines.push(...generateMelodicTrack(track, totalBars));
+      result = generateMelodicTrack(track, totalBars, usedVarNames);
+    }
+    lines.push(...result.lines);
+    if (preserveVelocity && track.hasVelocityVariation && result.velocityBars) {
+      trackVelocityBars.set(track.identifier, result.velocityBars);
     }
     lines.push("");
   }
 
   // Generate named block labels with sound assignments
   for (const track of tracks) {
+    const velBars = trackVelocityBars.get(track.identifier);
     if (track.isDrum) {
-      lines.push(`${track.identifier}: ${track.identifier}`);
+      if (velBars) {
+        lines.push(
+          `${track.identifier}: ${track.identifier}\n  .velocity(${formatVelocityCat(velBars)})`,
+        );
+      } else {
+        lines.push(`${track.identifier}: ${track.identifier}`);
+      }
     } else {
-      const fx = [`.s("${track.strudelSound}")`];
+      const sound =
+        options.soundOverrides?.[track.originalIndex] ?? track.strudelSound;
+      const fx = [`.s("${sound}")`];
+      if (velBars) {
+        fx.push(`.velocity(${formatVelocityCat(velBars)})`);
+      }
       fx.push(".room(0.2)");
       lines.push(
         `${track.identifier}: ${track.identifier}\n  ${fx.join("\n  ")}`,
@@ -410,89 +437,151 @@ export function midiFileToPattern(buffer, options = {}) {
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function generateMelodicTrack(track, totalBars) {
-  const lines = [];
-  const bars = [];
+function generateMelodicTrack(track, totalBars, usedVarNames) {
+  const noteBars = [];
+  const velocityBars = [];
   const slotsPerBar = track.slotsPerBar;
 
   for (let bar = 0; bar < totalBars; bar++) {
     const barNotes = track.notes.filter((n) => n.bar === bar);
 
     if (barNotes.length === 0) {
-      // All rests
-      bars.push(buildRestBar(slotsPerBar));
+      noteBars.push(buildRestBar(slotsPerBar));
+      velocityBars.push(buildRestBar(slotsPerBar));
       continue;
     }
 
-    bars.push(buildMelodicBar(barNotes, slotsPerBar));
+    const events = buildMelodicBarEvents(barNotes, slotsPerBar);
+    noteBars.push(eventsToMiniNotation(events));
+    velocityBars.push(eventsToVelocityNotation(events));
   }
 
   // Trim trailing all-rest bars
-  while (bars.length > 1 && isAllRest(bars[bars.length - 1])) {
-    bars.pop();
+  while (noteBars.length > 1 && isAllRest(noteBars[noteBars.length - 1])) {
+    noteBars.pop();
+    velocityBars.pop();
   }
 
-  const indent = "    ";
-  lines.push(`const ${track.identifier} = note(`);
-  lines.push(`  cat(`);
-  for (let i = 0; i < bars.length; i++) {
-    const comma = ",";
-    const barComment = ` // bar ${i + 1}`;
-    lines.push(`${indent}"${bars[i]}"${comma}${barComment}`);
-  }
-  lines.push(`  ),`);
-  lines.push(`)`);
+  const lines = [];
+  const repetition = detectBarRepetitions(noteBars, usedVarNames);
 
-  return lines;
+  if (repetition) {
+    for (const { name, content } of repetition.consts) {
+      lines.push(`const ${name} = "${content}"`);
+    }
+    lines.push("");
+    lines.push(`const ${track.identifier} = note(`);
+    lines.push(`  cat(`);
+    const indent = "    ";
+    for (let i = 0; i < repetition.sequence.length; i++) {
+      const entry = repetition.sequence[i];
+      const comma = ",";
+      const barComment = ` // bar ${i + 1}`;
+      if (entry.type === "var") {
+        lines.push(`${indent}${entry.name}${comma}${barComment}`);
+      } else {
+        lines.push(`${indent}"${entry.content}"${comma}${barComment}`);
+      }
+    }
+    lines.push(`  ),`);
+    lines.push(`)`);
+  } else {
+    const indent = "    ";
+    lines.push(`const ${track.identifier} = note(`);
+    lines.push(`  cat(`);
+    for (let i = 0; i < noteBars.length; i++) {
+      const comma = ",";
+      const barComment = ` // bar ${i + 1}`;
+      lines.push(`${indent}"${noteBars[i]}"${comma}${barComment}`);
+    }
+    lines.push(`  ),`);
+    lines.push(`)`);
+  }
+
+  return {
+    lines,
+    velocityBars: track.hasVelocityVariation ? velocityBars : null,
+  };
 }
 
-function generateDrumTrack(track, totalBars) {
-  const lines = [];
+function generateDrumTrack(track, totalBars, usedVarNames) {
   const slotsPerBar = track.slotsPerBar;
 
   // Collect all unique drum names used
   const drumWarnings = new Set();
-  const bars = [];
+  const noteBars = [];
+  const velocityBars = [];
 
   for (let bar = 0; bar < totalBars; bar++) {
     const barNotes = track.notes.filter((n) => n.bar === bar);
 
     if (barNotes.length === 0) {
-      bars.push(buildRestBar(slotsPerBar));
+      noteBars.push(buildRestBar(slotsPerBar));
+      velocityBars.push(buildRestBar(slotsPerBar));
       continue;
     }
 
-    bars.push(buildDrumBar(barNotes, slotsPerBar, drumWarnings));
+    const events = buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings);
+    noteBars.push(eventsToMiniNotation(events));
+    velocityBars.push(eventsToVelocityNotation(events));
   }
 
   // Trim trailing all-rest bars
-  while (bars.length > 1 && isAllRest(bars[bars.length - 1])) {
-    bars.pop();
+  while (noteBars.length > 1 && isAllRest(noteBars[noteBars.length - 1])) {
+    noteBars.pop();
+    velocityBars.pop();
   }
 
+  const lines = [];
+
   if (drumWarnings.size > 0) {
-    // These get surfaced as analysis warnings
-    // but we also note them in a comment
     lines.push(
       `// ⚠ unmapped drum notes (MIDI): ${[...drumWarnings].sort((a, b) => a - b).join(", ")}`,
     );
   }
 
-  const indent = "    ";
-  lines.push(`const ${track.identifier} = s(`);
-  lines.push(`  cat(`);
-  for (let i = 0; i < bars.length; i++) {
-    const comma = ",";
-    const barComment = ` // bar ${i + 1}`;
-    lines.push(`${indent}"${bars[i]}"${comma}${barComment}`);
-  }
-  lines.push(`  ),`);
-  lines.push(`)`);
+  const repetition = detectBarRepetitions(noteBars, usedVarNames);
 
-  return lines;
+  if (repetition) {
+    for (const { name, content } of repetition.consts) {
+      lines.push(`const ${name} = "${content}"`);
+    }
+    lines.push("");
+    lines.push(`const ${track.identifier} = s(`);
+    lines.push(`  cat(`);
+    const indent = "    ";
+    for (let i = 0; i < repetition.sequence.length; i++) {
+      const entry = repetition.sequence[i];
+      const comma = ",";
+      const barComment = ` // bar ${i + 1}`;
+      if (entry.type === "var") {
+        lines.push(`${indent}${entry.name}${comma}${barComment}`);
+      } else {
+        lines.push(`${indent}"${entry.content}"${comma}${barComment}`);
+      }
+    }
+    lines.push(`  ),`);
+    lines.push(`)`);
+  } else {
+    const indent = "    ";
+    lines.push(`const ${track.identifier} = s(`);
+    lines.push(`  cat(`);
+    for (let i = 0; i < noteBars.length; i++) {
+      const comma = ",";
+      const barComment = ` // bar ${i + 1}`;
+      lines.push(`${indent}"${noteBars[i]}"${comma}${barComment}`);
+    }
+    lines.push(`  ),`);
+    lines.push(`)`);
+  }
+
+  return {
+    lines,
+    velocityBars: track.hasVelocityVariation ? velocityBars : null,
+  };
 }
 
-function buildMelodicBar(barNotes, slotsPerBar) {
+function buildMelodicBarEvents(barNotes, slotsPerBar) {
   // Group notes by grid position
   const slots = new Map();
   for (const note of barNotes) {
@@ -524,6 +613,7 @@ function buildMelodicBar(barNotes, slotsPerBar) {
         type: "note",
         name: notes[0].name,
         duration: maxDur,
+        velocity: notes[0].velocity,
       });
     } else {
       // Chord: sort low to high, max 6 notes
@@ -535,6 +625,7 @@ function buildMelodicBar(barNotes, slotsPerBar) {
         type: "chord",
         names: sorted.map((n) => n.name),
         duration: maxDur,
+        velocity: sorted.reduce((s, n) => s + n.velocity, 0) / sorted.length,
       });
     }
 
@@ -546,10 +637,14 @@ function buildMelodicBar(barNotes, slotsPerBar) {
     events.push({ type: "rest", duration: slotsPerBar - pos });
   }
 
-  return eventsToMiniNotation(events);
+  return events;
 }
 
-function buildDrumBar(barNotes, slotsPerBar, drumWarnings) {
+function buildMelodicBar(barNotes, slotsPerBar) {
+  return eventsToMiniNotation(buildMelodicBarEvents(barNotes, slotsPerBar));
+}
+
+function buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings) {
   // Group notes by grid position
   const slots = new Map();
   for (const note of barNotes) {
@@ -571,11 +666,15 @@ function buildDrumBar(barNotes, slotsPerBar, drumWarnings) {
 
     const notes = slots.get(notePos);
     const drumNames = [];
+    const drumVelocities = [];
     for (const n of notes) {
       const name = resolveGmDrum(n.midi);
       if (name) {
         // Deduplicate: don't repeat the same drum name in a chord
-        if (!drumNames.includes(name)) drumNames.push(name);
+        if (!drumNames.includes(name)) {
+          drumNames.push(name);
+          drumVelocities.push(n.velocity);
+        }
       } else {
         drumWarnings.add(n.midi);
       }
@@ -585,9 +684,20 @@ function buildDrumBar(barNotes, slotsPerBar, drumWarnings) {
       // All unmapped
       events.push({ type: "rest", duration: 1 });
     } else if (drumNames.length === 1) {
-      events.push({ type: "note", name: drumNames[0], duration: 1 });
+      events.push({
+        type: "note",
+        name: drumNames[0],
+        duration: 1,
+        velocity: drumVelocities[0],
+      });
     } else {
-      events.push({ type: "chord", names: drumNames, duration: 1 });
+      events.push({
+        type: "chord",
+        names: drumNames,
+        duration: 1,
+        velocity:
+          drumVelocities.reduce((s, v) => s + v, 0) / drumVelocities.length,
+      });
     }
 
     pos = notePos + 1;
@@ -597,7 +707,13 @@ function buildDrumBar(barNotes, slotsPerBar, drumWarnings) {
     events.push({ type: "rest", duration: slotsPerBar - pos });
   }
 
-  return eventsToMiniNotation(events);
+  return events;
+}
+
+function buildDrumBar(barNotes, slotsPerBar, drumWarnings) {
+  return eventsToMiniNotation(
+    buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings),
+  );
 }
 
 function eventsToMiniNotation(events) {
@@ -627,6 +743,90 @@ function buildRestBar(slotsPerBar) {
 
 function isAllRest(barStr) {
   return /^~(@\d+)?$/.test(barStr);
+}
+
+// ─── Repetition detection ────────────────────────────────────────────────
+
+function detectBarRepetitions(bars, usedVarNames) {
+  // Only look for repetitions among non-rest bars with at least one duplicate.
+  const contentCounts = new Map();
+  for (const bar of bars) {
+    if (isAllRest(bar)) continue;
+    contentCounts.set(bar, (contentCounts.get(bar) || 0) + 1);
+  }
+
+  if (![...contentCounts.values()].some((c) => c > 1)) return null;
+
+  const uniqueContents = new Map(); // content → varName
+  const consts = [];
+  const sequence = [];
+
+  for (const bar of bars) {
+    if (isAllRest(bar)) {
+      sequence.push({ type: "literal", content: bar });
+      continue;
+    }
+
+    if (uniqueContents.has(bar)) {
+      sequence.push({ type: "var", name: uniqueContents.get(bar) });
+    } else {
+      const name = nextVarName(usedVarNames);
+      usedVarNames.add(name);
+      uniqueContents.set(bar, name);
+      consts.push({ name, content: bar });
+      sequence.push({ type: "var", name });
+    }
+  }
+
+  return { consts, sequence };
+}
+
+function nextVarName(usedNames) {
+  for (let i = 0; i < 26; i++) {
+    const name = String.fromCharCode(65 + i);
+    if (!usedNames.has(name)) return name;
+  }
+  for (let i = 0; i < 26; i++) {
+    for (let j = 0; j < 26; j++) {
+      const name = String.fromCharCode(65 + i) + String.fromCharCode(65 + j);
+      if (!usedNames.has(name)) return name;
+    }
+  }
+  return "_section";
+}
+
+// ─── Velocity notation ──────────────────────────────────────────────────
+
+function eventsToVelocityNotation(events) {
+  const parts = [];
+
+  for (const event of events) {
+    const dur = event.duration;
+    const weight = dur > 1 ? `@${dur}` : "";
+
+    if (event.type === "rest") {
+      parts.push(`~${weight}`);
+    } else {
+      parts.push(`${formatVelocity(event.velocity)}${weight}`);
+    }
+  }
+
+  return parts.join(" ");
+}
+
+function formatVelocity(v) {
+  const rounded = Math.round(v * 100) / 100;
+  // Avoid trailing zeros: 0.80 → 0.8, 1.00 → 1
+  return String(rounded);
+}
+
+function formatVelocityCat(velocityBars) {
+  if (velocityBars.length === 1) {
+    return `"${velocityBars[0]}"`;
+  }
+  const indent = "    ";
+  const items = velocityBars.map((b) => `${indent}"${b}",`).join("\n");
+  return `cat(\n${items}\n  )`;
 }
 
 // Auto-detect the coarsest quantization grid that captures >=95% of note onsets.

@@ -511,15 +511,20 @@ describe("generatePatternDraft()", () => {
     const analysis = analyzeTranslationInput(input);
     const code = generatePatternDraft(analysis);
 
-    // Pattern body should not contain standalone MIDI numbers like note("48 52 55")
-    // It should contain note names like "c4 e4 g4"
-    const noteBlocks = code.match(/note\(\s*cat\([^)]*\)/gs);
-    assert.ok(noteBlocks, "Should have note(cat(...)) blocks");
+    // Pattern body should contain note names like "c4 e4 g4"
+    // With repetition detection, names may be in const declarations
+    // rather than inline in cat(). Check the full code.
+    assert.match(
+      code,
+      /[a-g][b#]?\d/,
+      "Generated code should contain note names",
+    );
 
-    for (const block of noteBlocks) {
-      // Check for note-name pattern (letter + optional accidental + digit)
-      assert.match(block, /[a-g][b#]?\d/, `Expected note names in block`);
-    }
+    // Should not contain standalone MIDI numbers as note content
+    assert.ok(
+      !code.match(/note\(\s*cat\(\s*"[\d\s]+"/),
+      "Should use note names, not MIDI numbers",
+    );
   });
 
   test("uses s() not .sound()", () => {
@@ -1115,5 +1120,405 @@ describe("edge cases", () => {
 
     assert.ok(code.includes("c4"), "Should include the note");
     assert.ok(code.includes("note("), "Should use note()");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Repetition detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("repetition detection", () => {
+  test("repeated bars produce const variables and cat references", () => {
+    // A A B A pattern (4 bars, bar 1 and 2 identical, bar 4 = bar 1)
+    const input = {
+      sourceName: "repeat-test",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Melody",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "piano",
+          gmProgram: 0,
+          notes: [
+            // Bar 1: C D E F
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.8 },
+            { name: "d4", midi: 62, time: 0.5, duration: 0.5, velocity: 0.8 },
+            { name: "e4", midi: 64, time: 1.0, duration: 0.5, velocity: 0.8 },
+            { name: "f4", midi: 65, time: 1.5, duration: 0.5, velocity: 0.8 },
+            // Bar 2: same as bar 1
+            { name: "c4", midi: 60, time: 2.0, duration: 0.5, velocity: 0.8 },
+            { name: "d4", midi: 62, time: 2.5, duration: 0.5, velocity: 0.8 },
+            { name: "e4", midi: 64, time: 3.0, duration: 0.5, velocity: 0.8 },
+            { name: "f4", midi: 65, time: 3.5, duration: 0.5, velocity: 0.8 },
+            // Bar 3: G A B C
+            { name: "g4", midi: 67, time: 4.0, duration: 0.5, velocity: 0.8 },
+            { name: "a4", midi: 69, time: 4.5, duration: 0.5, velocity: 0.8 },
+            { name: "b4", midi: 71, time: 5.0, duration: 0.5, velocity: 0.8 },
+            { name: "c5", midi: 72, time: 5.5, duration: 0.5, velocity: 0.8 },
+            // Bar 4: same as bar 1
+            { name: "c4", midi: 60, time: 6.0, duration: 0.5, velocity: 0.8 },
+            { name: "d4", midi: 62, time: 6.5, duration: 0.5, velocity: 0.8 },
+            { name: "e4", midi: 64, time: 7.0, duration: 0.5, velocity: 0.8 },
+            { name: "f4", midi: 65, time: 7.5, duration: 0.5, velocity: 0.8 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input, { gridSubdivision: 4 });
+    const code = generatePatternDraft(analysis);
+
+    // Should have const A = "c4 d4 e4 f4"
+    assert.ok(
+      code.includes('const A = "c4 d4 e4 f4"'),
+      `Expected const A for repeated bar, got: ${code}`,
+    );
+    // Should have const B = "g4 a4 b4 c5"
+    assert.ok(
+      code.includes('const B = "g4 a4 b4 c5"'),
+      `Expected const B for unique bar, got: ${code}`,
+    );
+    // Should have cat(A, A, B, A) sequence (with commas and bar comments)
+    assert.ok(
+      code.includes("A, // bar 1"),
+      `Expected A at bar 1, got: ${code}`,
+    );
+    assert.ok(
+      code.includes("A, // bar 2"),
+      `Expected A at bar 2, got: ${code}`,
+    );
+    assert.ok(
+      code.includes("B, // bar 3"),
+      `Expected B at bar 3, got: ${code}`,
+    );
+    assert.ok(
+      code.includes("A, // bar 4"),
+      `Expected A at bar 4, got: ${code}`,
+    );
+  });
+
+  test("no repetition when all bars are unique", () => {
+    const input = {
+      sourceName: "unique-test",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Melody",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "piano",
+          gmProgram: 0,
+          notes: [
+            // Bar 1
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.8 },
+            // Bar 2
+            { name: "d4", midi: 62, time: 2.0, duration: 0.5, velocity: 0.8 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input, { gridSubdivision: 4 });
+    const code = generatePatternDraft(analysis);
+
+    // No const declarations for bar variables.
+    assert.ok(
+      !code.includes("const A"),
+      `Should not extract consts when no bars repeat, got: ${code}`,
+    );
+    // Should still use inline strings.
+    assert.ok(
+      code.includes('"c4 ~@3"'),
+      `Should have inline bar strings, got: ${code}`,
+    );
+  });
+
+  test("drum tracks also get repetition detection", () => {
+    const input = {
+      sourceName: "drum-repeat",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Drums",
+          channel: 9,
+          isDrum: true,
+          gmInstrument: "percussion",
+          gmProgram: 0,
+          notes: [
+            // Bar 1: bd sd bd sd
+            { name: "c2", midi: 36, time: 0, duration: 0.1, velocity: 0.9 },
+            { name: "d2", midi: 38, time: 0.5, duration: 0.1, velocity: 0.8 },
+            { name: "c2", midi: 36, time: 1.0, duration: 0.1, velocity: 0.9 },
+            { name: "d2", midi: 38, time: 1.5, duration: 0.1, velocity: 0.8 },
+            // Bar 2: same
+            { name: "c2", midi: 36, time: 2.0, duration: 0.1, velocity: 0.9 },
+            { name: "d2", midi: 38, time: 2.5, duration: 0.1, velocity: 0.8 },
+            { name: "c2", midi: 36, time: 3.0, duration: 0.1, velocity: 0.9 },
+            { name: "d2", midi: 38, time: 3.5, duration: 0.1, velocity: 0.8 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input, { gridSubdivision: 4 });
+    const code = generatePatternDraft(analysis);
+
+    assert.ok(
+      code.includes('const A = "bd sd bd sd"'),
+      `Expected drum repetition const, got: ${code}`,
+    );
+    assert.ok(
+      code.includes("A, // bar 1"),
+      `Expected A at bar 1, got: ${code}`,
+    );
+    assert.ok(
+      code.includes("A, // bar 2"),
+      `Expected A at bar 2, got: ${code}`,
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Velocity preservation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("velocity preservation", () => {
+  test("generates .velocity() when variation is significant", () => {
+    const input = {
+      sourceName: "velocity-test",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Piano",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "piano",
+          gmProgram: 0,
+          notes: [
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.9 },
+            { name: "d4", midi: 62, time: 0.5, duration: 0.5, velocity: 0.5 },
+            { name: "e4", midi: 64, time: 1.0, duration: 0.5, velocity: 0.8 },
+            { name: "f4", midi: 65, time: 1.5, duration: 0.5, velocity: 0.6 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input, { gridSubdivision: 4 });
+    const code = generatePatternDraft(analysis, { preserveVelocity: true });
+
+    assert.ok(
+      code.includes(".velocity("),
+      `Expected .velocity() in output, got: ${code}`,
+    );
+    // Should contain velocity values
+    assert.ok(
+      code.includes("0.9") && code.includes("0.5"),
+      `Expected velocity values 0.9 and 0.5, got: ${code}`,
+    );
+  });
+
+  test("no .velocity() when variation is below threshold", () => {
+    const input = {
+      sourceName: "flat-velocity",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Piano",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "piano",
+          gmProgram: 0,
+          notes: [
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.8 },
+            { name: "d4", midi: 62, time: 0.5, duration: 0.5, velocity: 0.85 },
+            { name: "e4", midi: 64, time: 1.0, duration: 0.5, velocity: 0.82 },
+            { name: "f4", midi: 65, time: 1.5, duration: 0.5, velocity: 0.78 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input, { gridSubdivision: 4 });
+    const code = generatePatternDraft(analysis, { preserveVelocity: true });
+
+    assert.ok(
+      !code.includes(".velocity("),
+      `Should not emit .velocity() when variation < 0.2, got: ${code}`,
+    );
+  });
+
+  test("preserveVelocity: false suppresses .velocity()", () => {
+    const input = {
+      sourceName: "vel-suppressed",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Piano",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "piano",
+          gmProgram: 0,
+          notes: [
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.9 },
+            { name: "d4", midi: 62, time: 0.5, duration: 0.5, velocity: 0.4 },
+            { name: "e4", midi: 64, time: 1.0, duration: 0.5, velocity: 0.8 },
+            { name: "f4", midi: 65, time: 1.5, duration: 0.5, velocity: 0.3 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input, { gridSubdivision: 4 });
+    const code = generatePatternDraft(analysis, { preserveVelocity: false });
+
+    assert.ok(
+      !code.includes(".velocity("),
+      `Should not emit .velocity() when preserveVelocity is false, got: ${code}`,
+    );
+  });
+
+  test("velocity warning only when preserveVelocity is false", () => {
+    const input = {
+      sourceName: "vel-warn",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Piano",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "piano",
+          gmProgram: 0,
+          notes: [
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.9 },
+            { name: "d4", midi: 62, time: 0.5, duration: 0.5, velocity: 0.4 },
+          ],
+        },
+      ],
+    };
+
+    // With velocity preservation on: no warning.
+    const analysisOn = analyzeTranslationInput(input, {
+      preserveVelocity: true,
+    });
+    assert.ok(
+      !analysisOn.warnings.some((w) => w.includes("velocity variation")),
+      "Should not warn about velocity when preserveVelocity is true",
+    );
+
+    // With velocity preservation off: warning present.
+    const analysisOff = analyzeTranslationInput(input, {
+      preserveVelocity: false,
+    });
+    assert.ok(
+      analysisOff.warnings.some((w) => w.includes("velocity variation")),
+      "Should warn about velocity when preserveVelocity is false",
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sound overrides
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("sound overrides", () => {
+  test("soundOverrides changes the .s() call in generated code", () => {
+    const input = {
+      sourceName: "override-test",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Piano",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "acoustic grand piano",
+          gmProgram: 0,
+          notes: [
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.8 },
+            { name: "e4", midi: 64, time: 0.5, duration: 0.5, velocity: 0.8 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input);
+    const code = generatePatternDraft(analysis, {
+      soundOverrides: { 0: "gm_epiano1" },
+    });
+
+    assert.ok(
+      code.includes('.s("gm_epiano1")'),
+      `Expected .s("gm_epiano1") override, got: ${code}`,
+    );
+    assert.ok(
+      !code.includes('.s("gm_piano")'),
+      `Should not contain original .s("gm_piano"), got: ${code}`,
+    );
+  });
+
+  test("soundOverrides does not affect tracks without an override", () => {
+    const input = {
+      sourceName: "partial-override",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "Piano",
+          channel: 0,
+          isDrum: false,
+          gmInstrument: "acoustic grand piano",
+          gmProgram: 0,
+          notes: [
+            { name: "c4", midi: 60, time: 0, duration: 0.5, velocity: 0.8 },
+          ],
+        },
+        {
+          name: "Strings",
+          channel: 1,
+          isDrum: false,
+          gmInstrument: "string ensemble 1",
+          gmProgram: 48,
+          notes: [
+            { name: "g3", midi: 55, time: 0, duration: 0.5, velocity: 0.8 },
+          ],
+        },
+      ],
+    };
+
+    const analysis = analyzeTranslationInput(input);
+    // Override only track 0 (Piano).
+    const code = generatePatternDraft(analysis, {
+      soundOverrides: { 0: "gm_harpsichord" },
+    });
+
+    assert.ok(
+      code.includes('.s("gm_harpsichord")'),
+      `Expected override for Piano, got: ${code}`,
+    );
+    assert.ok(
+      code.includes('.s("gm_string_ensemble_1")'),
+      `Expected unchanged Strings sound, got: ${code}`,
+    );
+  });
+
+  test("soundOverrides via midiFileToPattern convenience", () => {
+    const buffer = loadFixture("test-midi.mid");
+    const result = midiFileToPattern(buffer, {
+      soundOverrides: { 0: "gm_epiano2" },
+    });
+
+    assert.ok(
+      result.patternBody.includes('.s("gm_epiano2")'),
+      `Expected override in patternBody, got snippet: ${result.patternBody.slice(0, 200)}`,
+    );
   });
 });
