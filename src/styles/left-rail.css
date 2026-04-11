@@ -189,9 +189,9 @@
 }
 
 .left-rail__empty {
-  padding: var(--space-3) var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--text-dim);
+  padding: var(--space-5) var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-mut);
   text-align: center;
 }
 
@@ -214,8 +214,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   background: none;
   border: none;

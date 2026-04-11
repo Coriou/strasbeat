@@ -33,6 +33,19 @@
 import { makeIcon } from "./icons.js";
 import { confirm } from "./modal.js";
 
+// ─── Pretty name ─────────────────────────────────────────────────────────
+// Strips leading numeric+letter prefixes (e.g. "25-", "G3-") and title-cases
+// the result so pattern names read like track titles, not filenames.
+//   "25-dub"              → "Dub"
+//   "G3-progression-demo" → "Progression Demo"
+//   "ben-choir"           → "Ben Choir"
+function prettyName(raw) {
+  const stripped = raw.replace(/^[a-zA-Z]*\d+[a-zA-Z]*-/, "");
+  const spaced = stripped.replace(/[-_]/g, " ");
+  const titled = spaced.replace(/\b\w/g, (c) => c.toUpperCase());
+  return titled.trim() || raw;
+}
+
 export function mount({
   container,
   patterns,
@@ -91,10 +104,11 @@ export function mount({
       isCollapsed ? `${COLLAPSED_W}px` : `${EXPANDED_W}px`,
     );
     container.setAttribute("data-collapsed", isCollapsed ? "true" : "false");
-    collapseBtn.setAttribute(
-      "aria-label",
-      isCollapsed ? "Expand patterns panel" : "Collapse patterns panel",
-    );
+    const label = isCollapsed
+      ? "Expand patterns panel"
+      : "Collapse patterns panel";
+    collapseBtn.setAttribute("aria-label", label);
+    collapseBtn.title = label;
   }
 
   // ─── Build the static structure once ──────────────────────────────────
@@ -196,15 +210,21 @@ export function mount({
   function renderList() {
     listEl.replaceChildren();
 
+    // Match against both raw filename AND pretty display name so users
+    // can search by either convention (e.g. "25" finds "25-dub").
     const filteredShipped = query
-      ? shippedNames.filter((name) =>
-          prettyName(name).toLowerCase().includes(query),
+      ? shippedNames.filter(
+          (n) =>
+            n.toLowerCase().includes(query) ||
+            prettyName(n).toLowerCase().includes(query),
         )
       : shippedNames;
 
     const filteredUser = query
-      ? userPatternNames.filter((name) =>
-          prettyName(name).toLowerCase().includes(query),
+      ? userPatternNames.filter(
+          (n) =>
+            n.toLowerCase().includes(query) ||
+            prettyName(n).toLowerCase().includes(query),
         )
       : userPatternNames;
 
@@ -212,7 +232,7 @@ export function mount({
       const empty = el(
         "div",
         "left-rail__empty",
-        query ? `no patterns match "${query}"` : "no patterns",
+        query ? `No results for "${query}"` : "No patterns yet",
       );
       listEl.appendChild(empty);
       return;
@@ -291,7 +311,8 @@ export function mount({
       moreBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const rect = moreBtn.getBoundingClientRect();
-        showContextMenu(rect.right, rect.top, name, isUser);
+        // Open below the button so it reads as a dropdown, not a tooltip.
+        showContextMenu(rect.left, rect.bottom, name, isUser);
       });
       metaEl.appendChild(moreBtn);
     }
@@ -489,16 +510,3 @@ function el(tag, className, text) {
   return e;
 }
 
-// ─── Pretty name ─────────────────────────────────────────────────────────
-// Strips leading numeric+letter prefixes (e.g. "25-", "G3-") and title-cases
-// the result so pattern names read like track titles, not filenames.
-//   "25-dub"              → "Dub"
-//   "G3-progression-demo" → "Progression Demo"
-//   "ben-choir"           → "Ben Choir"
-
-function prettyName(raw) {
-  const stripped = raw.replace(/^[a-zA-Z]*\d+[a-zA-Z]*-/, "");
-  const spaced = stripped.replace(/[-_]/g, " ");
-  const titled = spaced.replace(/\b\w/g, (c) => c.toUpperCase());
-  return titled.trim() || raw;
-}
