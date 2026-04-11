@@ -41,6 +41,18 @@ lead: stack(
   .crush(12)
   .coarse(3)
 
+leadbrass: stack(
+  stack(melody, bass).s("gm_brass_section"),
+  stack(melody).s("gm_synth_brass_1"),
+  stack(melody).s("gm_synth_brass_2"),
+)
+  .room(0.7)
+  .crush(12)
+  .coarse(3)
+  .attack(1)
+  .sustain(0.5)
+  .gain(0.25)
+
 bassrev: stack(bass)
   .s("gm_acoustic_bass")
   .rev()
