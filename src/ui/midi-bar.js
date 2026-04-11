@@ -752,8 +752,7 @@ function buildPresetPopover(getPreset, onSelect, midi) {
     const key = getPreset();
     const preset = presets[key];
     const overrides = midi.getPresetOverrides(key);
-    for (const { param, def } of Object.values(fxSliders).map((o) => ({ param: o.def.param, def: o.def }))) {
-      const fx = fxSliders[param];
+    for (const [param, fx] of Object.entries(fxSliders)) {
       const base = param === "lpf" ? (preset?.[param] ?? 20000) : (preset?.[param] ?? 0);
       const val = overrides[param] ?? base;
       fx.slider.value = String(val);
