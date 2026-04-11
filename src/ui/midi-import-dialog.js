@@ -55,7 +55,7 @@ function installListeners(root, onDismiss) {
     if (e.key === "Tab") {
       const focusables = Array.from(
         root.querySelectorAll(
-          "input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex=\"-1\"])",
+          'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ),
       ).filter((el) => el.offsetParent !== null);
       if (focusables.length === 0) {
