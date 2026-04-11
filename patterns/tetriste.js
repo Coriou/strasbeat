@@ -32,8 +32,15 @@ const bass = note(
   ),
 )
 
-lead: stack(melody, bass).s("gm_acoustic_guitar_nylon").crush(12).coarse(3)
-leadback: stack(melody).s("gm_alto_sax").lpf(800).room(0.75).pan(sine.slow(2))
+lead: stack(
+  stack(melody, bass).s("gm_synth_choir"),
+  stack(melody).s("gm_choir_aahs"),
+  stack(melody).s("gm_pad_choir"),
+)
+  .room(0.7)
+  .crush(12)
+  .coarse(3)
+
 bassrev: stack(bass)
   .s("gm_acoustic_bass")
   .rev()
