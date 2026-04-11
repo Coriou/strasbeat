@@ -44,6 +44,8 @@ export const PRESET_CATEGORIES = [
   "Strings & Pads",
   "Synth",
   "Bass",
+  "Guitar",
+  "Brass & Wind",
   "Drums",
 ];
 
@@ -196,6 +198,250 @@ export const presets = {
     },
     duration: 0.5,
   },
+
+  // ─── Keys (new) ─────────────────────────────────────────────────────
+  musicbox: {
+    label: "Music Box",
+    category: "Keys",
+    s: "gm_music_box",
+    duration: 2,
+    attack: 0.001,
+    decay: 2,
+    sustain: 0,
+    release: 0.3,
+    room: 0.35,
+  },
+  celesta: {
+    label: "Celesta",
+    category: "Keys",
+    s: "gm_celesta",
+    duration: 2,
+    attack: 0.001,
+    decay: 1.5,
+    sustain: 0,
+    release: 0.2,
+    room: 0.3,
+  },
+  vibes: {
+    label: "Vibraphone",
+    category: "Keys",
+    s: "gm_vibraphone",
+    duration: 3,
+    attack: 0.001,
+    decay: 3,
+    sustain: 0,
+    release: 0.4,
+    room: 0.35,
+  },
+  accordion: {
+    label: "Accordion",
+    category: "Keys",
+    s: "gm_accordion",
+    duration: 6,
+    attack: 0.03,
+    decay: 0.1,
+    sustain: 0.85,
+    release: 0.15,
+    room: 0.2,
+  },
+  clavinet: {
+    label: "Clavinet",
+    category: "Keys",
+    s: "gm_clavinet",
+    duration: 1.5,
+    attack: 0.001,
+    decay: 1.5,
+    sustain: 0,
+    release: 0.15,
+  },
+
+  // ─── Strings & Pads (new) ──────────────────────────────────────────
+  choir: {
+    label: "Choir",
+    category: "Strings & Pads",
+    s: "gm_choir_aahs",
+    duration: 6,
+    attack: 0.2,
+    decay: 0.5,
+    sustain: 0.8,
+    release: 1.2,
+    room: 0.5,
+  },
+  padnewage: {
+    label: "Pad (new age)",
+    category: "Strings & Pads",
+    s: "gm_pad_new_age",
+    duration: 6,
+    attack: 0.3,
+    decay: 0.5,
+    sustain: 0.8,
+    release: 1.5,
+    room: 0.45,
+  },
+  padchoir: {
+    label: "Pad (choir)",
+    category: "Strings & Pads",
+    s: "gm_pad_choir",
+    duration: 6,
+    attack: 0.35,
+    decay: 0.5,
+    sustain: 0.75,
+    release: 2,
+    room: 0.5,
+    lpf: 4000,
+  },
+  cello: {
+    label: "Cello",
+    category: "Strings & Pads",
+    s: "gm_cello",
+    duration: 4,
+    attack: 0.08,
+    decay: 0.5,
+    sustain: 0.8,
+    release: 0.8,
+    room: 0.3,
+  },
+
+  // ─── Synth (new) ───────────────────────────────────────────────────
+  synthbrass: {
+    label: "Synth Brass",
+    category: "Synth",
+    s: "gm_synth_brass_1",
+    duration: 3,
+    attack: 0.02,
+    decay: 0.3,
+    sustain: 0.7,
+    release: 0.3,
+    lpf: 4000,
+  },
+  squarelead: {
+    label: "Square Lead",
+    category: "Synth",
+    s: "gm_lead_1_square",
+    duration: 2,
+    attack: 0.01,
+    decay: 2,
+    sustain: 0,
+    release: 0.2,
+    lpf: 2500,
+    room: 0.15,
+  },
+  fmsynth: {
+    label: "FM Synth",
+    category: "Synth",
+    s: "sine",
+    duration: 1.5,
+    attack: 0.005,
+    decay: 1.5,
+    sustain: 0,
+    release: 0.2,
+    lpf: 5000,
+    room: 0.2,
+  },
+
+  // ─── Bass (new) ────────────────────────────────────────────────────
+  fingerbass: {
+    label: "Finger Bass",
+    category: "Bass",
+    s: "gm_electric_bass_finger",
+    duration: 1.2,
+    attack: 0.005,
+    decay: 1.2,
+    sustain: 0,
+    release: 0.15,
+  },
+  slapbass: {
+    label: "Slap Bass",
+    category: "Bass",
+    s: "gm_slap_bass_1",
+    duration: 0.8,
+    attack: 0.001,
+    decay: 0.8,
+    sustain: 0,
+    release: 0.1,
+  },
+  acousticbass: {
+    label: "Acoustic Bass",
+    category: "Bass",
+    s: "gm_acoustic_bass",
+    duration: 1.5,
+    attack: 0.005,
+    decay: 1.5,
+    sustain: 0,
+    release: 0.2,
+    room: 0.15,
+  },
+
+  // ─── Guitar (new category) ─────────────────────────────────────────
+  nylon: {
+    label: "Nylon Guitar",
+    category: "Guitar",
+    s: "gm_acoustic_guitar_nylon",
+    duration: 2,
+    attack: 0.001,
+    decay: 2,
+    sustain: 0,
+    release: 0.3,
+    room: 0.2,
+  },
+  steel: {
+    label: "Steel Guitar",
+    category: "Guitar",
+    s: "gm_acoustic_guitar_steel",
+    duration: 2,
+    attack: 0.001,
+    decay: 2,
+    sustain: 0,
+    release: 0.3,
+    room: 0.2,
+  },
+  cleanelectric: {
+    label: "Clean Electric",
+    category: "Guitar",
+    s: "gm_electric_guitar_clean",
+    duration: 2.5,
+    attack: 0.001,
+    decay: 2.5,
+    sustain: 0,
+    release: 0.3,
+    room: 0.25,
+    delay: 0.15,
+  },
+
+  // ─── Brass & Wind (new category) ───────────────────────────────────
+  trumpet: {
+    label: "Trumpet",
+    category: "Brass & Wind",
+    s: "gm_trumpet",
+    duration: 3,
+    attack: 0.03,
+    decay: 0.3,
+    sustain: 0.75,
+    release: 0.2,
+    room: 0.2,
+  },
+  sax: {
+    label: "Sax",
+    category: "Brass & Wind",
+    s: "gm_tenor_sax",
+    duration: 3,
+    attack: 0.02,
+    decay: 0.3,
+    sustain: 0.8,
+    release: 0.25,
+    room: 0.2,
+  },
+  flute: {
+    label: "Flute",
+    category: "Brass & Wind",
+    s: "gm_flute",
+    duration: 3,
+    attack: 0.05,
+    decay: 0.3,
+    sustain: 0.8,
+    release: 0.3,
+    room: 0.3,
+  },
 };
 
 // ─── Note name helpers (used by event emitter + midi-bar) ─────────────────
@@ -292,6 +538,10 @@ export class MidiBridge {
     this._sustainDown = false;
     /** @type {Map<number, {velocity: number, timeout: number}>} */
     this.activeNotes = new Map();
+
+    // ─── Per-preset FX overrides (session-only, not persisted) ────────
+    /** @type {Map<string, {room?: number, delay?: number, lpf?: number}>} */
+    this.presetOverrides = new Map();
   }
 
   // ─── Event emitter ──────────────────────────────────────────────────
@@ -328,6 +578,16 @@ export class MidiBridge {
   }
   getVolume() {
     return this._volume;
+  }
+
+  // ─── Per-preset FX overrides ───────────────────────────────────────
+  setPresetOverride(presetKey, param, value) {
+    const existing = this.presetOverrides.get(presetKey) ?? {};
+    existing[param] = value;
+    this.presetOverrides.set(presetKey, existing);
+  }
+  getPresetOverrides(presetKey) {
+    return this.presetOverrides.get(presetKey) ?? {};
   }
 
   // ─── Sustain state ─────────────────────────────────────────────────
@@ -488,6 +748,14 @@ export class MidiBridge {
         ...(preset.room != null && { room: preset.room }),
         ...(preset.delay != null && { delay: preset.delay }),
       };
+
+      // Merge per-preset FX overrides (session-only, from the popover sliders).
+      const overrides = this.presetOverrides.get(presetKey);
+      if (overrides) {
+        if (overrides.room != null) value.room = overrides.room;
+        if (overrides.delay != null) value.delay = overrides.delay;
+        if (overrides.lpf != null) value.lpf = overrides.lpf;
+      }
     }
 
     // 10ms latency cushion so the note schedules slightly in the future —

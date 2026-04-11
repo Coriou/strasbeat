@@ -221,7 +221,8 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     onPresetChange(key);
     presetLabelEl.textContent = presets[key]?.label ?? key;
     closePopover();
-  });
+    popover._updateFxSliders();
+  }, midi);
   popover.setAttribute("role", "listbox");
   popover.setAttribute("aria-label", "MIDI preset");
   document.body.appendChild(popover);
@@ -305,6 +306,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
       filter.focus();
     }
     updatePopoverSelection();
+    popover._updateFxSliders();
   }
   function closePopover() {
     popover.hidden = true;
@@ -650,7 +652,7 @@ function makeBtn(cls, text) {
   return btn;
 }
 
-function buildPresetPopover(getPreset, onSelect) {
+function buildPresetPopover(getPreset, onSelect, midi) {
   const popover = document.createElement("div");
   popover.className = "midi-bar__preset-popover";
   popover.hidden = true;
@@ -661,6 +663,11 @@ function buildPresetPopover(getPreset, onSelect) {
   filter.className = "midi-bar__preset-filter";
   filter.placeholder = "Filter…";
   popover.appendChild(filter);
+
+  // Scrollable preset list
+  const listWrap = document.createElement("div");
+  listWrap.className = "midi-bar__preset-list";
+  popover.appendChild(listWrap);
 
   // Group presets by category
   const byCategory = new Map();
@@ -676,7 +683,7 @@ function buildPresetPopover(getPreset, onSelect) {
     const catEl = document.createElement("div");
     catEl.className = "midi-bar__preset-category";
     catEl.textContent = cat;
-    popover.appendChild(catEl);
+    listWrap.appendChild(catEl);
 
     for (const { key, label } of items) {
       const item = document.createElement("button");
@@ -688,12 +695,71 @@ function buildPresetPopover(getPreset, onSelect) {
       item.addEventListener("click", () => onSelect(key));
       item.addEventListener("mouseenter", () => {
         // Remove previous keyboard-nav focus
-        const prev = popover.querySelector(".is-focused");
+        const prev = listWrap.querySelector(".is-focused");
         if (prev) prev.classList.remove("is-focused");
       });
-      popover.appendChild(item);
+      listWrap.appendChild(item);
     }
   }
+
+  // ─── FX sliders section ─────────────────────────────────────────────
+  const fxSection = document.createElement("div");
+  fxSection.className = "midi-bar__fx-section";
+
+  const FX_DEFS = [
+    { param: "room", label: "Room", min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+    { param: "delay", label: "Delay", min: 0, max: 1, step: 0.01, fmt: (v) => Math.round(v * 100) + "%" },
+    { param: "lpf", label: "LPF", min: 200, max: 20000, step: 100, fmt: (v) => v >= 10000 ? (v / 1000).toFixed(1) + "k" : Math.round(v) + "" },
+  ];
+
+  const fxSliders = {};
+  for (const def of FX_DEFS) {
+    const row = document.createElement("div");
+    row.className = "midi-bar__fx-row";
+
+    const lbl = document.createElement("label");
+    lbl.className = "midi-bar__fx-label";
+    lbl.textContent = def.label;
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.className = "midi-bar__fx-slider";
+    slider.min = String(def.min);
+    slider.max = String(def.max);
+    slider.step = String(def.step);
+
+    const valEl = document.createElement("span");
+    valEl.className = "midi-bar__fx-value";
+
+    lbl.setAttribute("for", `midi-fx-${def.param}`);
+    slider.id = `midi-fx-${def.param}`;
+
+    slider.addEventListener("input", () => {
+      const v = Number(slider.value);
+      valEl.textContent = def.fmt(v);
+      midi.setPresetOverride(getPreset(), def.param, v);
+    });
+
+    row.append(lbl, slider, valEl);
+    fxSection.appendChild(row);
+    fxSliders[def.param] = { slider, valEl, def };
+  }
+
+  popover.appendChild(fxSection);
+
+  /** Sync slider positions with the current preset's values + any overrides. */
+  popover._updateFxSliders = () => {
+    const key = getPreset();
+    const preset = presets[key];
+    const overrides = midi.getPresetOverrides(key);
+    for (const { param, def } of Object.values(fxSliders).map((o) => ({ param: o.def.param, def: o.def }))) {
+      const fx = fxSliders[param];
+      const base = param === "lpf" ? (preset?.[param] ?? 20000) : (preset?.[param] ?? 0);
+      const val = overrides[param] ?? base;
+      fx.slider.value = String(val);
+      fx.valEl.textContent = fx.def.fmt(val);
+    }
+  };
 
   return popover;
 }
