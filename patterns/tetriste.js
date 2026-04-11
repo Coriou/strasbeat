@@ -43,8 +43,8 @@ lead: stack(
 
 leadbrass: stack(
   stack(melody, bass).s("gm_brass_section"),
-  stack(melody).s("gm_synth_brass_1"),
-  stack(melody).s("gm_synth_brass_2"),
+  stack(melody).s("gm_synth_brass_1").pan(0),
+  stack(melody).s("gm_synth_brass_2").pan(1),
 )
   .room(0.7)
   .crush(12)
