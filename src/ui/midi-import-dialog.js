@@ -287,6 +287,9 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
   nameRow.appendChild(nameError);
   dialog.appendChild(nameRow);
 
+  // Scrollable body for the middle content (tracks, grid, velocity, warnings).
+  const body = el("div", "midi-import__body");
+
   // Song metadata.
   const [tsNum, tsDenom] = input.timeSignature;
   const totalNotes = input.tracks.reduce((s, t) => s + t.notes.length, 0);
@@ -296,7 +299,7 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 
   const metaEl = el("div", "midi-import__meta");
   metaEl.textContent = `${tsNum}/${tsDenom} at ${input.bpm} BPM · ${preAnalysis.totalBars} bars · ${totalNotes} notes`;
-  dialog.appendChild(metaEl);
+  body.appendChild(metaEl);
 
   // Track checkboxes + instrument overrides.
   const tracksSection = el("div", "midi-import__tracks");
@@ -374,7 +377,7 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
     tracksSection.appendChild(row);
   }
 
-  dialog.appendChild(tracksSection);
+  body.appendChild(tracksSection);
 
   // Grid selector.
   const gridSection = el("div", "midi-import__grid-section");
@@ -410,7 +413,7 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
   }
 
   gridSection.appendChild(gridRow);
-  dialog.appendChild(gridSection);
+  body.appendChild(gridSection);
 
   // Velocity checkbox.
   const velocitySection = el("div", "midi-import__velocity-section");
@@ -424,7 +427,7 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
     document.createTextNode(" Preserve velocity dynamics"),
   );
   velocitySection.appendChild(velocityLabel);
-  dialog.appendChild(velocitySection);
+  body.appendChild(velocitySection);
 
   // Warnings.
   const warningsEl = el("div", "midi-import__warnings");
@@ -435,7 +438,8 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
       warningsEl.appendChild(wEl);
     }
   }
-  dialog.appendChild(warningsEl);
+  body.appendChild(warningsEl);
+  dialog.appendChild(body);
 
   // Actions.
   const actions = el("div", "modal__actions");

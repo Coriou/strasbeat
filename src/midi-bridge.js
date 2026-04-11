@@ -642,6 +642,10 @@ export class MidiBridge {
   }
   setMetronomeEnabled(enabled) {
     this._metronomeEnabled = enabled;
+    if (this.captureEnabled) {
+      if (enabled) this._startMetronome();
+      else this._stopMetronome();
+    }
     this._emit("metronomechange", { enabled, bpm: this._metronomeBpm });
   }
   getMetronomeBpm() {
@@ -649,6 +653,7 @@ export class MidiBridge {
   }
   setMetronomeBpm(bpm) {
     this._metronomeBpm = Math.max(30, Math.min(300, Math.round(bpm)));
+    if (this._metronomeIntervalId !== null) this._startMetronome();
     this._emit("metronomechange", {
       enabled: this._metronomeEnabled,
       bpm: this._metronomeBpm,

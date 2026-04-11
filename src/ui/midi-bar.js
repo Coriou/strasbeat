@@ -409,7 +409,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     midi.setMetronomeBpm(midi.getMetronomeBpm() + delta);
     updateMetUI();
     persistState();
-  });
+  }, { passive: false });
   midi.on("metronomechange", updateMetUI);
 
   // Preset popover open/close

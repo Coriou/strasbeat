@@ -8,6 +8,15 @@
   max-width: min(560px, calc(100vw - var(--space-6)));
 }
 
+/* Scrollable body between title/name and action buttons */
+.midi-import__body {
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 /* ─── Drop zone (State 1) ─────────────────────────────────────────────── */
 
 .midi-import__drop-zone {
@@ -121,6 +130,8 @@
   display: flex;
   flex-direction: column;
   gap: 0;
+  max-height: 280px;
+  overflow-y: auto;
 }
 
 .midi-import__track-row {
