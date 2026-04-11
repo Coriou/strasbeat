@@ -503,8 +503,6 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-
-
 function el(tag, className, text) {
   const e = document.createElement(tag);
   if (className) e.className = className;
