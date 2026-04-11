@@ -39,6 +39,9 @@
 // Pure DOM, no framework. See design/work/08-feature-parity-and-beyond.md
 // "Phase 5: Enhanced Settings Panel".
 
+import { categorizeSounds } from "./sound-browser.js";
+import { getUserSamples } from "../user-setup.js";
+
 // ─── Default accent values (mirror settings-drawer.js / tokens.css) ──────
 // Kept in sync by hand. If SYSTEM.md §5 ever moves, update both files.
 const DEFAULT_HUE = 358;
@@ -139,6 +142,7 @@ export function createSettingsPanel({
   onAccentReset = () => {},
   getStoredAccent = () => null,
   getSoundCount = () => 0,
+  getSoundMap = () => ({}),
   themes = [],
   appVersion = "",
   strudelVersion = "",
@@ -161,6 +165,7 @@ export function createSettingsPanel({
   let fontSizeSelect = null;
   let fontFamilySelect = null;
   let soundCountEl = null;
+  let soundBreakdownEl = null;
   /** @type {Record<string, HTMLButtonElement>} key → toggle button */
   const toggleButtons = {};
   /** @type {Record<string, HTMLDivElement>} key → toggle row */
@@ -429,7 +434,8 @@ export function createSettingsPanel({
     soundCountEl = el("div", "settings-panel__about-line");
     soundCountEl.textContent = `Sounds loaded: ${getSoundCount() || "…"}`;
     section.body.appendChild(soundCountEl);
-
+    soundBreakdownEl = el("div", "settings-panel__about-breakdown");
+    section.body.appendChild(soundBreakdownEl);
     // Links row — opens in a new tab so the editor context isn't
     // dropped. noopener + noreferrer are defensive against tab-nabbing
     // via window.opener, same as any other outbound link.
@@ -491,8 +497,33 @@ export function createSettingsPanel({
   function syncAboutInfo() {
     if (soundCountEl) {
       const n = getSoundCount();
-      soundCountEl.textContent = `Sounds loaded: ${n || "…"}`;
+      soundCountEl.textContent = `Sounds loaded: ${n ? n.toLocaleString() : "\u2026"}`;
     }
+    if (soundBreakdownEl) {
+      const mapObj = getSoundMap();
+      getUserSamples()
+        .then((banks) => {
+          const bankNames = new Set(banks.map((b) => b.name));
+          const cats = categorizeSounds(mapObj, bankNames);
+          _renderBreakdown(cats);
+        })
+        .catch(() => {
+          const cats = categorizeSounds(mapObj);
+          _renderBreakdown(cats);
+        });
+    }
+  }
+
+  function _renderBreakdown(cats) {
+    if (!soundBreakdownEl) return;
+    const parts = [];
+    if (cats.kits) parts.push(`Kits: ${cats.kits.toLocaleString()}`);
+    if (cats.gm) parts.push(`GM: ${cats.gm.toLocaleString()}`);
+    if (cats.synth) parts.push(`Synth: ${cats.synth.toLocaleString()}`);
+    if (cats.wavetable)
+      parts.push(`Wavetable: ${cats.wavetable.toLocaleString()}`);
+    if (cats.user) parts.push(`User: ${cats.user.toLocaleString()}`);
+    soundBreakdownEl.textContent = parts.length ? parts.join(" \u00b7 ") : "";
   }
 
   // ─── Event handlers ───────────────────────────────────────────────────

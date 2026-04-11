@@ -149,6 +149,7 @@ export function registerPanels({
     },
     getStoredAccent: () => readStoredAccent(),
     getSoundCount: () => Object.keys(soundMap.get() ?? {}).length,
+    getSoundMap: () => soundMap.get(),
     themes: THEME_OPTIONS,
     appVersion: APP_VERSION,
     strudelVersion: STRUDEL_VERSION,

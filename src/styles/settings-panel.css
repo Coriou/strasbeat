@@ -440,6 +440,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+.settings-panel__about-breakdown {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  padding-left: var(--space-2);
+}
+
 .settings-panel__links {
   display: flex;
   flex-wrap: wrap;

@@ -30,6 +30,7 @@
 // and transport.js.
 
 import { makeIcon } from "./icons.js";
+import { getUserSamples } from "../user-setup.js";
 
 const SEARCH_DEBOUNCE_MS = 150;
 
@@ -75,7 +76,9 @@ export function createSoundBrowserPanel({
   let inUse = new Set();
   let currentBufferText = "";
   let query = "";
-  let category = "all"; // all | kits | gm | synth
+  let category = "all"; // all | kits | gm | synth | user | wavetable
+  /** @type {Set<string>} user-imported sample bank names for category filtering */
+  let userBankNames = new Set();
   let activeIndex = -1; // index into the currently-rendered flat list
   /** @type {Set<string>} */
   let collapsedGroups = new Set();
@@ -151,6 +154,18 @@ export function createSoundBrowserPanel({
       { id: "kits", label: "Kits" },
       { id: "gm", label: "GM", title: "General MIDI soundfont instruments" },
       { id: "synth", label: "Synth" },
+      {
+        id: "wavetable",
+        label: "Wavetable",
+        title: "Wavetable synthesis samples",
+        dynamic: true,
+      },
+      {
+        id: "user",
+        label: "User",
+        title: "Your imported samples",
+        dynamic: true,
+      },
     ]) {
       const pill = document.createElement("button");
       pill.type = "button";
@@ -161,6 +176,7 @@ export function createSoundBrowserPanel({
       pill.setAttribute("role", "tab");
       pill.setAttribute("aria-selected", c.id === category ? "true" : "false");
       if (c.id === category) pill.classList.add("is-active");
+      if (c.dynamic) pill.classList.add("is-dynamic");
       pill.addEventListener("click", () => {
         category = c.id;
         for (const p of pillsEl.querySelectorAll(".sound-browser__pill")) {
@@ -209,7 +225,28 @@ export function createSoundBrowserPanel({
 
   function refresh() {
     allSounds = collectSounds(getSoundMap());
+    // Refresh user bank names and dynamic pill visibility.
+    getUserSamples()
+      .then((banks) => {
+        userBankNames = new Set(banks.map((b) => b.name));
+        _syncDynamicPills();
+      })
+      .catch(() => {});
+    _syncDynamicPills();
     if (mounted) render();
+  }
+
+  function _syncDynamicPills() {
+    if (!pillsEl) return;
+    const hasUser = userBankNames.size > 0;
+    const hasWavetable = allSounds.some((s) => s.name.startsWith("wt_"));
+    for (const pill of pillsEl.querySelectorAll(
+      ".sound-browser__pill.is-dynamic",
+    )) {
+      const id = pill.dataset.category;
+      if (id === "user") pill.hidden = !hasUser;
+      if (id === "wavetable") pill.hidden = !hasWavetable;
+    }
   }
 
   function setBufferText(text) {
@@ -249,12 +286,19 @@ export function createSoundBrowserPanel({
       return;
     }
     if (filtered.length === 0) {
-      const empty = el(
-        "div",
-        "sound-browser__empty",
-        query ? `no sounds match "${query}"` : "no sounds in this category",
-      );
-      listEl.appendChild(empty);
+      if (category === "user" && !query) {
+        const empty = el("div", "sound-browser__empty");
+        empty.innerHTML =
+          "No user samples imported yet.<br>Import samples in the <strong>Setup</strong> panel.";
+        listEl.appendChild(empty);
+      } else {
+        const empty = el(
+          "div",
+          "sound-browser__empty",
+          query ? `no sounds match "${query}"` : "no sounds in this category",
+        );
+        listEl.appendChild(empty);
+      }
       return;
     }
 
@@ -609,10 +653,25 @@ export function createSoundBrowserPanel({
         return s.name.startsWith("gm_");
       case "synth":
         return s.type === "synth";
+      case "wavetable":
+        return s.name.startsWith("wt_");
+      case "user":
+        return _isUserSound(s.name);
       case "all":
       default:
         return true;
     }
+  }
+
+  function _isUserSound(name) {
+    if (userBankNames.size === 0) return false;
+    // User-imported samples are registered under their bank name as prefix.
+    // Check if the sound name matches any user bank name or starts with
+    // one followed by an underscore (kit convention).
+    for (const bank of userBankNames) {
+      if (name === bank || name.startsWith(bank + "_")) return true;
+    }
+    return false;
   }
 }
 
@@ -683,6 +742,7 @@ function splitPrefix(name) {
 
 function inferType(name) {
   if (name.startsWith("gm_")) return "soundfont";
+  if (name.startsWith("wt_")) return "wavetable";
   // Strudel's built-in synth waveform names — the few sounds the soundMap
   // ships with `data.type === 'synth'` are exactly this set, but in case
   // a future bank skips the type field we still want to bucket them.
@@ -713,6 +773,8 @@ function bucketLabel(sound) {
       return "synth";
     case "soundfont":
       return "soundfonts";
+    case "wavetable":
+      return "wavetables";
     case "sample":
       return "samples";
     default:
@@ -795,4 +857,30 @@ function el(tag, className, text) {
   if (className) e.className = className;
   if (text != null) e.textContent = text;
   return e;
+}
+
+/**
+ * Categorize all sounds in the soundMap by type for summary display.
+ * Returns { total, kits, gm, synth, wavetable, user }.
+ */
+export function categorizeSounds(soundMapObj, userBankNameSet = new Set()) {
+  const result = { total: 0, kits: 0, gm: 0, synth: 0, wavetable: 0, user: 0 };
+  if (!soundMapObj || typeof soundMapObj !== "object") return result;
+  const sounds = collectSounds(soundMapObj);
+  result.total = sounds.length;
+  for (const s of sounds) {
+    if (s.name.startsWith("gm_")) result.gm++;
+    else if (s.name.startsWith("wt_")) result.wavetable++;
+    else if (s.type === "synth") result.synth++;
+    else if (_isInUserBanks(s.name, userBankNameSet)) result.user++;
+    else result.kits++; // kit sounds + remaining samples
+  }
+  return result;
+}
+
+function _isInUserBanks(name, bankNames) {
+  for (const bank of bankNames) {
+    if (name === bank || name.startsWith(bank + "_")) return true;
+  }
+  return false;
 }
