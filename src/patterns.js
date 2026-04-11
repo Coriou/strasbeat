@@ -107,17 +107,12 @@ export function patternNameExists(name, patterns, store) {
  * Save a pattern (dev: /api/save, prod: store). Returns { ok, error? }.
  * On success in prod, also updates the store index and left rail.
  *
- * @param {string} code - Raw Strudel code (no export wrapper). Used for the
- *   editor and the store in prod.
- * @param {string} [fileContent] - Optional full file content for the disk
- *   write (dev only). Pass this when the caller has built an
- *   `export default \`...\`` wrapper (e.g. MIDI import). When omitted,
- *   `code` is written verbatim.
+ * `code` is always raw Strudel code (no export wrapper). The /api/save
+ * endpoint handles the `export default \`...\`` file wrapping in dev.
  */
 export async function saveNewPattern({
   name,
   code,
-  fileContent,
   store,
   patterns,
   leftRail,
@@ -130,7 +125,7 @@ export async function saveNewPattern({
     const res = await fetch("/api/save", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, code: fileContent ?? code }),
+      body: JSON.stringify({ name, code }),
     });
     if (!res.ok) {
       const msg = await res.text();

@@ -12,7 +12,25 @@
 // Using `import *` and falling back covers both paths.
 import * as _toneMidiNs from "@tonejs/midi";
 const Midi = _toneMidiNs.Midi ?? _toneMidiNs.default?.Midi;
-import { resolveGmInstrument, resolveGmDrum } from "./midi-gm.js";
+import { resolveGmInstrument, resolveGmDrum, GM_DRUM_MAP } from "./midi-gm.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drum-track heuristic
+// ─────────────────────────────────────────────────────────────────────────────
+// Many DAWs export drum patterns on channel 0 with program 0 ("acoustic grand
+// piano") rather than the GM-standard channel 10.  Detect this by checking
+// whether the overwhelming majority of note pitches land on known GM drum
+// keys — if they do, it's almost certainly a drum track regardless of channel.
+
+const GM_DRUM_PITCHES = new Set(Object.keys(GM_DRUM_MAP).map(Number));
+
+function looksLikeDrumTrack(notes) {
+  if (notes.length < 2) return false;
+  const distinct = new Set(notes.map((n) => n.midi));
+  const matchCount = [...distinct].filter((m) => GM_DRUM_PITCHES.has(m)).length;
+  // All distinct pitches must be known GM drum notes.
+  return matchCount === distinct.size;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. File adapter: @tonejs/midi → TranslationInput
@@ -38,7 +56,10 @@ export function parseMidiFile(buffer) {
       : [4, 4];
 
   const tracks = midi.tracks.map((track, i) => {
-    const isDrum = track.instrument.percussion || track.channel === 9;
+    const isDrum =
+      track.instrument.percussion ||
+      track.channel === 9 ||
+      looksLikeDrumTrack(track.notes);
     return {
       name: track.name || `Track ${i + 1}`,
       channel: track.channel,

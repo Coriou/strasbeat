@@ -282,7 +282,6 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 
   // Song metadata.
   const [tsNum, tsDenom] = input.timeSignature;
-  const nonEmptyCount = input.tracks.filter((t) => t.notes.length > 0).length;
   const totalNotes = input.tracks.reduce((s, t) => s + t.notes.length, 0);
 
   // Run analysis to get bar count and grid.
@@ -469,13 +468,12 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
     }
 
     // Save via the shared saveNewPattern path.
-    // result.patternBody = raw Strudel code (no export wrapper) → editor/store
-    // result.code        = full file with export default `…` wrapper → disk
+    // result.patternBody = raw Strudel code (no export wrapper).
+    // /api/save handles the export default `…` file wrapper on disk.
     ctx.flushToStore();
     const saveResult = await saveNewPattern({
       name: result.name,
       code: result.patternBody,
-      fileContent: result.code,
       store: ctx.store,
       patterns: ctx.patterns,
       leftRail: ctx.leftRail,
