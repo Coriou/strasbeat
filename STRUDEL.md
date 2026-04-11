@@ -190,6 +190,10 @@ preset table, and the style merge.
 > The function detects the failure mode and warns, but it's cleaner to
 > just type `'`.
 >
+> This rule is specific to helper APIs that need literal JS strings.
+> Ordinary Strudel mini-notation inside `note("…")`, `s("…")`, and similar
+> calls should continue using double quotes.
+>
 > **Escape hatch**: if you must use double quotes in a region, wrap it with
 > `/* mini-off */` … `/* mini-on */` comments to disable the transpiler
 > rewrite for that block.

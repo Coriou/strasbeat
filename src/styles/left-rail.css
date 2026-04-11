@@ -55,6 +55,29 @@
   height: 14px;
 }
 
+.left-rail__import {
+  width: 24px;
+  height: 24px;
+  color: var(--text-mut);
+  border-radius: var(--radius-sm);
+}
+.left-rail__import:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.left-rail__import:active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.left-rail__import:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.left-rail__import svg {
+  width: 14px;
+  height: 14px;
+}
+
 .left-rail__search {
   position: relative;
   margin: 0 var(--space-3) var(--space-3);
@@ -276,7 +299,8 @@
 
 /* ─── Collapsed state ──────────────────────────────────────────────────── */
 .left-rail[data-collapsed="true"] .left-rail__title,
-.left-rail[data-collapsed="true"] .left-rail__plus {
+.left-rail[data-collapsed="true"] .left-rail__plus,
+.left-rail[data-collapsed="true"] .left-rail__import {
   display: none;
 }
 .left-rail[data-collapsed="true"] .left-rail__header {
@@ -395,6 +419,7 @@
   .left-rail__context-item,
   .left-rail__search-clear,
   .left-rail__plus,
+  .left-rail__import,
   .left-rail__more-btn,
   .left-rail__collapse-btn,
   .left-rail__dirty-dot,

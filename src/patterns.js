@@ -89,6 +89,84 @@ export function createAutosave({
   return { flushToStore, scheduleAutosave, lastDirtyState };
 }
 
+// ─── Pattern-name validation (shared by new-pattern, MIDI import, etc.) ──
+const PATTERN_NAME_RE = /^[a-z0-9_-]+$/i;
+
+/** Returns an error string, or null if the name is valid. */
+export function validatePatternName(name) {
+  if (!PATTERN_NAME_RE.test(name)) return "use only letters, numbers, - and _";
+  return null;
+}
+
+/** Returns true if `name` already exists (shipped or user-created). */
+export function patternNameExists(name, patterns, store) {
+  return name in patterns || !!store.get(name)?.isUserPattern;
+}
+
+/**
+ * Save a pattern (dev: /api/save, prod: store). Returns { ok, error? }.
+ * On success in prod, also updates the store index and left rail.
+ *
+ * @param {string} code - Raw Strudel code (no export wrapper). Used for the
+ *   editor and the store in prod.
+ * @param {string} [fileContent] - Optional full file content for the disk
+ *   write (dev only). Pass this when the caller has built an
+ *   `export default \`...\`` wrapper (e.g. MIDI import). When omitted,
+ *   `code` is written verbatim.
+ */
+export async function saveNewPattern({
+  name,
+  code,
+  fileContent,
+  store,
+  patterns,
+  leftRail,
+  setCurrentName,
+  editor,
+  transport,
+  isDev,
+}) {
+  if (isDev) {
+    const res = await fetch("/api/save", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, code: fileContent ?? code }),
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      transport.setStatus(`save failed: ${msg}`);
+      return { ok: false, error: msg };
+    }
+    transport.setStatus(`created "${name}" — HMR will reload`);
+    return { ok: true };
+  }
+  // Prod: store as user pattern.
+  try {
+    store.set(name, {
+      code,
+      modified: new Date().toISOString(),
+      isUserPattern: true,
+    });
+    const idx = store.getIndex();
+    idx.userPatterns = [...idx.userPatterns.filter((n) => n !== name), name];
+    idx.lastOpen = name;
+    store.setIndex(idx);
+  } catch (err) {
+    if (err?.name === "QuotaExceededError") {
+      transport.setStatus(
+        "\u26a0 couldn\u2019t save \u2014 browser storage full",
+      );
+      return { ok: false, error: "storage full" };
+    }
+    return { ok: false, error: String(err) };
+  }
+  leftRail.addUserPattern(name);
+  setCurrentName(name);
+  editor.setCode(code);
+  transport.setStatus(`created "${name}"`);
+  return { ok: true };
+}
+
 // ─── New pattern ("+") button ─────────────────────────────────────────────
 // In dev: writes to disk via /api/save, HMR reloads.
 // In prod: creates a user pattern in the store, appears in left rail.
@@ -111,50 +189,23 @@ export async function handleNewPatternClick(ctx) {
     placeholder: "letters, numbers, - and _",
     defaultValue: `untitled-${Date.now().toString(36)}`,
     confirmLabel: "Create",
-    validate: (v) =>
-      /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
+    validate: validatePatternName,
   });
   if (!name) return;
-  // Check both shipped patterns and user patterns.
-  if (name in patterns || store.get(name)?.isUserPattern) {
+  if (patternNameExists(name, patterns, store)) {
     transport.setStatus(`"${name}" already exists — pick another name`);
     return;
   }
   const code = `// ${name}\nsetcps(120/60/4)\n\nsound("bd ~ sd ~")\n`;
-  if (isDev) {
-    const res = await fetch("/api/save", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, code }),
-    });
-    if (!res.ok) {
-      transport.setStatus(`save failed: ${await res.text()}`);
-      return;
-    }
-    transport.setStatus(`created "${name}" — HMR will reload`);
-  } else {
-    // Prod: store as user pattern.
-    try {
-      store.set(name, {
-        code,
-        modified: new Date().toISOString(),
-        isUserPattern: true,
-      });
-      const idx = store.getIndex();
-      idx.userPatterns = [...idx.userPatterns.filter((n) => n !== name), name];
-      idx.lastOpen = name;
-      store.setIndex(idx);
-    } catch (err) {
-      if (err?.name === "QuotaExceededError") {
-        transport.setStatus(
-          "\u26a0 couldn\u2019t save \u2014 browser storage full",
-        );
-      }
-      return;
-    }
-    leftRail.addUserPattern(name);
-    setCurrentName(name);
-    editor.setCode(code);
-    transport.setStatus(`created "${name}"`);
-  }
+  await saveNewPattern({
+    name,
+    code,
+    store,
+    patterns,
+    leftRail,
+    setCurrentName,
+    editor,
+    transport,
+    isDev,
+  });
 }

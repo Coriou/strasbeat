@@ -544,7 +544,9 @@ device selection and monitoring.
 1. **`@strudel/midi` integration** — load the package (opt-in via
    Setup panel, Phase 2) and register it with `evalScope()` so
    `midi()` and `.midi(output?)` work in pattern code. This gives
-   strasbeat MIDI _output_ alongside its existing MIDI _input_.
+   strasbeat MIDI _output_ alongside its existing MIDI _input_. MIDI
+   file import and capture-to-pattern translation belong to
+   `16-midi-import.md`, not this scope.
 
 2. **MIDI output device selector** — UI for choosing which MIDI
    output device receives pattern events. Options:
@@ -581,6 +583,8 @@ device selection and monitoring.
 - Replacing the MIDI bridge's input path with `@strudel/midi`'s input.
   The bridge's trigger-and-decay model is strasbeat-specific and superior
   for live play. Keep both.
+- MIDI file import, MIDI seed-library ingestion, or MIDI-to-Strudel
+  code generation. Those belong to `16-midi-import.md`.
 - Latency compensation for MIDI/OSC output. Accept browser-native
   latency for now.
 
@@ -596,14 +600,11 @@ device selection and monitoring.
 
 ### Architecture notes
 
-- **Neither `@strudel/midi` nor `@strudel/osc` is currently
-  installed.** They are NOT transitive deps of any installed
-  package. Both must be added to `package.json` explicitly before
-  dynamic import will work. `@strudel/midi` also depends on
-  `webmidi` (Jean-Philippe Côté's Web MIDI library, ^3.0.0) which
-  will come as a transitive dep when `@strudel/midi` is installed.
-  They're loaded via dynamic `import()` in `user-setup.js` when
-  enabled.
+- **`@strudel/midi` and `@strudel/osc` are already present in
+  `package.json`, and `src/user-setup.js` already contains opt-in loader
+  entries for both.** The remaining work is runtime registration,
+  device/config UI, and validating the published package behavior in the
+  app's real browser path.
 - `@strudel/midi` registers `.midi()` via a **side-effect
   `Pattern.prototype.midi` mutation** on import — the import alone
   makes `.midi()` available on patterns without needing `evalScope()`.
@@ -612,12 +613,12 @@ device selection and monitoring.
   become globals. The default output device is configured via the
   `webmidi` library's `WebMidi.outputs` API (check upstream source
   at `strudel-source/packages/midi/util.mjs:getDevice()`).
-- **Important:** the upstream `@strudel/midi` source has a
-  workspace-relative import (`from '../superdough/helpers.mjs'`)
-  that only works inside the monorepo. The **published npm dist**
-  bundles this differently. Before writing any UI, do a spike:
-  `pnpm add @strudel/midi`, then `import('@strudel/midi')` in a
-  test script, and verify it loads without import errors.
+- **Important:** package installation alone is not proof that the runtime
+  path is healthy. A current Node ESM smoke test in this repo fails while
+  resolving the installed Strudel graph (`@kabelsalat/web` export mismatch
+  under `@strudel/core`). Treat that as a real packaging/runtime risk and
+  verify the browser-side dynamic import path before building UI on top of
+  it.
 - `@strudel/osc` similarly exports an `osc` function. It requires a
   running WebSocket bridge on the target machine. strasbeat's role is
   limited to loading the package and providing the target URL config.
@@ -627,15 +628,15 @@ device selection and monitoring.
 
 ### Files likely to change
 
-| Action | File                                                                                           |
-| ------ | ---------------------------------------------------------------------------------------------- |
-| Modify | `src/user-setup.js` — dynamic import of `@strudel/midi`, `@strudel/osc`; output device config  |
-| Modify | `src/ui/setup-panel.js` — MIDI output device selector, OSC target config                       |
-| Modify | `src/ui/midi-bar.js` — output device dropdown + activity indicator                             |
-| Modify | `src/main.js` — ensure evalScope receives the dynamically loaded modules                       |
-| Modify | `package.json` — add `@strudel/midi` and `@strudel/osc` to dependencies if not already present |
-| Create | `src/osc-config.js` — optional, if OSC config logic is non-trivial                             |
-| Modify | `src/styles/midi-bar.css` — output indicator styling                                           |
+| Action | File                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------ |
+| Modify | `src/user-setup.js` — extend the existing dynamic import entries with output-device / OSC config |
+| Modify | `src/ui/setup-panel.js` — MIDI output device selector, OSC target config                         |
+| Modify | `src/ui/midi-bar.js` — output device dropdown + activity indicator                               |
+| Modify | `src/main.js` — ensure evalScope receives the dynamically loaded modules                         |
+| Modify | `package.json` — only if version alignment is needed; both packages are already present          |
+| Create | `src/osc-config.js` — optional, if OSC config logic is non-trivial                               |
+| Modify | `src/styles/midi-bar.css` — output indicator styling                                             |
 
 ### Acceptance criteria
 

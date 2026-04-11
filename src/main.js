@@ -44,7 +44,12 @@ import { runExport, prewarmSounds, isExportRunning } from "./export.js";
 import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate } from "./editor-actions.js"; // prettier-ignore
 import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
-import { discoverPatterns, computeDirtySet, getUserPatternNames, createAutosave, handleNewPatternClick } from "./patterns.js"; // prettier-ignore
+import { discoverPatterns, computeDirtySet, getUserPatternNames, createAutosave, handleNewPatternClick, validatePatternName, patternNameExists, saveNewPattern } from "./patterns.js"; // prettier-ignore
+import {
+  showMidiImportDialog,
+  hasMidiFile,
+  getMidiFile,
+} from "./ui/midi-import-dialog.js";
 import { readStoredCmSettingsFromLocalStorage, applyInitialSettings, dispatchEditorExtensions, THEME_OPTIONS, applyPanelSetting } from "./editor-setup.js"; // prettier-ignore
 import { formatCommand } from "./editor/format.js";
 import {
@@ -444,6 +449,9 @@ const leftRail = mountLeftRail({
       isDev: import.meta.env.DEV,
     });
   },
+  onImportMidi() {
+    openMidiImportDialog();
+  },
   onRevert(name) {
     store.delete(name);
     lastDirtyState.delete(name);
@@ -532,6 +540,48 @@ editor.editor.dispatch({
 
 window.addEventListener("beforeunload", () => {
   flushToStore();
+});
+
+// ─── MIDI import dialog helper ───────────────────────────────────────────
+function openMidiImportDialog(file) {
+  showMidiImportDialog({
+    store,
+    patterns,
+    leftRail,
+    editor,
+    transport,
+    setCurrentName,
+    flushToStore,
+    isDev: import.meta.env.DEV,
+    file,
+  });
+}
+
+// ─── MIDI file drag-and-drop on the editor surface ───────────────────────
+editorRoot.addEventListener("dragover", (e) => {
+  // During dragover, browsers restrict file access — we can only check
+  // whether *any* files are being dragged, not their names. Show the cue
+  // optimistically for any file drag; the drop handler filters by extension.
+  if (e.dataTransfer?.types?.includes("Files")) {
+    e.preventDefault();
+    e.stopPropagation();
+    editorRoot.classList.add("editor--midi-dragover");
+  }
+});
+editorRoot.addEventListener("dragleave", (e) => {
+  if (e.target === editorRoot || !editorRoot.contains(e.relatedTarget)) {
+    editorRoot.classList.remove("editor--midi-dragover");
+  }
+});
+editorRoot.addEventListener("drop", (e) => {
+  editorRoot.classList.remove("editor--midi-dragover");
+  const file = getMidiFile(e.dataTransfer);
+  if (file) {
+    e.preventDefault();
+    e.stopPropagation();
+    openMidiImportDialog(file);
+  }
+  // Non-MIDI files fall through to the browser/editor's normal behavior.
 });
 
 // ─── Top bar wiring ──────────────────────────────────────────────────────

@@ -1,0 +1,228 @@
+/*
+ * MIDI import dialog — styles for src/ui/midi-import-dialog.js.
+ * Extends the modal pattern from modal.css. See design/SYSTEM.md §5–§9.
+ */
+
+.midi-import {
+  min-width: 420px;
+  max-width: min(560px, calc(100vw - var(--space-6)));
+}
+
+/* ─── Drop zone (State 1) ─────────────────────────────────────────────── */
+
+.midi-import__drop-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 140px;
+  padding: var(--space-5);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    border-color var(--t-hover),
+    background var(--t-hover);
+}
+
+.midi-import__drop-zone:hover,
+.midi-import__drop-zone--active {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.midi-import__drop-icon {
+  color: var(--text-dim);
+  transition: color var(--t-hover);
+}
+
+.midi-import__drop-zone:hover .midi-import__drop-icon,
+.midi-import__drop-zone--active .midi-import__drop-icon {
+  color: var(--accent);
+}
+
+.midi-import__drop-text {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+  text-align: center;
+}
+
+.midi-import__drop-text code {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  color: var(--text);
+}
+
+.midi-import__file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  /* Let click-through work but keep it accessible. */
+  pointer-events: none;
+}
+
+/* ─── Error state ─────────────────────────────────────────────────────── */
+
+.midi-import__error {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--rec);
+  padding: var(--space-3) 0;
+}
+
+/* ─── Track selection (State 2) ────────────────────────────────────────── */
+
+.midi-import__name-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.midi-import__label {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: 600;
+  color: var(--text-mut);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.midi-import__name-input {
+  font-family: var(--font-mono);
+}
+
+.midi-import__name-error {
+  min-height: var(--lh-xs);
+}
+
+.midi-import__meta {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+}
+
+.midi-import__section-label {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: 600;
+  color: var(--text-mut);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--space-1);
+}
+
+/* ─── Track rows ──────────────────────────────────────────────────────── */
+
+.midi-import__tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.midi-import__track-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  transition: background var(--t-hover);
+}
+
+.midi-import__track-row:hover {
+  background: var(--surface-3);
+}
+
+.midi-import__track-row--disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.midi-import__track-row--disabled:hover {
+  background: transparent;
+}
+
+.midi-import__track-cb {
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.midi-import__track-info {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.midi-import__track-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.midi-import__track-details {
+  color: var(--text-mut);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.midi-import__badge {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.midi-import__badge--empty {
+  font-family: var(--font-sans);
+  font-style: italic;
+}
+
+/* ─── Grid selector ───────────────────────────────────────────────────── */
+
+.midi-import__grid-section {
+  margin-top: var(--space-1);
+}
+
+.midi-import__grid-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.midi-import__grid-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.midi-import__grid-option input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+/* ─── Warnings ────────────────────────────────────────────────────────── */
+
+.midi-import__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.midi-import__warning {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: oklch(0.78 0.14 70); /* amber, distinct from rec (red) */
+  padding: var(--space-1) 0;
+}

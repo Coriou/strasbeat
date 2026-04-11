@@ -74,6 +74,9 @@ importers:
       '@strudel/xen':
         specifier: ^1.2.6
         version: 1.2.6
+      '@tonejs/midi':
+        specifier: ^2.0.28
+        version: 2.0.28
       lucide:
         specifier: ^1.8.0
         version: 1.8.0
@@ -745,6 +748,9 @@ packages:
   '@tonaljs/tonal@4.10.0':
     resolution: {integrity: sha512-F2T9Fiy+j0MVped89kCrX1XF68mQOLUnny4pDOHrIf+OkrjtLQOzzaSOrX1tx0o72WUwQm1knz6D1d57b9X1HA==}
 
+  '@tonejs/midi@2.0.28':
+    resolution: {integrity: sha512-RII6YpInPsOZ5t3Si/20QKpNqB1lZ2OCFJSOzJxz38YdY/3zqDr3uaml4JuCWkdixuPqP1/TBnXzhQ39csyoVg==}
+
   '@types/esrecurse@4.3.1':
     resolution: {integrity: sha512-xJBAbDifo5hpffDBuHl0Y8ywswbiAp/Wi7Y/GtAgSlZyIABppyurxVueOPE8LUQOxdlgi6Zqce7uoEpqNTeiUw==}
 
@@ -773,6 +779,9 @@ packages:
   ansi-styles@4.3.0:
     resolution: {integrity: sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==}
     engines: {node: '>=8'}
+
+  array-flatten@3.0.0:
+    resolution: {integrity: sha512-zPMVc3ZYlGLNk4mpK1NzP2wg0ml9t7fUgDsayR5Y5rSzxQilzR9FGu/EH2jQOcKSAeAfWeylyW8juy3OkWRvNA==}
 
   automation-events@7.1.17:
     resolution: {integrity: sha512-L9MTEpShvoOrFETgB9PMQ4cHq1Foe3p53QFKrefGsgSzlRBORzRi0cC81tMYAgN71W30yYEt5cDZnWZvJKjLoQ==}
@@ -1168,6 +1177,9 @@ packages:
   meyda@5.6.3:
     resolution: {integrity: sha512-fAdwfzIi1WDoL0idUQvCD7dZ7EN74FYH83G+jZQO3Nr9yOEBtzFvcMg2KLdLlu6psSP8XFlO0kYynG5o/E681Q==}
     hasBin: true
+
+  midi-file@1.2.4:
+    resolution: {integrity: sha512-B5SnBC6i2bwJIXTY9MElIydJwAmnKx+r5eJ1jknTLetzLflEl0GWveuBB6ACrQpecSRkOB6fhTx1PwXk2BVxnA==}
 
   minimatch@10.2.5:
     resolution: {integrity: sha512-MULkVLfKGYDFYejP07QOurDLLQpcjk7Fw+7jXS2R2czRQzR56yHRveU5NDJEOviH+hETZKSkIk5c+T23GjFUMg==}
@@ -2244,6 +2256,11 @@ snapshots:
       '@tonaljs/scale-type': 4.9.2
       '@tonaljs/time-signature': 4.9.0
 
+  '@tonejs/midi@2.0.28':
+    dependencies:
+      array-flatten: 3.0.0
+      midi-file: 1.2.4
+
   '@types/esrecurse@4.3.1': {}
 
   '@types/estree@1.0.8': {}
@@ -2268,6 +2285,8 @@ snapshots:
   ansi-styles@4.3.0:
     dependencies:
       color-convert: 2.0.1
+
+  array-flatten@3.0.0: {}
 
   automation-events@7.1.17:
     dependencies:
@@ -2674,6 +2693,8 @@ snapshots:
     transitivePeerDependencies:
       - rollup
       - supports-color
+
+  midi-file@1.2.4: {}
 
   minimatch@10.2.5:
     dependencies:

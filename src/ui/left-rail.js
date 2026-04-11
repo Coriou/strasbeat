@@ -54,6 +54,7 @@ export function mount({
   currentName = null,
   onSelect = () => {},
   onCreate = () => {},
+  onImportMidi = () => {},
   onRevert = () => {},
   onDelete = () => {},
 }) {
@@ -139,6 +140,14 @@ export function mount({
   plusBtn.appendChild(makeIcon("plus"));
   plusBtn.addEventListener("click", () => onCreate());
   header.appendChild(plusBtn);
+
+  const importBtn = el("button", "btn btn--icon left-rail__import");
+  importBtn.type = "button";
+  importBtn.title = "Import MIDI file";
+  importBtn.setAttribute("aria-label", "Import MIDI");
+  importBtn.appendChild(makeIcon("file-music", { size: 14 }));
+  importBtn.addEventListener("click", () => onImportMidi());
+  header.appendChild(importBtn);
   container.appendChild(header);
 
   // Search input
@@ -509,4 +518,3 @@ function el(tag, className, text) {
   if (text != null) e.textContent = text;
   return e;
 }
-

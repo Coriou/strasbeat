@@ -13,6 +13,12 @@
   overflow: hidden;
 }
 
+/* Visual cue when a MIDI file is being dragged onto the editor. */
+.editor--midi-dragover {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
 .editor .cm-editor {
   height: 100%;
   /* font-family + font-size are NOT set here — StrudelMirror's
