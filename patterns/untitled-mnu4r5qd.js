@@ -34,4 +34,5 @@ bass: stack(
   .sustain(0.75)
   .pan(sine.fast(2))
   .rev()
+
 `;
