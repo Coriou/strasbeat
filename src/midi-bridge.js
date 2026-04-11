@@ -16,6 +16,12 @@
 //     producing a real version-controlled patterns/*.js file.
 
 import { superdough, getAudioContext, getSound } from "@strudel/webaudio";
+import {
+  captureBufferToTranslationInput,
+  analyzeTranslationInput,
+  generatePatternDraft,
+  gridSubdivisionLabel,
+} from "./midi-to-strudel.js";
 
 // ─── Presets ──────────────────────────────────────────────────────────────
 // Each preset is the value object passed to superdough() per noteon, minus
@@ -534,12 +540,11 @@ export class MidiBridge {
 
   /**
    * Convert the captured events into a usable Strudel pattern string.
-   * Algorithm (deliberately simple, easy to refine in the editor afterward):
-   *   1. Group events that fall within `chordWindow` of each other into chords.
-   *   2. Each group becomes one step in a mini-notation pattern.
-   *   3. Notes are emitted as MIDI numbers (round-trip safe).
-   *   4. Wrap in `note("…").sound("<preset>")` so it plays the same sound the
-   *      user was hearing while they captured.
+   *
+   * Uses the shared translation pipeline (captureBufferToTranslationInput →
+   * analyzeTranslationInput → generatePatternDraft) so capture output gets
+   * the same quality as file import: note names, bar structure, quantization,
+   * repetition detection, and velocity preservation.
    */
   buildPatternFromCapture() {
     if (this.captureBuffer.length === 0) return null;
@@ -547,27 +552,25 @@ export class MidiBridge {
     const preset = presets[presetKey];
     const sound = preset?.s ?? "sawtooth";
 
-    const chordWindow = 0.06; // seconds — anything closer than this = chord
-    const groups = [];
-    for (const ev of this.captureBuffer) {
-      const last = groups[groups.length - 1];
-      if (last && ev.time - last.time < chordWindow) {
-        last.notes.push(ev.midi);
-      } else {
-        groups.push({ time: ev.time, notes: [ev.midi] });
-      }
-    }
-    const steps = groups.map((g) =>
-      g.notes.length === 1 ? String(g.notes[0]) : `[${g.notes.join(",")}]`,
+    const input = captureBufferToTranslationInput(this.captureBuffer, {
+      presetName: presetKey,
+    });
+    const analysis = analyzeTranslationInput(input);
+    const body = generatePatternDraft(analysis, {
+      soundOverrides: { 0: sound },
+    });
+
+    const noteCount = this.captureBuffer.length;
+    const gridLabel = gridSubdivisionLabel(
+      analysis.gridSubdivision,
+      analysis.timeSignature,
     );
+    const header = [
+      `// captured live from MIDI · preset "${presetKey}" · ${noteCount} note${noteCount === 1 ? "" : "s"}`,
+      `// ${gridLabel} grid · ${analysis.totalBars} bar${analysis.totalBars === 1 ? "" : "s"} at ${analysis.bpm} BPM (estimated)`,
+      `// edit me — try .slow(2), .fast(2), add .gain(), or change the sound`,
+    ];
 
-    const header = `// captured live from MIDI · ${groups.length} step${
-      groups.length === 1 ? "" : "s"
-    } · preset "${presetKey}"
-// edit me — try .slow(2), .fast(2), add .gain(), or change the sound
-
-`;
-    const body = `note("${steps.join(" ")}").sound("${sound}")\n`;
-    return header + body;
+    return header.join("\n") + "\n\n" + body + "\n";
   }
 }

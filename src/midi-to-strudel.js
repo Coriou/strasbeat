@@ -434,6 +434,141 @@ export function midiFileToPattern(buffer, options = {}) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 4. Capture adapter: live MIDI buffer → TranslationInput
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Estimate BPM from an array of capture events by analyzing the median
+ * inter-onset interval (IOI).
+ *
+ * Assumes the median IOI corresponds to an 8th note. Falls back to
+ * quarter-note or 16th-note interpretation if that gives an out-of-range
+ * BPM. Returns 120 if estimation fails.
+ *
+ * @param {Array<{ time: number }>} events — time in seconds from capture start
+ * @returns {number}
+ */
+export function estimateBpmFromCapture(events) {
+  if (events.length < 2) return 120;
+
+  // Group near-simultaneous events (chords) and compute IOIs between onsets
+  const chordWindow = 0.06;
+  const onsets = [events[0].time];
+  for (let i = 1; i < events.length; i++) {
+    if (events[i].time - events[i - 1].time > chordWindow) {
+      onsets.push(events[i].time);
+    }
+  }
+
+  if (onsets.length < 2) return 120;
+
+  const iois = [];
+  for (let i = 1; i < onsets.length; i++) {
+    iois.push(onsets[i] - onsets[i - 1]);
+  }
+
+  // Median IOI
+  const sorted = iois.slice().sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+
+  // Try as 8th note: one 8th = 30/BPM seconds → BPM = 30/median
+  const bpm8th = 30 / median;
+  if (bpm8th >= 60 && bpm8th <= 200) return Math.round(bpm8th);
+
+  // Try as quarter note: BPM = 60/median
+  const bpmQtr = 60 / median;
+  if (bpmQtr >= 60 && bpmQtr <= 200) return Math.round(bpmQtr);
+
+  // Try as 16th note: BPM = 15/median
+  const bpm16th = 15 / median;
+  if (bpm16th >= 60 && bpm16th <= 200) return Math.round(bpm16th);
+
+  return 120;
+}
+
+/**
+ * Convert a live MIDI capture buffer into a TranslationInput suitable for
+ * the shared analysis + codegen pipeline.
+ *
+ * The capture buffer has no noteoff events (the bridge uses trigger-and-decay),
+ * so duration is inferred from the gap to the next onset, with a minimum floor.
+ *
+ * @param {Array<{ midi: number, velocity: number, time: number }>} events
+ * @param {{ presetName?: string }} [options]
+ * @returns {TranslationInput}
+ */
+export function captureBufferToTranslationInput(events, options = {}) {
+  const bpm = estimateBpmFromCapture(events);
+
+  // Group near-simultaneous events into chords (same window as the bridge)
+  const chordWindow = 0.06;
+  const groups = [];
+  for (const ev of events) {
+    const last = groups[groups.length - 1];
+    if (last && ev.time - last[0].time < chordWindow) {
+      last.push(ev);
+    } else {
+      groups.push([ev]);
+    }
+  }
+
+  // Compute median IOI for fallback duration (last note, isolated notes)
+  let fallbackDuration = 0.25; // sensible default
+  if (groups.length >= 2) {
+    const iois = [];
+    for (let i = 1; i < groups.length; i++) {
+      iois.push(groups[i][0].time - groups[i - 1][0].time);
+    }
+    iois.sort((a, b) => a - b);
+    fallbackDuration = iois[Math.floor(iois.length / 2)];
+  }
+
+  // Build notes with inferred durations
+  const MIN_DURATION = 0.05;
+  const notes = [];
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    const onset = group[0].time;
+    const nextOnset = i + 1 < groups.length ? groups[i + 1][0].time : null;
+    const duration =
+      nextOnset != null
+        ? Math.max(MIN_DURATION, nextOnset - onset)
+        : fallbackDuration;
+
+    for (const ev of group) {
+      notes.push({
+        name: midiToName(ev.midi),
+        midi: ev.midi,
+        time: ev.time,
+        duration,
+        velocity: ev.velocity,
+      });
+    }
+  }
+
+  return {
+    sourceName: options.presetName
+      ? `captured-${options.presetName}`
+      : "captured",
+    bpm,
+    timeSignature: /** @type {[number, number]} */ ([4, 4]),
+    ppq: 480,
+    hasTempoChanges: false,
+    hasTimeSigChanges: false,
+    tracks: [
+      {
+        name: options.presetName ?? "capture",
+        channel: 0,
+        isDrum: false,
+        gmInstrument: "acoustic grand piano",
+        gmProgram: 0,
+        notes,
+      },
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -900,10 +1035,10 @@ const NOTE_NAMES = [
   "B",
 ];
 
-function midiToName(midi) {
+export function midiToName(midi) {
   const octave = Math.floor(midi / 12) - 1;
   const note = NOTE_NAMES[midi % 12];
-  return `${note}${octave}`;
+  return `${note}${octave}`.toLowerCase();
 }
 
 function sanitizeIdentifier(name, usedIdentifiers) {

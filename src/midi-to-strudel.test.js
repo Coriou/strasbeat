@@ -16,6 +16,9 @@ import {
   analyzeTranslationInput,
   generatePatternDraft,
   midiFileToPattern,
+  estimateBpmFromCapture,
+  captureBufferToTranslationInput,
+  midiToName,
 } from "./midi-to-strudel.js";
 
 import {
@@ -1519,6 +1522,274 @@ describe("sound overrides", () => {
     assert.ok(
       result.patternBody.includes('.s("gm_epiano2")'),
       `Expected override in patternBody, got snippet: ${result.patternBody.slice(0, 200)}`,
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// midiToName
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("midiToName", () => {
+  test("converts middle C", () => {
+    assert.equal(midiToName(60), "c4");
+  });
+
+  test("converts sharps and flats", () => {
+    assert.equal(midiToName(61), "c#4");
+    assert.equal(midiToName(63), "eb4");
+    assert.equal(midiToName(66), "f#4");
+    assert.equal(midiToName(70), "bb4");
+  });
+
+  test("handles octave boundaries", () => {
+    assert.equal(midiToName(0), "c-1");
+    assert.equal(midiToName(12), "c0");
+    assert.equal(midiToName(127), "g9");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Capture adapter
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("estimateBpmFromCapture", () => {
+  test("returns 120 for fewer than 2 events", () => {
+    assert.equal(estimateBpmFromCapture([]), 120);
+    assert.equal(estimateBpmFromCapture([{ time: 0 }]), 120);
+  });
+
+  test("estimates 120 BPM from 8th-note intervals (0.25s)", () => {
+    const events = Array.from({ length: 9 }, (_, i) => ({ time: i * 0.25 }));
+    assert.equal(estimateBpmFromCapture(events), 120);
+  });
+
+  test("estimates 100 BPM from 8th-note intervals (0.3s)", () => {
+    const events = Array.from({ length: 9 }, (_, i) => ({ time: i * 0.3 }));
+    assert.equal(estimateBpmFromCapture(events), 100);
+  });
+
+  test("estimates BPM from quarter-note intervals when 8th is out of range", () => {
+    // 0.4s gaps → 8th-note interpretation gives 75 BPM (in range), so it uses that
+    // 0.8s gaps → 8th gives 37.5 (too slow), quarter gives 75
+    const events = Array.from({ length: 5 }, (_, i) => ({ time: i * 0.8 }));
+    assert.equal(estimateBpmFromCapture(events), 75);
+  });
+
+  test("ignores chord events (near-simultaneous)", () => {
+    // Main notes at 0.25s apart (120 BPM 8th notes) with chord stacking
+    const events = [
+      { time: 0 },
+      { time: 0.02 }, // chord
+      { time: 0.25 },
+      { time: 0.27 }, // chord
+      { time: 0.5 },
+      { time: 0.52 }, // chord
+      { time: 0.75 },
+      { time: 1.0 },
+    ];
+    assert.equal(estimateBpmFromCapture(events), 120);
+  });
+
+  test("falls back to 120 for very fast or very slow events", () => {
+    // 0.01s gaps → all interpretations > 200
+    const fast = Array.from({ length: 5 }, (_, i) => ({ time: i * 0.01 }));
+    assert.equal(estimateBpmFromCapture(fast), 120);
+  });
+});
+
+describe("captureBufferToTranslationInput", () => {
+  test("returns valid TranslationInput for simple sequence", () => {
+    const events = [
+      { midi: 60, velocity: 0.8, time: 0 },
+      { midi: 64, velocity: 0.7, time: 0.25 },
+      { midi: 67, velocity: 0.9, time: 0.5 },
+      { midi: 72, velocity: 0.6, time: 0.75 },
+    ];
+    const input = captureBufferToTranslationInput(events);
+
+    assert.equal(input.tracks.length, 1);
+    assert.equal(input.tracks[0].isDrum, false);
+    assert.equal(input.tracks[0].notes.length, 4);
+    assert.deepStrictEqual(input.timeSignature, [4, 4]);
+    assert.equal(input.hasTempoChanges, false);
+    assert.equal(input.hasTimeSigChanges, false);
+  });
+
+  test("uses note names instead of MIDI numbers", () => {
+    const events = [
+      { midi: 60, velocity: 0.8, time: 0 },
+      { midi: 64, velocity: 0.7, time: 0.5 },
+    ];
+    const input = captureBufferToTranslationInput(events);
+
+    assert.equal(input.tracks[0].notes[0].name, "c4");
+    assert.equal(input.tracks[0].notes[1].name, "e4");
+  });
+
+  test("infers duration from gap to next note", () => {
+    const events = [
+      { midi: 60, velocity: 0.8, time: 0 },
+      { midi: 64, velocity: 0.7, time: 0.3 },
+      { midi: 67, velocity: 0.9, time: 0.8 },
+    ];
+    const input = captureBufferToTranslationInput(events);
+    const notes = input.tracks[0].notes;
+
+    assert.equal(notes[0].duration, 0.3);
+    assert.equal(notes[1].duration, 0.5);
+    // Last note gets fallback duration (median IOI)
+    assert.ok(notes[2].duration > 0);
+  });
+
+  test("groups near-simultaneous events as chords", () => {
+    const events = [
+      { midi: 60, velocity: 0.8, time: 0 },
+      { midi: 64, velocity: 0.7, time: 0.02 }, // chord with previous
+      { midi: 67, velocity: 0.9, time: 0.5 },
+    ];
+    const input = captureBufferToTranslationInput(events);
+    const notes = input.tracks[0].notes;
+
+    // Both chord notes share the same duration (gap to next group)
+    assert.equal(notes[0].duration, 0.5);
+    assert.equal(notes[1].duration, 0.5);
+  });
+
+  test("preserves velocity values", () => {
+    const events = [
+      { midi: 60, velocity: 0.4, time: 0 },
+      { midi: 64, velocity: 0.9, time: 0.25 },
+    ];
+    const input = captureBufferToTranslationInput(events);
+
+    assert.equal(input.tracks[0].notes[0].velocity, 0.4);
+    assert.equal(input.tracks[0].notes[1].velocity, 0.9);
+  });
+
+  test("passes presetName into track and sourceName", () => {
+    const events = [{ midi: 60, velocity: 0.8, time: 0 }];
+    const input = captureBufferToTranslationInput(events, {
+      presetName: "piano",
+    });
+
+    assert.equal(input.sourceName, "captured-piano");
+    assert.equal(input.tracks[0].name, "piano");
+  });
+
+  test("estimates BPM and produces valid analysis", () => {
+    // 8 notes at 0.25s intervals → 120 BPM 8th notes
+    const events = Array.from({ length: 8 }, (_, i) => ({
+      midi: 60 + (i % 4),
+      velocity: 0.8,
+      time: i * 0.25,
+    }));
+    const input = captureBufferToTranslationInput(events);
+    assert.equal(input.bpm, 120);
+
+    const analysis = analyzeTranslationInput(input);
+    assert.equal(analysis.bpm, 120);
+    assert.ok(analysis.tracks.length === 1);
+    assert.ok(analysis.totalBars >= 1);
+  });
+
+  test("full pipeline produces valid pattern code", () => {
+    // C major arpeggio, 8th notes at 120 BPM
+    const events = [
+      { midi: 60, velocity: 0.8, time: 0 },
+      { midi: 64, velocity: 0.7, time: 0.25 },
+      { midi: 67, velocity: 0.9, time: 0.5 },
+      { midi: 72, velocity: 0.8, time: 0.75 },
+      { midi: 60, velocity: 0.8, time: 1.0 },
+      { midi: 64, velocity: 0.7, time: 1.25 },
+      { midi: 67, velocity: 0.9, time: 1.5 },
+      { midi: 72, velocity: 0.8, time: 1.75 },
+    ];
+    const input = captureBufferToTranslationInput(events, {
+      sound: "gm_piano",
+      presetName: "piano",
+    });
+    const analysis = analyzeTranslationInput(input);
+    const code = generatePatternDraft(analysis, {
+      soundOverrides: { 0: "gm_piano" },
+    });
+
+    // Should use note names, not MIDI numbers
+    assert.ok(code.includes("c4"), `Expected c4 in output: ${code}`);
+    assert.ok(!code.includes(" 60"), `Expected no MIDI number 60 in output: ${code}`);
+
+    // Should have setcpm
+    assert.ok(code.includes("setcpm("), `Expected setcpm in output: ${code}`);
+
+    // Should use the sound override
+    assert.ok(
+      code.includes('.s("gm_piano")'),
+      `Expected .s("gm_piano") in output: ${code}`,
+    );
+
+    // Should have note() call (melodic track)
+    assert.ok(code.includes("note("), `Expected note() in output: ${code}`);
+  });
+
+  test("repetition detection works on repeated capture phrases", () => {
+    // Two identical bars of C-E-G-C at 120 BPM
+    const bar = [
+      { midi: 60, velocity: 0.8 },
+      { midi: 64, velocity: 0.8 },
+      { midi: 67, velocity: 0.8 },
+      { midi: 72, velocity: 0.8 },
+    ];
+    const events = [];
+    for (let rep = 0; rep < 4; rep++) {
+      for (let i = 0; i < bar.length; i++) {
+        events.push({
+          midi: bar[i].midi,
+          velocity: bar[i].velocity,
+          time: rep * 1.0 + i * 0.25,
+        });
+      }
+    }
+    const input = captureBufferToTranslationInput(events);
+    const analysis = analyzeTranslationInput(input);
+    const code = generatePatternDraft(analysis);
+
+    // With 4 identical bars, repetition detection should fire — look for const
+    assert.ok(
+      code.includes("const A"),
+      `Expected repetition variable in output: ${code}`,
+    );
+  });
+
+  test("single note capture produces valid output", () => {
+    const events = [{ midi: 60, velocity: 0.8, time: 0 }];
+    const input = captureBufferToTranslationInput(events);
+    const analysis = analyzeTranslationInput(input);
+    const code = generatePatternDraft(analysis);
+
+    assert.ok(code.includes("c4"), `Expected c4: ${code}`);
+    assert.ok(code.includes("setcpm("), `Expected setcpm: ${code}`);
+  });
+
+  test("varying velocity is preserved through pipeline", () => {
+    const events = [
+      { midi: 60, velocity: 0.3, time: 0 },
+      { midi: 64, velocity: 0.9, time: 0.25 },
+      { midi: 60, velocity: 0.3, time: 0.5 },
+      { midi: 64, velocity: 0.9, time: 0.75 },
+    ];
+    const input = captureBufferToTranslationInput(events);
+    const analysis = analyzeTranslationInput(input);
+
+    // The track should detect velocity variation
+    assert.ok(
+      analysis.tracks[0].hasVelocityVariation,
+      "Expected velocity variation to be detected",
+    );
+
+    const code = generatePatternDraft(analysis, { preserveVelocity: true });
+    assert.ok(
+      code.includes(".velocity("),
+      `Expected .velocity() in output: ${code}`,
     );
   });
 });
