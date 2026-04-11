@@ -1357,6 +1357,127 @@ midi.start();
 // Capture button lives inside the MIDI bar now; find it there.
 const captureBtn = midiBar.getCaptureButton();
 
+// ─── Capture preview modal ───────────────────────────────────────────────
+// Shows generated pattern code with Play/Save/Discard buttons and a
+// quantization grid selector. Returns { code } on save, null on discard.
+function showCapturePreviewModal({ initialCode, onGridChange, onPlay }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Capture preview");
+
+    const dialog = document.createElement("div");
+    dialog.className = "modal capture-preview";
+    overlay.appendChild(dialog);
+
+    const titleEl = document.createElement("div");
+    titleEl.className = "modal__title";
+    titleEl.textContent = "Capture preview";
+    dialog.appendChild(titleEl);
+
+    // Grid selector
+    const gridSection = document.createElement("div");
+    gridSection.className = "capture-preview__grid";
+    const gridLabel = document.createElement("span");
+    gridLabel.className = "capture-preview__grid-label";
+    gridLabel.textContent = "Quantize:";
+    gridSection.appendChild(gridLabel);
+
+    const GRID_OPTIONS = [
+      { value: "", label: "Auto" },
+      { value: "4", label: "1/4" },
+      { value: "8", label: "1/8" },
+      { value: "16", label: "1/16" },
+    ];
+    let currentCode = initialCode;
+
+    for (const opt of GRID_OPTIONS) {
+      const radioLabel = document.createElement("label");
+      radioLabel.className = "capture-preview__grid-option";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "capture-grid";
+      radio.value = opt.value;
+      radio.checked = opt.value === "";
+      radio.addEventListener("change", () => {
+        const grid = radio.value ? Number(radio.value) : undefined;
+        const newCode = onGridChange(grid);
+        if (newCode) {
+          currentCode = newCode;
+          codeEl.textContent = currentCode;
+        }
+      });
+      radioLabel.appendChild(radio);
+      radioLabel.appendChild(document.createTextNode(" " + opt.label));
+      gridSection.appendChild(radioLabel);
+    }
+    dialog.appendChild(gridSection);
+
+    // Code preview
+    const codeWrap = document.createElement("div");
+    codeWrap.className = "capture-preview__code-wrap";
+    const codeEl = document.createElement("pre");
+    codeEl.className = "capture-preview__code";
+    codeEl.textContent = currentCode;
+    codeWrap.appendChild(codeEl);
+    dialog.appendChild(codeWrap);
+
+    // Actions
+    const actions = document.createElement("div");
+    actions.className = "modal__actions";
+    dialog.appendChild(actions);
+
+    const discardBtn = document.createElement("button");
+    discardBtn.type = "button";
+    discardBtn.className = "btn btn--ghost modal__cancel";
+    discardBtn.textContent = "Discard";
+    actions.appendChild(discardBtn);
+
+    const playBtn = document.createElement("button");
+    playBtn.type = "button";
+    playBtn.className = "btn btn--ghost";
+    playBtn.textContent = "Play";
+    actions.appendChild(playBtn);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn modal__confirm";
+    saveBtn.textContent = "Save";
+    actions.appendChild(saveBtn);
+
+    function close(value) {
+      overlay.classList.remove("modal-overlay--open");
+      overlay.classList.add("modal-overlay--exiting");
+      document.removeEventListener("keydown", onKeydown, true);
+      setTimeout(() => {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      }, 80);
+      resolve(value);
+    }
+
+    discardBtn.addEventListener("click", () => close(null));
+    playBtn.addEventListener("click", () => onPlay(currentCode));
+    saveBtn.addEventListener("click", () => close({ code: currentCode }));
+
+    function onKeydown(e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close(null);
+      }
+    }
+    document.addEventListener("keydown", onKeydown, true);
+    overlay.addEventListener("mousedown", (e) => {
+      if (e.target === overlay) close(null);
+    });
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add("modal-overlay--open"));
+    saveBtn.focus();
+  });
+}
+
 captureBtn.addEventListener("click", async () => {
   if (!midi.isCaptureEnabled()) {
     midi.setCaptureEnabled(true);
@@ -1366,14 +1487,49 @@ captureBtn.addEventListener("click", async () => {
     );
     return;
   }
-  // stop + save
+  // stop capture
   midi.setCaptureEnabled(false);
   midiBar.setCaptureState({ recording: false });
-  const code = midi.buildPatternFromCapture();
+
+  if (midi.getCaptureCount() === 0) {
+    transport.setStatus("capture stopped — no notes recorded");
+    return;
+  }
+
+  // Build initial pattern code. Use metronome BPM as hint if it was enabled.
+  const bpmHint = midi.isMetronomeEnabled() ? midi.getMetronomeBpm() : undefined;
+  let selectedGrid = undefined;
+  let code = midi.buildPatternFromCapture({ bpmHint, gridSubdivision: selectedGrid });
   if (!code) {
     transport.setStatus("capture stopped — no notes recorded");
     return;
   }
+
+  // Show capture preview modal
+  const prevCode = editor.code;
+  const result = await showCapturePreviewModal({
+    initialCode: code,
+    onGridChange: (grid) => {
+      selectedGrid = grid || undefined;
+      code = midi.buildPatternFromCapture({ bpmHint, gridSubdivision: selectedGrid });
+      return code;
+    },
+    onPlay: (previewCode) => {
+      editor.setCode(previewCode);
+      editor.evaluate();
+    },
+  });
+
+  if (!result) {
+    // Discard — restore previous editor code
+    editor.setCode(prevCode);
+    transport.setStatus("capture discarded");
+    return;
+  }
+
+  // Save flow with the (possibly re-quantized) code
+  code = result.code;
+
   if (import.meta.env.PROD) {
     // No filesystem in prod — save as a user pattern in the store.
     const stamp = new Date()
@@ -1422,6 +1578,7 @@ captureBtn.addEventListener("click", async () => {
       /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
   });
   if (!name) {
+    editor.setCode(prevCode);
     transport.setStatus("capture discarded");
     return;
   }

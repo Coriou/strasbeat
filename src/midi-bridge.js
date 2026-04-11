@@ -542,6 +542,23 @@ export class MidiBridge {
     // ─── Per-preset FX overrides (session-only, not persisted) ────────
     /** @type {Map<string, {room?: number, delay?: number, lpf?: number}>} */
     this.presetOverrides = new Map();
+
+    // ─── Mod wheel (CC1) ──────────────────────────────────────────────
+    this._modWheel = 0; // 0–127, default fully open
+
+    // ─── Velocity curve ───────────────────────────────────────────────
+    /** @type {'soft'|'linear'|'hard'} */
+    this._velocityCurve = 'linear';
+
+    // ─── Device selector ──────────────────────────────────────────────
+    /** @type {string|null} null = all devices */
+    this._selectedDevice = null;
+
+    // ─── Metronome ────────────────────────────────────────────────────
+    this._metronomeEnabled = false;
+    this._metronomeBpm = 120;
+    this._metronomeIntervalId = null;
+    this._metronomeBeat = 0;
   }
 
   // ─── Event emitter ──────────────────────────────────────────────────
@@ -595,6 +612,89 @@ export class MidiBridge {
     return this._sustainDown;
   }
 
+  // ─── Mod wheel ─────────────────────────────────────────────────────
+  getModWheel() {
+    return this._modWheel;
+  }
+
+  // ─── Velocity curve ────────────────────────────────────────────────
+  getVelocityCurve() {
+    return this._velocityCurve;
+  }
+  setVelocityCurve(mode) {
+    if (mode === "soft" || mode === "linear" || mode === "hard") {
+      this._velocityCurve = mode;
+    }
+  }
+
+  // ─── Device selector ──────────────────────────────────────────────
+  getSelectedDevice() {
+    return this._selectedDevice;
+  }
+  setSelectedDevice(id) {
+    this._selectedDevice = id;
+    this._wireInputs();
+  }
+
+  // ─── Metronome ─────────────────────────────────────────────────────
+  isMetronomeEnabled() {
+    return this._metronomeEnabled;
+  }
+  setMetronomeEnabled(enabled) {
+    this._metronomeEnabled = enabled;
+    this._emit("metronomechange", { enabled, bpm: this._metronomeBpm });
+  }
+  getMetronomeBpm() {
+    return this._metronomeBpm;
+  }
+  setMetronomeBpm(bpm) {
+    this._metronomeBpm = Math.max(30, Math.min(300, Math.round(bpm)));
+    this._emit("metronomechange", {
+      enabled: this._metronomeEnabled,
+      bpm: this._metronomeBpm,
+    });
+  }
+  _startMetronome() {
+    this._stopMetronome();
+    if (!this._metronomeEnabled) return;
+    const ctx = getAudioContext();
+    if (!ctx || ctx.state !== "running") return;
+    this._metronomeBeat = 0;
+    const tick = () => {
+      const now = getAudioContext()?.currentTime;
+      if (!now) return;
+      const beat = this._metronomeBeat % 4;
+      const isDownbeat = beat === 0;
+      Promise.resolve(
+        superdough(
+          {
+            s: "sine",
+            note: isDownbeat ? 80 : 76,
+            duration: 0.02,
+            gain: isDownbeat ? 0.5 : 0.3,
+            attack: 0.001,
+            decay: 0.02,
+            sustain: 0,
+            release: 0.01,
+          },
+          now + 0.01,
+          0.02,
+        ),
+      ).catch(() => {});
+      this._metronomeBeat++;
+    };
+    tick(); // play first beat immediately
+    const interval = (60 / this._metronomeBpm) * 1000;
+    this._metronomeIntervalId = setInterval(tick, interval);
+  }
+  _stopMetronome() {
+    if (this._metronomeIntervalId !== null) {
+      clearInterval(this._metronomeIntervalId);
+      this._metronomeIntervalId = null;
+    }
+    this._metronomeBeat = 0;
+  }
+
   // ─── Device enumeration ────────────────────────────────────────────
   getDevices() {
     if (!this.access) return [];
@@ -634,9 +734,26 @@ export class MidiBridge {
 
   _wireInputs() {
     if (!this.access) return;
+    const selected = this._selectedDevice;
+    let foundSelected = false;
     for (const input of this.access.inputs.values()) {
+      if (selected && input.id !== selected) {
+        input.onmidimessage = null;
+        continue;
+      }
+      if (selected && input.id === selected) foundSelected = true;
       // Re-assigning .onmidimessage is idempotent — replaces any prior handler.
       input.onmidimessage = (e) => this._onMessage(e);
+    }
+    // If the selected device disconnected, fall back to all devices.
+    if (selected && !foundSelected) {
+      console.warn(
+        `[midi] selected device "${selected}" disconnected — falling back to all devices`,
+      );
+      this._selectedDevice = null;
+      for (const input of this.access.inputs.values()) {
+        input.onmidimessage = (e) => this._onMessage(e);
+      }
     }
     this._announce();
     this._emit("devicechange", { devices: this.getDevices() });
@@ -667,7 +784,7 @@ export class MidiBridge {
       this._noteOn(data1, data2 / 127);
     }
     // noteoff is intentionally ignored — see file header.
-    // CC messages — sustain pedal (CC64) and general CC events.
+    // CC messages — sustain pedal (CC64), mod wheel (CC1), and general CC events.
     if (cmd === 0xb0) {
       this._emit("cc", { cc: data1, value: data2 });
       if (data1 === 64) {
@@ -677,7 +794,13 @@ export class MidiBridge {
           this._emit("sustain", { down });
         }
       }
+      if (data1 === 1) {
+        this._modWheel = data2;
+        this._emit("modwheel", { value: data2 });
+      }
     }
+    // Pitch bend (0xE0) — not implemented; superdough doesn't support
+    // real-time cent offsets. Documented as future work.
   }
 
   _noteOn(midiRaw, velocity) {
@@ -705,6 +828,11 @@ export class MidiBridge {
     const baseDuration = preset.duration ?? 0.5;
     const duration = this._sustainDown ? baseDuration * 3 : baseDuration;
 
+    // Apply velocity curve.
+    let vel = velocity;
+    if (this._velocityCurve === "soft") vel = Math.sqrt(velocity);
+    else if (this._velocityCurve === "hard") vel = velocity * velocity;
+
     let value;
     if (preset.drumMap) {
       const s = preset.drumMap[midi];
@@ -717,7 +845,7 @@ export class MidiBridge {
         );
         return;
       }
-      value = { s, gain: this._volume * (0.5 + velocity * 0.5) };
+      value = { s, gain: this._volume * (0.5 + vel * 0.5) };
     } else {
       if (!getSound(preset.s) && !this._warnedSounds.has(preset.s)) {
         this._warnedSounds.add(preset.s);
@@ -737,7 +865,7 @@ export class MidiBridge {
       value = {
         s: preset.s,
         note: midi,
-        gain: this._volume * (0.5 + velocity * 0.5),
+        gain: this._volume * (0.5 + vel * 0.5),
         ...(preset.attack != null && { attack: preset.attack }),
         ...(preset.decay != null && { decay: preset.decay }),
         ...(preset.sustain != null && { sustain: preset.sustain }),
@@ -755,6 +883,14 @@ export class MidiBridge {
         if (overrides.room != null) value.room = overrides.room;
         if (overrides.delay != null) value.delay = overrides.delay;
         if (overrides.lpf != null) value.lpf = overrides.lpf;
+      }
+
+      // Mod wheel (CC1) → LPF: exponential curve 200 Hz–20 kHz.
+      // The mod wheel can only close the filter (never open beyond preset).
+      if (this._modWheel < 127) {
+        const modWheelLpf = 200 * Math.pow(100, this._modWheel / 127);
+        const presetLpf = value.lpf ?? 20000;
+        value.lpf = Math.min(presetLpf, modWheelLpf);
       }
     }
 
@@ -795,6 +931,9 @@ export class MidiBridge {
       this.captureBuffer = [];
       this.captureStart = 0;
       this.onCaptureChange(0);
+      this._startMetronome();
+    } else {
+      this._stopMetronome();
     }
   }
 
@@ -813,8 +952,10 @@ export class MidiBridge {
    * analyzeTranslationInput → generatePatternDraft) so capture output gets
    * the same quality as file import: note names, bar structure, quantization,
    * repetition detection, and velocity preservation.
+   *
+   * @param {{ gridSubdivision?: number, bpmHint?: number }} [opts]
    */
-  buildPatternFromCapture() {
+  buildPatternFromCapture(opts = {}) {
     if (this.captureBuffer.length === 0) return null;
     const presetKey = this.getPreset();
     const preset = presets[presetKey];
@@ -823,7 +964,11 @@ export class MidiBridge {
     const input = captureBufferToTranslationInput(this.captureBuffer, {
       presetName: presetKey,
     });
-    const analysis = analyzeTranslationInput(input);
+    // If metronome was enabled, use its BPM as the capture BPM.
+    if (opts.bpmHint) input.bpm = opts.bpmHint;
+    const analysisOpts = {};
+    if (opts.gridSubdivision) analysisOpts.gridSubdivision = opts.gridSubdivision;
+    const analysis = analyzeTranslationInput(input, analysisOpts);
     const body = generatePatternDraft(analysis, {
       soundOverrides: { 0: sound },
     });

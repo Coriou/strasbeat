@@ -144,6 +144,17 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   // ─── Build DOM ──────────────────────────────────────────────────────
   container.innerHTML = "";
 
+  // Device selector (only visible when >1 device connected)
+  const deviceGroup = document.createElement("div");
+  deviceGroup.className = "midi-bar__device";
+  deviceGroup.hidden = true;
+  const deviceSelect = document.createElement("select");
+  deviceSelect.className = "midi-bar__device-select";
+  deviceSelect.title = "MIDI input device";
+  deviceSelect.setAttribute("aria-label", "MIDI input device");
+  deviceGroup.appendChild(deviceSelect);
+  container.appendChild(deviceGroup);
+
   // Mini-keyboard canvas
   const kbCanvas = document.createElement("canvas");
   kbCanvas.className = "midi-bar__keyboard";
@@ -201,6 +212,33 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   volGroup.append(volIcon, volSlider, volLabel);
   container.appendChild(volGroup);
 
+  // Sep
+  container.appendChild(makeSep());
+
+  // Velocity curve toggle (segmented: Soft / Linear / Hard)
+  const velGroup = document.createElement("div");
+  velGroup.className = "midi-bar__velocity-curve";
+  velGroup.title = "Velocity curve";
+  const VELOCITY_MODES = ["soft", "linear", "hard"];
+  const velBtns = {};
+  for (const mode of VELOCITY_MODES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "midi-bar__vel-btn";
+    btn.textContent = mode[0].toUpperCase() + mode.slice(1);
+    btn.dataset.mode = mode;
+    if (mode === midi.getVelocityCurve()) btn.classList.add("is-active");
+    btn.addEventListener("click", () => {
+      midi.setVelocityCurve(mode);
+      for (const b of Object.values(velBtns)) b.classList.remove("is-active");
+      btn.classList.add("is-active");
+      persistState();
+    });
+    velGroup.appendChild(btn);
+    velBtns[mode] = btn;
+  }
+  container.appendChild(velGroup);
+
   // Spacer
   const spacer = document.createElement("div");
   spacer.className = "midi-bar__spacer";
@@ -241,6 +279,40 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   susLabel.textContent = "sus";
   susGroup.append(susLamp, susLabel);
   container.appendChild(susGroup);
+
+  // Mod wheel indicator (thin bar + label, near sustain)
+  const modGroup = document.createElement("div");
+  modGroup.className = "midi-bar__mod-group";
+  const modBar = document.createElement("div");
+  modBar.className = "midi-bar__mod-bar";
+  const modFill = document.createElement("div");
+  modFill.className = "midi-bar__mod-fill";
+  modFill.style.height = "0%";
+  modBar.appendChild(modFill);
+  const modLabel = document.createElement("span");
+  modLabel.className = "midi-bar__mod-label";
+  modLabel.textContent = "mod";
+  modGroup.append(modBar, modLabel);
+  container.appendChild(modGroup);
+
+  // Sep
+  container.appendChild(makeSep());
+
+  // Metronome toggle + BPM
+  const metGroup = document.createElement("div");
+  metGroup.className = "midi-bar__metronome";
+  const metBtn = document.createElement("button");
+  metBtn.type = "button";
+  metBtn.className = "midi-bar__met-btn";
+  metBtn.title = "Toggle metronome for capture";
+  metBtn.setAttribute("aria-label", "Metronome");
+  metBtn.setAttribute("aria-pressed", "false");
+  metBtn.innerHTML = `<span class="btn__icon" data-icon="timer"></span>`;
+  const metBpmEl = document.createElement("span");
+  metBpmEl.className = "midi-bar__met-bpm";
+  metBpmEl.textContent = "";
+  metGroup.append(metBtn, metBpmEl);
+  container.appendChild(metGroup);
 
   // Sep
   container.appendChild(makeSep());
@@ -283,6 +355,62 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     volLabel.textContent = `${volSlider.value}%`;
     persistState();
   });
+
+  // Device selector
+  function rebuildDeviceSelect(devices) {
+    deviceSelect.innerHTML = "";
+    if (devices.length <= 1) {
+      deviceGroup.hidden = true;
+      return;
+    }
+    deviceGroup.hidden = false;
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "All devices";
+    deviceSelect.appendChild(allOpt);
+    for (const d of devices) {
+      const opt = document.createElement("option");
+      opt.value = d.id;
+      opt.textContent = d.name || d.id;
+      deviceSelect.appendChild(opt);
+    }
+    deviceSelect.value = midi.getSelectedDevice() ?? "";
+  }
+  deviceSelect.addEventListener("change", () => {
+    const id = deviceSelect.value || null;
+    midi.setSelectedDevice(id);
+    persistState();
+  });
+
+  // Mod wheel indicator
+  function onModWheel({ value }) {
+    const pct = Math.round((value / 127) * 100);
+    modFill.style.height = `${pct}%`;
+  }
+  midi.on("modwheel", onModWheel);
+
+  // Metronome toggle
+  function updateMetUI() {
+    const on = midi.isMetronomeEnabled();
+    metBtn.classList.toggle("is-active", on);
+    metBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    metBpmEl.textContent = on ? `${midi.getMetronomeBpm()}` : "";
+  }
+  metBtn.addEventListener("click", () => {
+    midi.setMetronomeEnabled(!midi.isMetronomeEnabled());
+    updateMetUI();
+    persistState();
+  });
+  // BPM adjustment via scroll on the BPM label
+  metBpmEl.addEventListener("wheel", (e) => {
+    if (!midi.isMetronomeEnabled()) return;
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1 : -1;
+    midi.setMetronomeBpm(midi.getMetronomeBpm() + delta);
+    updateMetUI();
+    persistState();
+  });
+  midi.on("metronomechange", updateMetUI);
 
   // Preset popover open/close
   let popoverOpen = false;
@@ -391,6 +519,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   // Auto-show/hide based on device connectivity
   function onDeviceChange({ devices }) {
     container.hidden = devices.length === 0;
+    rebuildDeviceSelect(devices);
     // Clear stale visual state when all devices disconnect so the bar
     // doesn't re-show with ghost active notes / lit sustain lamp.
     if (devices.length === 0) {
@@ -403,6 +532,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
         fadeAnimId = null;
       }
       susLamp.classList.remove("midi-bar__sustain--active");
+      modFill.style.height = "0%";
       redrawKeyboard();
     }
   }
@@ -457,6 +587,10 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
           volume: midi.getVolume(),
           octaveShift: midi.getOctaveShift(),
           preset: getPreset(),
+          velocityCurve: midi.getVelocityCurve(),
+          selectedDevice: midi.getSelectedDevice(),
+          metronomeEnabled: midi.isMetronomeEnabled(),
+          metronomeBpm: midi.getMetronomeBpm(),
         }),
       );
     } catch (_) {
@@ -480,6 +614,23 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
       if (typeof s.preset === "string" && presets[s.preset]) {
         onPresetChange(s.preset);
         presetLabelEl.textContent = presets[s.preset].label ?? s.preset;
+      }
+      if (typeof s.velocityCurve === "string") {
+        midi.setVelocityCurve(s.velocityCurve);
+        for (const b of Object.values(velBtns)) {
+          b.classList.toggle("is-active", b.dataset.mode === s.velocityCurve);
+        }
+      }
+      if (typeof s.selectedDevice === "string") {
+        midi.setSelectedDevice(s.selectedDevice);
+      }
+      if (typeof s.metronomeEnabled === "boolean") {
+        midi.setMetronomeEnabled(s.metronomeEnabled);
+        updateMetUI();
+      }
+      if (typeof s.metronomeBpm === "number") {
+        midi.setMetronomeBpm(s.metronomeBpm);
+        updateMetUI();
       }
     } catch (_) {
       /* corrupted */
@@ -615,6 +766,8 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     midi.off("noteoff", onNoteOff);
     midi.off("sustain", onSustain);
     midi.off("devicechange", onDeviceChange);
+    midi.off("modwheel", onModWheel);
+    midi.off("metronomechange", updateMetUI);
     document.removeEventListener("mousedown", onDocMousedown);
     document.removeEventListener("keydown", onDocKeydown);
     clearTimeout(noteFadeTimer);
