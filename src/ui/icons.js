@@ -35,6 +35,7 @@ import {
   Copy,
   Wrench,
   Waves,
+  Check,
 } from "lucide";
 
 const ICONS = {
@@ -62,6 +63,7 @@ const ICONS = {
   "more-horizontal": MoreHorizontal,
   "volume-2": Volume2,
   x: X,
+  check: Check,
 };
 
 /**

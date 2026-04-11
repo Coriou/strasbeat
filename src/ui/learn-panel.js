@@ -54,6 +54,33 @@ export function createLearnPanel({
   let mounted = false;
   let searchTimer = null;
   let flatVisible = [];
+  let hintEl = null;
+
+  // Tried-state persistence
+  const TRIED_KEY = "strasbeat:learn-tried";
+  let triedSet = loadTriedSet();
+
+  function loadTriedSet() {
+    try {
+      const raw = localStorage.getItem(TRIED_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function saveTried() {
+    try {
+      localStorage.setItem(TRIED_KEY, JSON.stringify([...triedSet]));
+    } catch {}
+  }
+
+  function markTried(id) {
+    if (!triedSet.has(id)) {
+      triedSet.add(id);
+      saveTried();
+    }
+  }
 
   // ─── Right-rail panel spec ────────────────────────────────────────────
   return {
@@ -121,6 +148,15 @@ export function createLearnPanel({
       pillsEl.appendChild(pill);
     }
     root.appendChild(pillsEl);
+
+    // Hint for first-time users (hidden once any entry has been tried)
+    hintEl = el(
+      "div",
+      "learn-panel__hint",
+      "Pick a workshop to start learning, or search for a topic.",
+    );
+    hintEl.hidden = triedSet.size > 0;
+    root.appendChild(hintEl);
 
     // Count
     countEl = el("div", "learn-panel__count");
@@ -218,7 +254,10 @@ export function createLearnPanel({
         expandedId = entry.id;
       } else {
         // Already expanded — trigger Try
-        triggerTry(entry);
+        const btn = listEl.querySelector(
+          `.learn-panel__entry[data-entry-id="${cssEscape(entry.id)}"] .learn-panel__btn--primary`,
+        );
+        triggerTry(entry, btn);
         return;
       }
       render();
@@ -256,6 +295,7 @@ export function createLearnPanel({
 
   function render() {
     if (!listEl) return;
+    if (hintEl) hintEl.hidden = triedSet.size > 0;
     listEl.replaceChildren();
     flatVisible = [];
 
@@ -333,9 +373,28 @@ export function createLearnPanel({
     head.appendChild(chevron);
 
     const textCol = el("div", "learn-panel__entry-text");
+
+    // Workshop chapter number prefix
+    if (entry.type === "workshop" && entry.chapter != null) {
+      const numEl = el(
+        "span",
+        "learn-panel__chapter-num",
+        `${entry.chapter}. `,
+      );
+      textCol.appendChild(numEl);
+    }
+
     const nameEl = el("span", "learn-panel__entry-name");
     appendHighlighted(nameEl, entry.title, query);
     textCol.appendChild(nameEl);
+
+    // Tried indicator
+    if (triedSet.has(entry.id)) {
+      const check = el("span", "learn-panel__tried");
+      check.appendChild(makeIcon("check", { size: 10 }));
+      check.title = "Already tried";
+      textCol.appendChild(check);
+    }
 
     const badge = el("span", "learn-panel__entry-badge");
     badge.textContent = TYPE_LABELS[entry.type] ?? entry.type;
@@ -364,7 +423,10 @@ export function createLearnPanel({
     if (entry.tags?.length) {
       const tags = el("div", "learn-panel__entry-tags");
       for (const tag of entry.tags) {
-        const chip = el("span", "learn-panel__tag", tag);
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "learn-panel__tag";
+        chip.textContent = tag;
         chip.addEventListener("click", (e) => {
           e.stopPropagation();
           searchInput.value = tag;
@@ -381,6 +443,8 @@ export function createLearnPanel({
     // Code preview
     if (entry.code) {
       const codeWrap = el("div", "learn-panel__code-wrap");
+      codeWrap.setAttribute("role", "region");
+      codeWrap.setAttribute("aria-label", "Code example");
       const pre = el("pre", "learn-panel__code");
       const codeEl = el("code", null, entry.code);
       pre.appendChild(codeEl);
@@ -394,47 +458,89 @@ export function createLearnPanel({
     const tryBtn = document.createElement("button");
     tryBtn.type = "button";
     tryBtn.className = "learn-panel__btn learn-panel__btn--primary";
+    tryBtn.title = "Load into editor and play";
     tryBtn.appendChild(makeIcon("play", { size: 12 }));
     tryBtn.appendChild(document.createTextNode(" Try"));
     tryBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      triggerTry(entry);
+      triggerTry(entry, tryBtn);
     });
     actions.appendChild(tryBtn);
 
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "learn-panel__btn";
+    copyBtn.title = "Save as a new pattern file";
     copyBtn.appendChild(makeIcon("copy", { size: 12 }));
     copyBtn.appendChild(document.createTextNode(" Copy to new pattern"));
     copyBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      triggerCopy(entry);
+      triggerCopy(entry, copyBtn);
     });
     actions.appendChild(copyBtn);
 
     body.appendChild(actions);
+
+    // Next chapter link (workshops only)
+    if (entry.type === "workshop" && entry.chapter != null) {
+      const nextEntry = allEntries.find(
+        (e) => e.type === "workshop" && e.chapter === entry.chapter + 1,
+      );
+      if (nextEntry) {
+        const nextBtn = document.createElement("button");
+        nextBtn.type = "button";
+        nextBtn.className = "learn-panel__next-chapter";
+        nextBtn.textContent = `Next: ${nextEntry.title} \u2192`;
+        nextBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          expandedId = nextEntry.id;
+          activeIndex = flatVisible.indexOf(nextEntry);
+          render();
+          paintActive();
+        });
+        body.appendChild(nextBtn);
+      }
+    }
+
     return body;
   }
 
   // ─── Actions ──────────────────────────────────────────────────────────
 
-  function triggerTry(entry) {
+  function triggerTry(entry, btn) {
     if (!entry.code) return;
     try {
       onTry(entry.code);
+      markTried(entry.id);
+      flashBtn(btn, " Loaded \u2713");
     } catch (err) {
       console.warn("[learn-panel] try failed:", err);
+      flashBtn(btn, " Error", true);
     }
   }
 
-  function triggerCopy(entry) {
+  function triggerCopy(entry, btn) {
     if (!entry.code) return;
     try {
       onCopyToNewPattern(entry.code, entry.title);
+      flashBtn(btn, " Copied \u2713");
     } catch (err) {
       console.warn("[learn-panel] copy to new pattern failed:", err);
+      flashBtn(btn, " Error", true);
     }
+  }
+
+  function flashBtn(btn, label, isError) {
+    if (!btn) return;
+    const cls = isError ? "is-error" : "is-feedback";
+    btn.classList.add(cls);
+    const textNode = [...btn.childNodes].find((n) => n.nodeType === 3);
+    const original = textNode?.textContent;
+    if (textNode) textNode.textContent = label;
+    setTimeout(() => {
+      btn.classList.remove(cls);
+      if (textNode && original != null) textNode.textContent = original;
+    }, 1200);
   }
 
   // ─── Navigation helpers ───────────────────────────────────────────────

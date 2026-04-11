@@ -32,6 +32,10 @@
   /* ─── Semantic (only when meaningful) ─── */
   --rec: oklch(0.65 0.22 25); /* recording, errors */
   --ok: oklch(0.78 0.16 150); /* MIDI connected, success */
+  --badge-recipe: oklch(0.7 0.15 150);
+  --badge-recipe-text: oklch(0.78 0.1 150);
+  --badge-example: oklch(0.7 0.13 280);
+  --badge-example-text: oklch(0.78 0.08 280);
 
   /* ─── Spacing scale ─── */
   --space-0: 0;

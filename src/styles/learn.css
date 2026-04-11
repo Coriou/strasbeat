@@ -290,15 +290,15 @@
 }
 
 .learn-panel__entry-badge--recipe {
-  background: color-mix(in oklch, oklch(0.7 0.15 150) 12%, var(--surface-2));
-  color: color-mix(in oklch, oklch(0.78 0.1 150) 78%, var(--text));
-  border: 1px solid color-mix(in oklch, oklch(0.7 0.15 150) 34%, transparent);
+  background: color-mix(in oklch, var(--badge-recipe) 12%, var(--surface-2));
+  color: color-mix(in oklch, var(--badge-recipe-text) 78%, var(--text));
+  border: 1px solid color-mix(in oklch, var(--badge-recipe) 34%, transparent);
 }
 
 .learn-panel__entry-badge--example {
-  background: color-mix(in oklch, oklch(0.7 0.13 280) 12%, var(--surface-2));
-  color: color-mix(in oklch, oklch(0.78 0.08 280) 78%, var(--text));
-  border: 1px solid color-mix(in oklch, oklch(0.7 0.13 280) 34%, transparent);
+  background: color-mix(in oklch, var(--badge-example) 12%, var(--surface-2));
+  color: color-mix(in oklch, var(--badge-example-text) 78%, var(--text));
+  border: 1px solid color-mix(in oklch, var(--badge-example) 34%, transparent);
 }
 
 /* ─── Expanded body ─────────────────────────────────────────────────── */
@@ -344,6 +344,11 @@
 .learn-panel__tag:hover {
   background: var(--accent-wash);
   color: var(--text);
+}
+
+.learn-panel__tag:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ─── Code preview ──────────────────────────────────────────────────── */
@@ -425,4 +430,81 @@
 .learn-panel__btn svg {
   width: 12px;
   height: 12px;
+}
+
+/* ─── Button feedback ───────────────────────────────────────────────── */
+
+@keyframes learn-btn-flash {
+  0% {
+    box-shadow: 0 0 0 2px var(--accent-wash);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+
+.learn-panel__btn.is-feedback {
+  border-color: var(--accent);
+  animation: learn-btn-flash 600ms ease-out;
+}
+
+.learn-panel__btn.is-error {
+  border-color: var(--rec);
+}
+
+/* ─── Chapter number ────────────────────────────────────────────────── */
+
+.learn-panel__chapter-num {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+/* ─── Tried indicator ───────────────────────────────────────────────── */
+
+.learn-panel__tried {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ok);
+  opacity: 0.5;
+  flex: 0 0 auto;
+}
+
+.learn-panel__tried svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* ─── First-use hint ────────────────────────────────────────────────── */
+
+.learn-panel__hint {
+  padding: var(--space-1) var(--space-3) 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+/* ─── Next chapter link ─────────────────────────────────────────────── */
+
+.learn-panel__next-chapter {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--t-hover);
+}
+
+.learn-panel__next-chapter:hover {
+  color: var(--accent-hi);
+}
+
+.learn-panel__next-chapter:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
