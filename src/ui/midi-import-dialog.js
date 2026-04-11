@@ -14,7 +14,11 @@ import {
   sanitizePatternName,
   gridSubdivisionLabel,
 } from "../midi-to-strudel.js";
-import { GM_FAMILY_FALLBACK, GM_INSTRUMENT_MAP } from "../midi-gm.js";
+import {
+  GM_FAMILY_FALLBACK,
+  GM_FAMILY_NAMES,
+  GM_INSTRUMENT_MAP,
+} from "../midi-gm.js";
 import {
   validatePatternName,
   patternNameExists,
@@ -58,7 +62,7 @@ function installListeners(root, onDismiss) {
     if (e.key === "Tab") {
       const focusables = Array.from(
         root.querySelectorAll(
-          'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'input:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ),
       ).filter((el) => el.offsetParent !== null);
       if (focusables.length === 0) {
@@ -550,26 +554,6 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
-
-// GM family names indexed by program range (8 instruments per family).
-const GM_FAMILY_NAMES = [
-  "piano",
-  "chromatic percussion",
-  "organ",
-  "guitar",
-  "bass",
-  "strings",
-  "ensemble",
-  "brass",
-  "reed",
-  "pipe",
-  "synth lead",
-  "synth pad",
-  "synth effects",
-  "ethnic",
-  "percussive",
-  "sound effects",
-];
 
 function getSoundAlternatives(gmProgram) {
   const primary = GM_INSTRUMENT_MAP[gmProgram] ?? "gm_piano";

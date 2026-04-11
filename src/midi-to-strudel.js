@@ -640,10 +640,6 @@ function buildMelodicBarEvents(barNotes, slotsPerBar) {
   return events;
 }
 
-function buildMelodicBar(barNotes, slotsPerBar) {
-  return eventsToMiniNotation(buildMelodicBarEvents(barNotes, slotsPerBar));
-}
-
 function buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings) {
   // Group notes by grid position
   const slots = new Map();
@@ -708,12 +704,6 @@ function buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings) {
   }
 
   return events;
-}
-
-function buildDrumBar(barNotes, slotsPerBar, drumWarnings) {
-  return eventsToMiniNotation(
-    buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings),
-  );
 }
 
 function eventsToMiniNotation(events) {

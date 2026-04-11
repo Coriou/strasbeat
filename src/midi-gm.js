@@ -174,6 +174,26 @@ export const GM_INSTRUMENT_MAP = {
   127: "gm_piano",
 };
 
+// GM family names ordered by index (program / 8).
+export const GM_FAMILY_NAMES = [
+  "piano",
+  "chromatic percussion",
+  "organ",
+  "guitar",
+  "bass",
+  "strings",
+  "ensemble",
+  "brass",
+  "reed",
+  "pipe",
+  "synth lead",
+  "synth pad",
+  "synth effects",
+  "ethnic",
+  "percussive",
+  "sound effects",
+];
+
 // Family fallback: when a specific GM program's Strudel name doesn't resolve,
 // fall back to the family representative.
 export const GM_FAMILY_FALLBACK = {
