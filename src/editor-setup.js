@@ -1,6 +1,7 @@
 import { Prec, StateEffect } from "@codemirror/state";
 import { codemirrorSettings, defaultSettings } from "@strudel/codemirror";
 import { formatExtension } from "./editor/format.js";
+import { errorMarksExtension } from "./editor/error-marks.js";
 import { createVscodeKeymap } from "./editor/keymap.js";
 import { numericScrubber } from "./editor/numeric-scrubber.js";
 import { hoverDocs } from "./editor/hover-docs.js";
@@ -104,6 +105,7 @@ export function applyInitialSettings(editor, storedSettings) {
 export function dispatchEditorExtensions(editor, { onOpenReference }) {
   editor.editor.dispatch({
     effects: StateEffect.appendConfig.of([
+      errorMarksExtension,
       Prec.highest(formatExtension),
       Prec.highest(createVscodeKeymap({ onEvaluate: () => editor.evaluate() })),
       numericScrubber({

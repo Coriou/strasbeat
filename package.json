@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "gen:docs": "node scripts/build-strudel-docs.mjs",
     "gen:learn": "node scripts/build-learn-index.mjs",
-    "test": "node --import ./scripts/test-register.mjs --test src/editor/track-labels.test.js src/strudel-ext/progression.test.js src/strudel-ext/roman.test.js"
+    "test": "node --import ./scripts/test-register.mjs --test src/editor/error-marks.test.js src/editor/track-labels.test.js src/strudel-ext/progression.test.js src/strudel-ext/roman.test.js"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",

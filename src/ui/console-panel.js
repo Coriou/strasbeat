@@ -49,6 +49,7 @@
 // Pure DOM, no framework. Match the imperative style of left-rail.js,
 // sound-browser.js, and reference-panel.js.
 
+import { extractErrorLine } from '../editor/error-marks.js';
 import { makeIcon } from './icons.js';
 
 const SEARCH_DEBOUNCE_MS = 150;
@@ -69,6 +70,7 @@ const LEVELS = [
 
 export function createConsolePanel({
   onFocusEditor = () => {},
+  onJumpToLine = () => {},
 } = {}) {
   // ─── State ────────────────────────────────────────────────────────────
   /** @type {Array<{id:number, level:string, message:string, timestamp:number, data:any}>} */
@@ -102,6 +104,7 @@ export function createConsolePanel({
     error,
     divider,
     clear,
+    scrollToEntry,
   };
 
   // ─── Lifecycle ────────────────────────────────────────────────────────
@@ -197,9 +200,9 @@ export function createConsolePanel({
 
   // ─── Public helpers — the host calls these from log hooks ─────────────
 
-  function log(message, data)   { pushEntry('log',   message, data); }
-  function warn(message, data)  { pushEntry('warn',  message, data); }
-  function error(message, data) { pushEntry('error', message, data); }
+  function log(message, data)   { return pushEntry('log',   message, data); }
+  function warn(message, data)  { return pushEntry('warn',  message, data); }
+  function error(message, data) { return pushEntry('error', message, data); }
 
   /**
    * Add an evaluation-separator entry. Rendered as a horizontal rule
@@ -207,7 +210,7 @@ export function createConsolePanel({
    * the user can tell one eval's tail output from the next one's head.
    */
   function divider(label) {
-    pushEntry('divider', label ?? '', null);
+    return pushEntry('divider', label ?? '', null);
   }
 
   function clear() {
@@ -221,12 +224,14 @@ export function createConsolePanel({
   // ─── Ring buffer + DOM updates ────────────────────────────────────────
 
   function pushEntry(level, rawMessage, data) {
+    const message = stringify(rawMessage);
     const entry = {
       id: nextId++,
       level,
-      message: stringify(rawMessage),
+      message,
       timestamp: Date.now(),
       data,
+      location: extractEntryLocation(level, message, data),
     };
     entries.push(entry);
 
@@ -243,7 +248,7 @@ export function createConsolePanel({
       }
     }
 
-    if (!mounted) return;
+    if (!mounted) return entry.id;
 
     // Auto-scroll lock — measure BEFORE appending so we know whether the
     // user was already pinned to the tail. Dividers always force-scroll
@@ -261,6 +266,34 @@ export function createConsolePanel({
       // scrollTop rather than scrollIntoView to avoid shifting focus.
       listEl.scrollTop = listEl.scrollHeight;
     }
+
+    return entry.id;
+  }
+
+  function scrollToEntry(entryId) {
+    if (!mounted || !listEl) return;
+    const entry = entries.find((candidate) => candidate.id === entryId);
+    if (!entry) return;
+
+    if (entry.level !== 'divider') {
+      enabledLevels.add(entry.level);
+      const btn = levelButtons[entry.level];
+      if (btn) {
+        btn.classList.add('is-active');
+        btn.setAttribute('aria-pressed', 'true');
+      }
+    }
+
+    if (query) {
+      query = '';
+      if (searchInput) searchInput.value = '';
+    }
+
+    render();
+
+    const node = listEl.querySelector(`[data-entry-id="${entryId}"]`);
+    if (!node) return;
+    node.scrollIntoView({ block: 'center' });
   }
 
   function isScrolledToBottom() {
@@ -339,9 +372,17 @@ export function createConsolePanel({
     const hap = extractHap(entry);
     if (hap) {
       body.appendChild(buildHapCard(entry, hap));
+      if (entry.location) {
+        body.appendChild(buildLineBadge(entry.location));
+      }
     } else {
+      const messageRow = el('div', 'console-panel__message-row');
       const msg = el('span', 'console-panel__msg', entry.message);
-      body.appendChild(msg);
+      messageRow.appendChild(msg);
+      if (entry.location) {
+        messageRow.appendChild(buildLineBadge(entry.location));
+      }
+      body.appendChild(messageRow);
     }
 
     row.appendChild(body);
@@ -358,6 +399,20 @@ export function createConsolePanel({
     const label = el('span', 'console-panel__divider-label', labelText);
     row.appendChild(label);
     return row;
+  }
+
+  function buildLineBadge(location) {
+    const badge = document.createElement('button');
+    badge.type = 'button';
+    badge.className = 'console-panel__line-badge';
+    badge.textContent = `[line ${location.line}]`;
+    badge.title = `Jump to line ${location.line}`;
+    badge.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onJumpToLine(location);
+    });
+    return badge;
   }
 
   function buildHapCard(entry, hap) {
@@ -584,6 +639,25 @@ function extractSourceLocation(hap, rawData) {
   if (rawData && typeof rawData.line === 'number') {
     return { line: rawData.line, column: rawData.column };
   }
+  return null;
+}
+
+function extractEntryLocation(level, message, rawData) {
+  if (level !== 'error') return null;
+
+  const fromError = extractErrorLine(rawData?.error ?? rawData);
+  if (fromError) {
+    return { line: fromError.line, column: fromError.column };
+  }
+
+  const fromStructuredData = extractSourceLocation(null, rawData);
+  if (fromStructuredData) return fromStructuredData;
+
+  const fromMessage = extractErrorLine({ message });
+  if (fromMessage) {
+    return { line: fromMessage.line, column: fromMessage.column };
+  }
+
   return null;
 }
 

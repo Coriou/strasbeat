@@ -1,0 +1,96 @@
+/* Inline eval-error decorations — see design/work/15-error-experience.md. */
+
+.editor .cm-line.cm-error-line {
+  background: color-mix(in oklch, var(--rec) 15%, transparent);
+}
+
+.editor .cm-gutterElement.cm-error-gutter-marker {
+  position: relative;
+  cursor: pointer;
+}
+
+.editor .cm-gutterElement.cm-error-gutter-marker::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: var(--space-1);
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 999px;
+  background: var(--rec);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--rec) 30%, transparent);
+}
+
+.editor .cm-error-widget {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: 2px 0 6px;
+  border-left: 2px solid color-mix(in oklch, var(--rec) 50%, transparent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--rec);
+  animation: error-widget-in var(--t-pop-in) both;
+}
+
+@keyframes error-widget-in {
+  from {
+    opacity: 0;
+    translate: 0 -2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor .cm-error-widget {
+    animation: none;
+  }
+}
+
+.editor .cm-error-widget__indent {
+  flex: 0 0 auto;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.editor .cm-error-widget__message {
+  color: color-mix(in oklch, var(--text) 68%, var(--rec));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.editor .cm-error-widget__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-top: -1px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  transition:
+    color var(--t-hover),
+    background var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.editor .cm-error-widget__dismiss:hover {
+  color: var(--text);
+  background: color-mix(in oklch, var(--rec) 8%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--rec) 28%, var(--border-soft));
+}
+
+.editor .cm-error-widget__dismiss:focus-visible {
+  outline: 2px solid var(--rec);
+  outline-offset: 1px;
+}

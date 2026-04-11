@@ -14,6 +14,7 @@ import { EditorView } from "@codemirror/view";
 import { MidiBridge, presets as midiPresets } from "./midi-bridge.js";
 import { mountMidiBar } from "./ui/midi-bar.js";
 import { installSoundCompletion } from "./editor/completions/sounds.js";
+import { clearError, setError } from "./editor/error-marks.js";
 import strudelDocs from "./editor/strudel-docs.json";
 import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
@@ -220,6 +221,8 @@ const editor = new StrudelMirror({
   autodraw: true,
   // Eval failures routed into the console panel.
   onEvalError: (err) => {
+    _lastEvalHadError = true;
+    setError(editor.editor, err);
     if (!consolePanel) return;
     try {
       consolePanel.error(err?.message || String(err), { error: err });
@@ -388,6 +391,8 @@ const leftRail = mountLeftRail({
   currentName: currentName,
   onSelect(name) {
     flushToStore();
+    clearError(editor.editor);
+    resetRuntimeErrors();
     setCurrentName(name);
     const record = store.get(name);
     if (record) editor.setCode(record.code);
@@ -414,6 +419,8 @@ const leftRail = mountLeftRail({
     store.delete(name);
     lastDirtyState.delete(name);
     if (currentName === name) {
+      clearError(editor.editor);
+      resetRuntimeErrors();
       editor.setCode(patterns[name]);
     }
     leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
@@ -439,6 +446,12 @@ const leftRail = mountLeftRail({
 const transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
   getAudioContext,
+  onErrorBadgeClick: () => {
+    rightRail.activate("console");
+    if (firstRuntimeErrorEntryId != null) {
+      consolePanel?.scrollToEntry(firstRuntimeErrorEntryId);
+    }
+  },
 });
 let playbackRequestId = 0;
 
@@ -576,6 +589,21 @@ referencePanel.setBufferText(editor.code ?? "");
 
 consolePanel = createConsolePanel({
   onFocusEditor: () => editor.editor.focus(),
+  onJumpToLine: ({ line, column }) => {
+    const view = editor.editor;
+    if (!view || !Number.isInteger(line)) return;
+    if (line < 1 || line > view.state.doc.lines) return;
+    const lineInfo = view.state.doc.line(line);
+    const safeColumn =
+      typeof column === "number"
+        ? Math.max(0, Math.min(column, lineInfo.length))
+        : 0;
+    view.dispatch({
+      selection: { anchor: lineInfo.from + safeColumn },
+      scrollIntoView: true,
+    });
+    view.focus();
+  },
 });
 rightRail.registerPanel(consolePanel);
 
@@ -641,8 +669,18 @@ document.addEventListener("strudel.log", (e) => {
   const data = detail.data ?? null;
   if (shouldIgnoreStrudelLog(message)) return;
   try {
-    if (type === "error") consolePanel.error(message, data);
-    else if (type === "warning") consolePanel.warn(message, data);
+    if (type === "error") {
+      const entryId = consolePanel.error(message, data);
+      // Only count as runtime error when NOT mid-eval. Eval-time errors
+      // land in strudel.log too (logger fires before onEvalError), but
+      // those are handled by onEvalError → inline marks, not the badge.
+      if (!_evalInProgress && editor.repl?.scheduler?.started) {
+        registerRuntimeError(entryId);
+        // Try to show inline mark for runtime errors that carry line data
+        // (e.g. mini-notation parse errors that surface mid-playback).
+        setError(editor.editor, { message });
+      }
+    } else if (type === "warning") consolePanel.warn(message, data);
     else consolePanel.log(message, data);
   } catch (panelErr) {
     console.warn("[strasbeat/console] dispatch failed:", panelErr);
@@ -668,7 +706,116 @@ bootPromise.then(() => {
 // The first evaluate after boot awaits prewarm so all instruments are ready
 // before the scheduler plays cycle 1; subsequent evals fire-and-forget.
 let _firstEvalDone = false;
+let runtimeErrorCount = 0;
+let firstRuntimeErrorEntryId = null;
+let lastWarnedUnknownSounds = new Set();
+// Flag set by onEvalError — lets the patched evaluate know whether
+// _editorEvaluate produced an error (it catches internally, never throws).
+let _lastEvalHadError = false;
+// True while _editorEvaluate is in flight — strudel.log errors during eval
+// are eval errors (handled by onEvalError + inline marks), not runtime errors.
+let _evalInProgress = false;
 const _editorEvaluate = editor.evaluate.bind(editor);
+
+function resetRuntimeErrors() {
+  runtimeErrorCount = 0;
+  firstRuntimeErrorEntryId = null;
+  transport.clearErrorCount();
+}
+
+function registerRuntimeError(entryId) {
+  runtimeErrorCount += 1;
+  if (firstRuntimeErrorEntryId == null && Number.isInteger(entryId)) {
+    firstRuntimeErrorEntryId = entryId;
+  }
+  transport.setErrorCount(runtimeErrorCount);
+}
+
+function collectOnsets(haps) {
+  return haps.filter((hap) => hap?.hasOnset?.());
+}
+
+function soundKeyFromHap(hap) {
+  const value = hap?.value;
+  if (!value || typeof value !== "object") return null;
+  let soundKey = value.s ?? "triangle";
+  if (value.bank && soundKey) soundKey = `${value.bank}_${soundKey}`;
+  if (typeof soundKey !== "string") return null;
+  if (["-", "~", "_"].includes(soundKey)) return null;
+  return soundKey;
+}
+
+function findSoundSuggestions(query) {
+  const allSounds = Object.keys(soundMap.get() ?? {});
+  if (!query) return [];
+
+  let matches = [];
+  try {
+    const re = new RegExp(query, "i");
+    matches = allSounds.filter((soundName) => re.test(soundName));
+  } catch {
+    const needle = String(query).toLowerCase();
+    matches = allSounds.filter((soundName) =>
+      soundName.toLowerCase().includes(needle),
+    );
+  }
+
+  if (matches.length === 0 && String(query).includes("_")) {
+    const tail = String(query).split("_").pop();
+    matches = allSounds.filter((soundName) =>
+      soundName.toLowerCase().includes(String(tail).toLowerCase()),
+    );
+  }
+
+  return matches.slice(0, 5);
+}
+
+function isExplicitSilencePattern(code) {
+  const lines = String(code ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("//"));
+
+  if (lines.length === 0) return false;
+  return lines.every(
+    (line) => /^setcp[sm]\(/.test(line) || /^silence(?:\(\))?$/.test(line),
+  );
+}
+
+function warnIfPatternStartsSilent(firstCycleOnsets, nearbyOnsets) {
+  if (firstCycleOnsets.length > 0) return;
+  if (nearbyOnsets.length > 0) return;
+  if (isExplicitSilencePattern(editor.code)) return;
+  consolePanel?.warn(
+    "Pattern evaluated but produced no sound events in the first 4 cycles. Check your sound names and pattern structure.",
+  );
+}
+
+function warnForUnknownSounds(haps) {
+  const soundMapObj = soundMap.get() ?? {};
+  const unknownSounds = new Set();
+
+  for (const hap of haps) {
+    const soundKey = soundKeyFromHap(hap);
+    if (!soundKey) continue;
+    if (!soundMapObj[soundKey.toLowerCase()]) {
+      unknownSounds.add(soundKey);
+    }
+  }
+
+  for (const soundName of unknownSounds) {
+    if (lastWarnedUnknownSounds.has(soundName)) continue;
+    const suggestions = findSoundSuggestions(soundName);
+    const message = suggestions.length
+      ? `Sound "${soundName}" not found. Did you mean: ${suggestions.join(", ")}?`
+      : `Sound "${soundName}" not found. Use strasbeat.findSounds('${soundName}') in the console to search.`;
+    consolePanel?.warn(message);
+  }
+
+  lastWarnedUnknownSounds = unknownSounds;
+}
+
 editor.evaluate = async function patchedEvaluate(...args) {
   const evalRequestId = ++playbackRequestId;
 
@@ -707,8 +854,30 @@ editor.evaluate = async function patchedEvaluate(...args) {
     } catch (err) {
       console.warn("[strasbeat/console] divider failed:", err);
     }
+    _lastEvalHadError = false;
+    _evalInProgress = true;
+    // Reset badge at eval start — new eval = fresh error slate.
+    resetRuntimeErrors();
     const result = await _editorEvaluate(...args);
+    _evalInProgress = false;
     if (evalRequestId !== playbackRequestId) return result;
+
+    // Only clear inline marks on success — on failure, onEvalError
+    // already called setError.
+    if (!_lastEvalHadError) {
+      clearError(editor.editor);
+    } else {
+      // Eval failed — skip post-eval diagnostics (prewarm, silence
+      // detection, sound validation). The error is already surfaced.
+      // Restore transport state: if the scheduler is still running the
+      // old pattern, stay "playing"; otherwise revert to "idle".
+      if (evalRequestId === playbackRequestId) {
+        transport.setPlaybackState(
+          editor.repl?.scheduler?.started ? "playing" : "idle",
+        );
+      }
+      return result;
+    }
 
     try {
       soundBrowser.setBufferText(editor.code ?? "");
@@ -729,23 +898,15 @@ editor.evaluate = async function patchedEvaluate(...args) {
       const pattern = editor.repl?.state?.pattern;
       const cps = editor.repl?.scheduler?.cps ?? 1;
       if (pattern) {
+        const firstCycleHaps = pattern.queryArc(0, 1, { _cps: cps });
+        const firstCycleOnsets = collectOnsets(firstCycleHaps);
         const haps = pattern.queryArc(0, 4, { _cps: cps });
+        const nearbyOnsets = collectOnsets(haps);
 
-        // Silent-pattern detection: if the pattern produces no onset haps
-        // at all, the user sees "playing" but hears nothing. This is the
-        // #1 confusing failure mode. Warn loudly.
-        const onsetCount = haps.filter((h) => h.hasOnset?.()).length;
-        if (onsetCount === 0) {
-          console.warn(
-            "[strasbeat] pattern produced 0 onset haps in 4 cycles — " +
-              "the scheduler is running but nothing will sound. " +
-              "Check for double-quoted string arguments to helpers " +
-              '(Strudel\'s transpiler rewrites "..." into mini() calls).',
-          );
-          transport.setStatus(
-            "playing — but no events detected (check single vs double quotes)",
-          );
-        }
+        warnIfPatternStartsSilent(firstCycleOnsets, nearbyOnsets);
+        warnForUnknownSounds(nearbyOnsets);
+
+        const onsetCount = nearbyOnsets.length;
 
         if (!_firstEvalDone) {
           _firstEvalDone = true;
@@ -765,6 +926,8 @@ editor.evaluate = async function patchedEvaluate(...args) {
             );
           } else if (onsetCount > 0) {
             transport.setStatus(`playing · ${warmed} instruments ready`);
+          } else {
+            transport.setStatus("playing");
           }
         } else {
           prewarmSounds(haps, { getSound, getAudioContext }).catch((err) =>
@@ -785,6 +948,7 @@ editor.evaluate = async function patchedEvaluate(...args) {
 
     return result;
   } catch (err) {
+    _evalInProgress = false;
     if (evalRequestId === playbackRequestId) {
       transport.setPlaybackState("idle");
     }
@@ -797,6 +961,8 @@ editor.stop = function patchedStop(...args) {
   const state = transportEl?.dataset.transportState ?? "idle";
   playbackRequestId += 1;
   const result = _editorStop(...args);
+  clearError(editor.editor);
+  resetRuntimeErrors();
   transport.setPlaybackState("idle");
   if (state === "queued" || state === "loading") {
     transport.setStatus("play canceled");

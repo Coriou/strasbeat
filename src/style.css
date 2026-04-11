@@ -36,6 +36,7 @@
 @import "./styles/roll.css";
 @import "./styles/bottom-panel.css";
 @import "./styles/editor.css";
+@import "./styles/error-marks.css";
 @import "./styles/autocomplete.css";
 @import "./styles/scrubber.css";
 @import "./styles/modal.css";

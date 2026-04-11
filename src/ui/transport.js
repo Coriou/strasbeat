@@ -24,9 +24,14 @@ const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
  * @param {object} opts
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
  * @param {() => AudioContext|null} [opts.getAudioContext]  returns the live AudioContext
- * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, dispose: () => void }}
+ * @param {() => void} [opts.onErrorBadgeClick]  opens the console for runtime errors
+ * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, setErrorCount: (count: number) => void, clearErrorCount: () => void, dispose: () => void }}
  */
-export function mountTransport({ getScheduler, getAudioContext }) {
+export function mountTransport({
+  getScheduler,
+  getAudioContext,
+  onErrorBadgeClick = () => {},
+}) {
   const transportEl = mustEl("transport");
   const stopBtn = mustEl("stop");
   const bpmEl = mustEl("bpm-readout");
@@ -36,6 +41,14 @@ export function mountTransport({ getScheduler, getAudioContext }) {
   const playheadBar = playheadEl.parentElement;
   const statusEl = mustEl("status");
   const midiPillEl = mustEl("midi-status");
+  const rightGroupEl = midiPillEl.parentElement;
+
+  const errorBadgeEl = document.createElement("button");
+  errorBadgeEl.type = "button";
+  errorBadgeEl.className = "transport__error-badge";
+  errorBadgeEl.hidden = true;
+  errorBadgeEl.addEventListener("click", () => onErrorBadgeClick());
+  rightGroupEl.insertBefore(errorBadgeEl, midiPillEl);
 
   // Last-rendered values, to skip unnecessary DOM writes.
   let lastBpm = NaN;
@@ -44,6 +57,7 @@ export function mountTransport({ getScheduler, getAudioContext }) {
   let lastIdle = null;
   let playbackState = "idle";
   let lastAcWarning = ""; // debounce audio context health warnings
+  let lastErrorCount = 0;
 
   let raf = null;
   // Safety-net poll: catches the case where the scheduler starts via the
@@ -163,6 +177,30 @@ export function mountTransport({ getScheduler, getAudioContext }) {
     midiPillEl.classList.toggle("is-err", ok === false);
   }
 
+  function setErrorCount(count) {
+    const nextCount = Math.max(
+      0,
+      Number.isFinite(count) ? Math.trunc(count) : 0,
+    );
+    if (nextCount === lastErrorCount) return;
+    lastErrorCount = nextCount;
+    errorBadgeEl.hidden = nextCount === 0;
+    if (nextCount === 0) {
+      errorBadgeEl.textContent = "";
+      errorBadgeEl.removeAttribute("aria-label");
+      errorBadgeEl.removeAttribute("title");
+      return;
+    }
+    const label = `${nextCount} error${nextCount === 1 ? "" : "s"}`;
+    errorBadgeEl.textContent = label;
+    errorBadgeEl.setAttribute("aria-label", `Open console: ${label}`);
+    errorBadgeEl.title = `Open console: ${label}`;
+  }
+
+  function clearErrorCount() {
+    setErrorCount(0);
+  }
+
   function syncPlaybackState(started) {
     if (started && playbackState !== "playing") {
       playbackState = "playing";
@@ -198,7 +236,15 @@ export function mountTransport({ getScheduler, getAudioContext }) {
     clearInterval(poll);
   }
 
-  return { kick, setStatus, setMidiStatus, setPlaybackState, dispose };
+  return {
+    kick,
+    setStatus,
+    setMidiStatus,
+    setPlaybackState,
+    setErrorCount,
+    clearErrorCount,
+    dispose,
+  };
 }
 
 function mustEl(id) {
