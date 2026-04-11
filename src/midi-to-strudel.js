@@ -742,7 +742,7 @@ function sanitizeIdentifier(name, usedIdentifiers) {
   return id;
 }
 
-function sanitizePatternName(name) {
+export function sanitizePatternName(name) {
   return (
     name
       .toLowerCase()
@@ -753,7 +753,7 @@ function sanitizePatternName(name) {
   );
 }
 
-function gridSubdivisionLabel(gridSlots, timeSignature) {
+export function gridSubdivisionLabel(gridSlots, timeSignature) {
   const [tsNum, tsDenom] = timeSignature;
   const beatsPerBar = tsNum * (4 / tsDenom);
 

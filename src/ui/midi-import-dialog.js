@@ -11,6 +11,8 @@ import {
   parseMidiFile,
   analyzeTranslationInput,
   midiFileToPattern,
+  sanitizePatternName,
+  gridSubdivisionLabel,
 } from "../midi-to-strudel.js";
 import {
   validatePatternName,
@@ -501,29 +503,7 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-function sanitizePatternName(name) {
-  return (
-    name
-      .toLowerCase()
-      .replace(/\.midi?$/i, "")
-      .replace(/[^a-z0-9_-]/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "") || "imported-midi"
-  );
-}
 
-function gridSubdivisionLabel(gridSlots, timeSignature) {
-  const [tsNum, tsDenom] = timeSignature;
-  const beatsPerBar = tsNum * (4 / tsDenom);
-  const ratio = gridSlots / beatsPerBar;
-  if (ratio === 1) return "quarter note";
-  if (ratio === 2) return "8th note";
-  if (ratio === 3) return "8th note triplet";
-  if (ratio === 4) return "16th note";
-  if (ratio === 6) return "16th note triplet";
-  if (ratio === 8) return "32nd note";
-  return `${gridSlots}-slot`;
-}
 
 function el(tag, className, text) {
   const e = document.createElement(tag);
