@@ -12,6 +12,24 @@
   "theme_color": "#1c1c1c",
   "lang": "en",
   "categories": ["music", "entertainment", "productivity"],
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "handle_links": "preferred",
+  "shortcuts": [
+    {
+      "name": "New Pattern",
+      "short_name": "New",
+      "url": "/?action=new",
+      "icons": [{ "src": "/favicon-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Export WAV",
+      "short_name": "Export",
+      "url": "/?action=export",
+      "icons": [{ "src": "/favicon-192x192.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "/favicon.svg",

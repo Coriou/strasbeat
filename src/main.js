@@ -1095,3 +1095,28 @@ window.strasbeat = mountDebugHelpers({ soundMap, getSound, editor, getConsolePan
 window.editor = editor;
 window.patterns = patterns;
 window.midi = midi;
+
+// ─── PWA shortcut actions (?action=new|export from manifest shortcuts) ───
+bootPromise.then(() => {
+  const params = new URLSearchParams(location.search);
+  const action = params.get("action");
+  if (!action) return;
+  // Clean the URL so the action doesn't re-fire on reload.
+  const clean = new URL(location.href);
+  clean.searchParams.delete("action");
+  history.replaceState(null, "", clean.pathname + clean.search + clean.hash);
+  if (action === "new") {
+    handleNewPatternClick({
+      getEditorCode: () => editor.code ?? "",
+      getCurrentName: () => currentName,
+      setCurrentName,
+      patterns,
+      patternNames,
+      leftRail,
+      store,
+      editor,
+    });
+  } else if (action === "export") {
+    exportBtn?.click();
+  }
+});

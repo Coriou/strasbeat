@@ -13,6 +13,7 @@ body {
   height: 100%;
   background: var(--surface-0);
   color: var(--text);
+  color-scheme: dark;
   font-family: var(--font-sans);
   font-size: var(--text-base);
   line-height: var(--lh-base);
@@ -22,10 +23,32 @@ body {
   text-rendering: optimizeLegibility;
   /* Geist stylistic sets — slightly tighter feel; tweak to taste. */
   font-feature-settings: "ss01", "ss03", "cv11";
+  /* Suppress web-page bounce / pull-to-refresh / swipe-back in installed PWA. */
+  overscroll-behavior: none;
+  /* Global thin dark scrollbar — individual components can still override. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
 }
 
 body {
   overflow: hidden;
+}
+
+/* ─── Text selection — accent-tinted instead of Chrome's default blue ─── */
+::selection {
+  background: oklch(0.63 0.19 358 / 0.35);
+  color: var(--text);
+}
+
+/* ─── Suppress long-press callout menus on chrome elements (iOS/touch). ─── */
+button,
+[role="button"],
+.btn,
+.transport,
+.top-bar,
+.left-rail__item,
+.track-bar {
+  -webkit-touch-callout: none;
 }
 
 /* Dev-only chrome (e.g. the disk-backed save button, the new pattern "+"
