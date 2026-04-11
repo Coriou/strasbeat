@@ -62,7 +62,7 @@ bassrev: stack(bass)
 
 bassplayful: stack(bass)
   .s("sawtooth")
-  .lpf(sine.range(200, 2000).slow(8))
+  .lpf(sine.range(800, 2000).slow(8))
   .lpq(12)
   .decay(0.15)
   .sustain(0)
