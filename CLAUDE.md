@@ -42,10 +42,14 @@ the editor).
 
 `index.html` → `src/main.js` boots a `StrudelMirror` (from
 `@strudel/codemirror`) into `#editor`, auto-discovers `patterns/*.js` via
-`import.meta.glob`, wires the toolbar (play / stop / save / export wav /
-capture / preset picker), prebakes sample banks, mounts the MIDI bridge,
-and registers `src/strudel-ext/` into Strudel's `evalScope()` so its
-helpers (`progression()`, …) become globals inside pattern code.
+`import.meta.glob`, and wires every panel and toolbar button together. The
+heavy lifting is split into focused modules: `boot.js` runs the prebake
+state machine (evalScope, soundfonts, samples), `eval-feedback.js`
+monkey-patches `editor.evaluate`/`editor.stop` with error tracking, sound
+validation, and silence detection, `panels.js` creates and registers all
+seven right-rail panels, `capture.js` owns the MIDI capture preview modal,
+`export.js` handles WAV rendering, `share.js` the URL codec, and
+`command-palette-actions.js` maps keyboard shortcuts to commands.
 
 The shell is a design-system layout (top bar with brand + pattern menu +
 share/settings, left rail patterns library, editor canvas, transport bar
@@ -79,8 +83,25 @@ top of Strudel's pattern language. See the dedicated section below.
 strasbeat/
 ├── index.html              # shell: top bar, left rail, editor, transport, piano roll
 ├── src/
-│   ├── main.js             # boot, toolbar, prebake, WAV export, pattern auto-discovery
+│   ├── main.js             # orchestration: editor construction, panel wiring, toolbar
+│   ├── boot.js             # prebake state machine (evalScope, soundfonts, samples)
+│   ├── eval-feedback.js    # patched evaluate/stop, error tracking, sound validation
+│   ├── capture.js          # MIDI capture preview modal + capture handler
+│   ├── panels.js           # right-rail panel creation & registration
+│   ├── export.js           # WAV render + encode + download
+│   ├── share.js            # URL share codec
+│   ├── editor-actions.js   # sound preview, insert, try example, insert template
+│   ├── editor-setup.js     # CM settings merge + extension dispatch
+│   ├── piano-roll-resize.js # roll toggle + divider drag
+│   ├── command-palette-actions.js # Cmd+Shift+P action builders
+│   ├── debug.js            # window.strasbeat console helpers
+│   ├── patterns.js         # pattern discovery, persistence bridge, autosave
+│   ├── store.js            # localStorage persistence (dirty tracking, user patterns)
+│   ├── strudel-logger.js   # strudel.log filtering
+│   ├── user-setup.js       # user setup script runner
 │   ├── midi-bridge.js      # Web MIDI → superdough trigger-and-decay
+│   ├── midi-to-strudel.js  # MIDI file → Strudel pattern translation pipeline
+│   ├── midi-gm.js          # GM program → Strudel sound mapping
 │   ├── editor/
 │   │   ├── format.js       # Prettier + quote-restoration post-processor
 │   │   ├── keymap.js       # VSCode-style keybindings
@@ -88,12 +109,28 @@ strasbeat/
 │   │   ├── hover-docs.js   # CM6 hoverTooltip for Strudel functions
 │   │   ├── signature-hint.js    # signature pill above cursor
 │   │   ├── strudel-docs.json    # generated JSDoc index (pnpm gen:docs)
+│   │   ├── error-marks.js  # inline error decorations + gutter markers
+│   │   ├── track-labels.js # track mute/solo label parsing
 │   │   ├── mini-notation-tokens.js  # tokeniser for mini-notation strings
 │   │   └── completions/    # sound, bank, chord, scale, mode, function, mini-notation
 │   ├── ui/
 │   │   ├── left-rail.js        # patterns library (search, keyboard nav)
 │   │   ├── transport.js        # BPM, cycle, playhead readouts, status, MIDI pill
+│   │   ├── midi-bar.js         # MIDI bar (mini-keyboard, presets, capture, controls)
+│   │   ├── midi-import-dialog.js # MIDI file import dialog
 │   │   ├── piano-roll.js       # Canvas2D renderer (per-layer color, click-to-locate)
+│   │   ├── right-rail.js       # resizable panel host
+│   │   ├── sound-browser.js    # sound search + preview + insert
+│   │   ├── reference-panel.js  # function reference + in-use highlighting
+│   │   ├── console-panel.js    # log/warn/error console
+│   │   ├── export-panel.js     # WAV export UI
+│   │   ├── settings-panel.js   # editor settings + about
+│   │   ├── learn-panel.js      # interactive Strudel lessons
+│   │   ├── setup-panel.js      # user packages + samples configuration
+│   │   ├── track-bar.js        # track mute/solo bar
+│   │   ├── scope.js            # oscilloscope visualizer
+│   │   ├── bottom-panel-modes.js # roll/scope/custom mode switcher
+│   │   ├── command-palette.js  # Cmd+Shift+P fuzzy command menu
 │   │   ├── modal.js            # in-app prompt replacement (focus-trapped)
 │   │   ├── settings-drawer.js  # OKLCH accent picker, persisted to localStorage
 │   │   └── icons.js            # Lucide icon wrapper + hydration
@@ -106,12 +143,13 @@ strasbeat/
 ├── patterns/               # *.js — each one default-exports a Strudel string
 ├── scripts/
 │   ├── build-strudel-docs.mjs   # extracts JSDoc → strudel-docs.json
+│   ├── build-learn-index.mjs    # builds learn panel content index
 │   └── test-format.mjs
 ├── design/
 │   ├── README.md           # how to use the design specs
 │   ├── SYSTEM.md           # design system (type, color, spacing, layout)
 │   ├── PATTERN-STYLE.md    # modern Strudel pattern idioms
-│   └── work/               # task specs (01-shell through 07-chord-progression)
+│   └── work/               # task specs (01-shell through 16-midi-import)
 ├── vite.config.js          # /api/save middleware + strudel.cc proxy
 ├── vercel.json             # production deployment config
 ├── README.md               # user-facing front door
