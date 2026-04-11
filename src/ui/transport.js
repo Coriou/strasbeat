@@ -23,9 +23,10 @@ const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
 /**
  * @param {object} opts
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
+ * @param {() => AudioContext|null} [opts.getAudioContext]  returns the live AudioContext
  * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, dispose: () => void }}
  */
-export function mountTransport({ getScheduler }) {
+export function mountTransport({ getScheduler, getAudioContext }) {
   const transportEl = mustEl("transport");
   const stopBtn = mustEl("stop");
   const bpmEl = mustEl("bpm-readout");
@@ -42,6 +43,7 @@ export function mountTransport({ getScheduler }) {
   let lastPct = -1;
   let lastIdle = null;
   let playbackState = "idle";
+  let lastAcWarning = ""; // debounce audio context health warnings
 
   let raf = null;
   // Safety-net poll: catches the case where the scheduler starts via the
@@ -114,6 +116,32 @@ export function mountTransport({ getScheduler }) {
       playheadBar.classList.toggle("transport__playhead--idle", idle);
     }
     syncPlaybackState(started);
+
+    // AudioContext health check — detect the "playing but no sound" state
+    // where the scheduler reports started but the audio context is not
+    // running (suspended by autoplay policy, closed after export, etc.).
+    if (started && getAudioContext) {
+      try {
+        const ac = getAudioContext();
+        if (ac && ac.state === "suspended" && lastAcWarning !== "suspended") {
+          lastAcWarning = "suspended";
+          setStatus("audio suspended — click the page to enable sound");
+          console.warn(
+            "[strasbeat/transport] scheduler is started but AudioContext is suspended",
+          );
+        } else if (ac && ac.state === "closed" && lastAcWarning !== "closed") {
+          lastAcWarning = "closed";
+          setStatus("audio context closed — reload to restore sound");
+          console.warn(
+            "[strasbeat/transport] scheduler is started but AudioContext is closed",
+          );
+        } else if (ac && ac.state === "running") {
+          lastAcWarning = "";
+        }
+      } catch {
+        // getAudioContext itself can throw during init — ignore.
+      }
+    }
   }
 
   function kick() {

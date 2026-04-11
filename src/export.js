@@ -434,6 +434,8 @@ export async function runExport(options, ctx) {
     resetGlobalEffects,
     initAudio,
     superdough,
+    onBeforeContextTeardown,
+    onAfterContextRestore,
   } = ctx;
 
   // ── Mutex: refuse if an export is already in flight ──
@@ -508,6 +510,16 @@ export async function runExport(options, ctx) {
     // whose rejections then poison Strudel's private loadCache forever
     // (there's no public API to clear it).
     await new Promise((r) => setTimeout(r, 120));
+
+    // Notify listeners (e.g. scope) that the audio context is about to
+    // be torn down — they should disconnect any patched state.
+    if (typeof onBeforeContextTeardown === "function") {
+      try {
+        onBeforeContextTeardown();
+      } catch (err) {
+        console.warn("[strasbeat/export] context teardown hook failed:", err);
+      }
+    }
 
     const { rendered, scheduled } = await renderPatternToBufferWithProgress(
       pattern,
@@ -650,5 +662,14 @@ export async function runExport(options, ctx) {
     _exportRunning = false;
     exportBtn.disabled = false;
     if (exportLabel) exportLabel.textContent = "wav";
+
+    // Notify listeners (e.g. scope) that a fresh audio context is ready.
+    if (typeof onAfterContextRestore === "function") {
+      try {
+        onAfterContextRestore();
+      } catch (err) {
+        console.warn("[strasbeat/export] context restore hook failed:", err);
+      }
+    }
   }
 }

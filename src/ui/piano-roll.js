@@ -156,16 +156,21 @@ function getFirstLocation(hap) {
   return null;
 }
 
-// Read design-token values off the canvas's computed style each frame so
-// any user override of `--accent` / `--surface-1` / etc. flows through
-// without a renderer rebuild.
+// Read design-token values off the canvas's computed style. Cached for 2s
+// so we don't pay the getComputedStyle allocation cost on every animation
+// frame (~60fps). Theme changes are picked up after the cache expires.
+let _tokenCache = null;
+let _tokenCanvas = null;
+let _tokenTimer = null;
 function readTokens(canvas) {
+  if (canvas === _tokenCanvas && _tokenCache) return _tokenCache;
   const cs = getComputedStyle(canvas);
   const get = (name, fallback) => {
     const v = cs.getPropertyValue(name).trim();
     return v || fallback;
   };
-  return {
+  _tokenCanvas = canvas;
+  _tokenCache = {
     bg: get("--surface-1", "#1f1f1f"),
     border: get("--border", "#4d4d4d"),
     borderSoft: get("--border-soft", "#2e2e2e"),
@@ -176,6 +181,11 @@ function readTokens(canvas) {
     fontMono: get("--font-mono", "ui-monospace, monospace"),
     textXs: get("--text-xs", "11px"),
   };
+  clearTimeout(_tokenTimer);
+  _tokenTimer = setTimeout(() => {
+    _tokenCache = null;
+  }, 2000);
+  return _tokenCache;
 }
 
 function colorForKey(state, key) {
@@ -361,10 +371,16 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   const rowH = noteAreaH / slotCount;
   const pillH = Math.max(2, rowH - 2);
 
+  // Build O(1) lookup for value → slot index (avoids indexOf per hap).
+  const valueIndex = new Map();
+  for (let i = 0; i < uniqueValues.length; i++) {
+    valueIndex.set(uniqueValues[i], i);
+  }
+
   const valueToY = (val) => {
-    const idx = uniqueValues.indexOf(val);
+    const idx = valueIndex.get(val) ?? 0;
     // Higher pitch = higher on screen → invert the slot index.
-    const slot = slotCount - 1 - (idx >= 0 ? idx : 0);
+    const slot = slotCount - 1 - idx;
     return noteAreaY + (slot / slotCount) * noteAreaH;
   };
 

@@ -8,28 +8,95 @@
 //   scope.connect(audioContext);          // lazy AnalyserNode creation
 //   scope.render(ctx, width, height);     // call in onDraw
 //   scope.disconnect();                   // cleanup
+//
+// Audio routing: AudioDestinationNode has no output channels, so the
+// naive `destination.connect(analyser)` silently produces zero data.
+// Instead we override the context's `destination` getter to return a
+// proxy GainNode that routes to both the real destination and our
+// analyser. All future audio routed to `ctx.destination` (including
+// superdough's one-shot calls) will be captured. Existing connections
+// made before connect() are unaffected — those are rare since Strudel
+// creates and connects nodes per-event.
 
 export function createScope() {
   let analyser = null;
   let dataArray = null;
+  let proxyGain = null;
+  let realDestination = null;
+  let patchedContext = null;
+  // Cache token values so we don't call getComputedStyle every frame.
+  let cachedTokenCanvas = null;
+  let cachedTokens = null;
+  let tokenTimer = null;
+
+  function readTokens(canvas) {
+    if (canvas === cachedTokenCanvas && cachedTokens) return cachedTokens;
+    const cs = getComputedStyle(canvas);
+    cachedTokenCanvas = canvas;
+    cachedTokens = {
+      bg: cs.getPropertyValue("--surface-1").trim() || "#1a1a1a",
+      accent: cs.getPropertyValue("--accent").trim() || "oklch(0.63 0.19 358)",
+      gridColor:
+        cs.getPropertyValue("--border-soft").trim() || "oklch(0.26 0 0)",
+    };
+    // Invalidate cached tokens after a short delay so theme changes are
+    // picked up without needing an explicit refresh.
+    clearTimeout(tokenTimer);
+    tokenTimer = setTimeout(() => {
+      cachedTokens = null;
+    }, 2000);
+    return cachedTokens;
+  }
 
   function connect(audioContext) {
     if (analyser) return;
-    analyser = audioContext.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.4;
-    dataArray = new Uint8Array(analyser.frequencyBinCount);
-    // Connect to audio context destination so we see the final output.
     try {
-      audioContext.destination.connect?.(analyser);
-    } catch {
-      // Some audio contexts don't allow connecting from destination.
-      // Fall back to connecting the analyser to nothing — the caller will
-      // need to route audio through us.
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.4;
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      // Intercept the destination getter so all future audio routes
+      // through a pass-through gain node that splits the signal to
+      // both the real destination and our analyser.
+      realDestination = audioContext.destination;
+      proxyGain = audioContext.createGain();
+      proxyGain.connect(realDestination);
+      proxyGain.connect(analyser);
+
+      Object.defineProperty(audioContext, "destination", {
+        get: () => proxyGain,
+        configurable: true,
+      });
+      patchedContext = audioContext;
+    } catch (err) {
+      console.warn(
+        "[strasbeat/scope] failed to tap audio output:",
+        err,
+        "— scope will show flat line",
+      );
+      // Leave analyser created so render() at least clears the canvas.
     }
   }
 
   function disconnect() {
+    // Restore the original destination getter.
+    if (patchedContext && realDestination) {
+      try {
+        Object.defineProperty(patchedContext, "destination", {
+          get: () => realDestination,
+          configurable: true,
+        });
+      } catch {
+        // Context may already be closed post-export.
+      }
+    }
+    if (proxyGain) {
+      try {
+        proxyGain.disconnect();
+      } catch {}
+      proxyGain = null;
+    }
     if (analyser) {
       try {
         analyser.disconnect();
@@ -37,30 +104,28 @@ export function createScope() {
       analyser = null;
       dataArray = null;
     }
+    realDestination = null;
+    patchedContext = null;
+    cachedTokenCanvas = null;
+    cachedTokens = null;
+    clearTimeout(tokenTimer);
   }
 
   function render(ctx, width, height) {
     if (!analyser || !dataArray) {
-      // Not connected — draw a flat line.
       drawFlatLine(ctx, width, height);
       return;
     }
 
     analyser.getByteTimeDomainData(dataArray);
-
-    const cs = getComputedStyle(ctx.canvas);
-    const bg = cs.getPropertyValue("--surface-1").trim() || "#1a1a1a";
-    const accent =
-      cs.getPropertyValue("--accent").trim() || "oklch(0.63 0.19 358)";
-    const gridColor =
-      cs.getPropertyValue("--border-soft").trim() || "oklch(0.26 0 0)";
+    const t = readTokens(ctx.canvas);
 
     // Background
-    ctx.fillStyle = bg;
+    ctx.fillStyle = t.bg;
     ctx.fillRect(0, 0, width, height);
 
     // Center line
-    ctx.strokeStyle = gridColor;
+    ctx.strokeStyle = t.gridColor;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -70,7 +135,7 @@ export function createScope() {
     ctx.setLineDash([]);
 
     // Waveform
-    ctx.strokeStyle = accent;
+    ctx.strokeStyle = t.accent;
     ctx.lineWidth = 1.5;
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -89,14 +154,10 @@ export function createScope() {
   }
 
   function drawFlatLine(ctx, width, height) {
-    const cs = getComputedStyle(ctx.canvas);
-    const bg = cs.getPropertyValue("--surface-1").trim() || "#1a1a1a";
-    const gridColor =
-      cs.getPropertyValue("--border-soft").trim() || "oklch(0.26 0 0)";
-
-    ctx.fillStyle = bg;
+    const t = readTokens(ctx.canvas);
+    ctx.fillStyle = t.bg;
     ctx.fillRect(0, 0, width, height);
-    ctx.strokeStyle = gridColor;
+    ctx.strokeStyle = t.gridColor;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();

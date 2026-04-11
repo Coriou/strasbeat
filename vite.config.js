@@ -22,23 +22,40 @@ function patternSavePlugin() {
     configureServer(server) {
       server.middlewares.use("/api/save", async (req, res, next) => {
         if (req.method !== "POST") return next();
+        // Cap request body at 1MB to prevent accidental memory exhaustion.
+        const MAX_BODY = 1024 * 1024;
         let body = "";
-        for await (const chunk of req) body += chunk;
+        for await (const chunk of req) {
+          body += chunk;
+          if (body.length > MAX_BODY) {
+            res.statusCode = 413;
+            return res.end(
+              JSON.stringify({ ok: false, error: "payload too large" }),
+            );
+          }
+        }
         let payload;
         try {
           payload = JSON.parse(body);
         } catch {
           res.statusCode = 400;
-          return res.end("invalid json");
+          return res.end(JSON.stringify({ ok: false, error: "invalid json" }));
         }
         const { name, code } = payload;
         if (typeof name !== "string" || !/^[a-z0-9_-]+$/i.test(name)) {
           res.statusCode = 400;
-          return res.end("name must match /^[a-z0-9_-]+$/i");
+          return res.end(
+            JSON.stringify({
+              ok: false,
+              error: "name must match /^[a-z0-9_-]+$/i",
+            }),
+          );
         }
         if (typeof code !== "string") {
           res.statusCode = 400;
-          return res.end("code must be a string");
+          return res.end(
+            JSON.stringify({ ok: false, error: "code must be a string" }),
+          );
         }
         const escaped = code
           .replace(/\\/g, "\\\\")
@@ -46,8 +63,19 @@ function patternSavePlugin() {
           .replace(/\$\{/g, "\\${");
         const file = `export default \`${escaped}\`;\n`;
         const target = path.join(PATTERNS_DIR, `${name}.js`);
-        fs.mkdirSync(PATTERNS_DIR, { recursive: true });
-        fs.writeFileSync(target, file, "utf8");
+        try {
+          fs.mkdirSync(PATTERNS_DIR, { recursive: true });
+          fs.writeFileSync(target, file, "utf8");
+        } catch (err) {
+          console.error("[strasbeat/api/save] write failed:", err);
+          res.statusCode = 500;
+          return res.end(
+            JSON.stringify({
+              ok: false,
+              error: `write failed: ${err.message}`,
+            }),
+          );
+        }
         res.setHeader("content-type", "application/json");
         res.end(
           JSON.stringify({ ok: true, path: path.relative(__dirname, target) }),

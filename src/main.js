@@ -438,6 +438,7 @@ const leftRail = mountLeftRail({
 // ─── Transport bar ───────────────────────────────────────────────────────
 const transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
+  getAudioContext,
 });
 let playbackRequestId = 0;
 
@@ -581,7 +582,7 @@ rightRail.registerPanel(consolePanel);
 // prettier-ignore
 const exportPanel = createExportPanel({
   onFocusEditor: () => editor.editor.focus(),
-  onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough }),
+  onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, onBeforeContextTeardown: () => scope.disconnect(), onAfterContextRestore: () => { if (bottomModes.getMode() === "scope") { try { scope.connect(getAudioContext()); } catch {} } } }),
   getPatternName: () => currentName || "untitled",
 });
 rightRail.registerPanel(exportPanel);
@@ -729,6 +730,23 @@ editor.evaluate = async function patchedEvaluate(...args) {
       const cps = editor.repl?.scheduler?.cps ?? 1;
       if (pattern) {
         const haps = pattern.queryArc(0, 4, { _cps: cps });
+
+        // Silent-pattern detection: if the pattern produces no onset haps
+        // at all, the user sees "playing" but hears nothing. This is the
+        // #1 confusing failure mode. Warn loudly.
+        const onsetCount = haps.filter((h) => h.hasOnset?.()).length;
+        if (onsetCount === 0) {
+          console.warn(
+            "[strasbeat] pattern produced 0 onset haps in 4 cycles — " +
+              "the scheduler is running but nothing will sound. " +
+              "Check for double-quoted string arguments to helpers " +
+              '(Strudel\'s transpiler rewrites "..." into mini() calls).',
+          );
+          transport.setStatus(
+            "playing — but no events detected (check single vs double quotes)",
+          );
+        }
+
         if (!_firstEvalDone) {
           _firstEvalDone = true;
           transport.setStatus("loading instruments…");
@@ -745,7 +763,7 @@ editor.evaluate = async function patchedEvaluate(...args) {
             transport.setStatus(
               `playing · ${failed.length} sound(s) couldn't load`,
             );
-          } else {
+          } else if (onsetCount > 0) {
             transport.setStatus(`playing · ${warmed} instruments ready`);
           }
         } else {
