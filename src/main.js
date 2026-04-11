@@ -1,17 +1,16 @@
-import { StrudelMirror, codemirrorSettings } from "@strudel/codemirror";
+import { StrudelMirror } from "@strudel/codemirror";
 import { transpiler } from "@strudel/transpiler";
-import { registerSoundfonts } from "@strudel/soundfonts";
-// Strudel packages fed to evalScope below — imported as namespaces to avoid
-// the static+dynamic chunking warning from mixing with named imports.
+// Strudel packages — imported as namespaces to avoid the static+dynamic
+// chunking warning. Boot-only packages (strudelDraw, soundfonts) live in
+// boot.js; the rest are still needed here for installSoundCompletion.
 import * as strudelCore from "@strudel/core";
-import * as strudelDraw from "@strudel/draw";
 import * as strudelMini from "@strudel/mini";
 import * as strudelTonal from "@strudel/tonal";
 import * as strudelWebaudio from "@strudel/webaudio";
 import * as strudelExt from "./strudel-ext/index.js";
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { MidiBridge, presets as midiPresets } from "./midi-bridge.js";
+import { MidiBridge } from "./midi-bridge.js";
 import { mountMidiBar } from "./ui/midi-bar.js";
 import { installSoundCompletion } from "./editor/completions/sounds.js";
 import {
@@ -24,57 +23,36 @@ import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
 import { mountRightRail } from "./ui/right-rail.js";
-import { createSoundBrowserPanel } from "./ui/sound-browser.js";
-import { createReferencePanel } from "./ui/reference-panel.js";
-import { createConsolePanel } from "./ui/console-panel.js";
-import { createExportPanel } from "./ui/export-panel.js";
-import { createSettingsPanel } from "./ui/settings-panel.js";
-import { createLearnPanel } from "./ui/learn-panel.js";
-import { createSetupPanel } from "./ui/setup-panel.js";
-import { runUserSetup } from "./user-setup.js";
+import { registerPanels } from "./panels.js";
 import { renderRoll } from "./ui/piano-roll.js";
 import { createScope } from "./ui/scope.js";
 import { createBottomPanelModes } from "./ui/bottom-panel-modes.js";
 import { mountTrackBar } from "./ui/track-bar.js";
 import { prompt, confirm } from "./ui/modal.js";
-import { applyStoredAccent, applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
+import { applyStoredAccent } from "./ui/settings-drawer.js";
 import { createLocalStore } from "./store.js";
 import { readSharedFromHash, shareCurrent } from "./share.js";
-import { runExport, prewarmSounds, isExportRunning } from "./export.js";
-import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate } from "./editor-actions.js"; // prettier-ignore
+import { prewarmSounds, isExportRunning } from "./export.js";
 import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
-import { discoverPatterns, computeDirtySet, getUserPatternNames, createAutosave, handleNewPatternClick, validatePatternName, patternNameExists, saveNewPattern } from "./patterns.js"; // prettier-ignore
+import { discoverPatterns, computeDirtySet, getUserPatternNames, createAutosave, handleNewPatternClick } from "./patterns.js";
 import {
   showMidiImportDialog,
-  hasMidiFile,
   getMidiFile,
 } from "./ui/midi-import-dialog.js";
-import { readStoredCmSettingsFromLocalStorage, applyInitialSettings, dispatchEditorExtensions, THEME_OPTIONS, applyPanelSetting } from "./editor-setup.js"; // prettier-ignore
-import { formatCommand } from "./editor/format.js";
 import {
-  installDefaultStrudelLogger,
-  shouldIgnoreStrudelLog,
-} from "./strudel-logger.js";
-import { mountCommandPalette, buildCommands } from "./ui/command-palette.js";
-import { toggleLabelAtCursor } from "./editor/keymap.js";
-import { toggleMute, toggleSolo } from "./editor/track-labels.js";
-import {
-  toggleComment,
-  deleteLine,
-  indentLess,
-  indentMore,
-  moveLineDown,
-  moveLineUp,
-  selectLine,
-} from "@codemirror/commands";
-import {
-  selectNextOccurrence,
-  selectSelectionMatches,
-} from "@codemirror/search";
+  readStoredCmSettingsFromLocalStorage,
+  applyInitialSettings,
+  dispatchEditorExtensions,
+} from "./editor-setup.js";
+import { installDefaultStrudelLogger } from "./strudel-logger.js";
+import { installEvalFeedback } from "./eval-feedback.js";
+import { createBoot } from "./boot.js";
+import { handleCaptureClick } from "./capture.js";
+import { mountCommandPalette } from "./ui/command-palette.js";
+import { buildPaletteCommands } from "./command-palette-actions.js";
 
-const { evalScope, controls } = strudelCore;
-const { getAudioContext, webaudioOutput, registerSynthSounds, registerZZFXSounds, initAudio, initAudioOnFirstClick, setLogger, samples, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
+const { getAudioContext, webaudioOutput, initAudio, setLogger, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
 
 // Version strings surfaced in the settings panel's "About" section.
 // Keep in sync with `package.json`.
@@ -194,32 +172,16 @@ let currentName = initialName;
 const INITIAL_STORED_CM_SETTINGS = readStoredCmSettingsFromLocalStorage();
 
 // ─── Boot state machine ─────────────────────────────────────────────────
-// Tracks prebake progress so the UI can gate play, show progress, and
-// surface partial failures rather than silently degrading.
-let bootReady = false;
-let bootFailures = [];
-let _bootResolve;
-const bootPromise = new Promise((r) => {
-  _bootResolve = r;
+const { bootPromise, getBootReady, prebake } = createBoot({
+  shellEl,
+  exportBtn,
+  status,
 });
-
-// Progress bar — thin accent line across the top of the shell.
-const progressBar = document.createElement("div");
-progressBar.className = "boot-progress";
-shellEl.prepend(progressBar);
-
-function setBootProgress(fraction, label) {
-  progressBar.style.setProperty("--boot-pct", fraction.toFixed(2));
-  if (label) status.textContent = label;
-}
-
-// Gate export/share until boot completes.
-exportBtn.disabled = true;
-shellEl.classList.add("is-booting");
 
 // Forward decl — panel mounted further down; onEvalError fires after boot.
 let consolePanel = null;
 let transport = null;
+let evalFeedback = null;
 
 const editor = new StrudelMirror({
   defaultOutput: webaudioOutput,
@@ -229,25 +191,8 @@ const editor = new StrudelMirror({
   initialCode,
   drawTime,
   autodraw: true,
-  // Eval failures routed into the console panel.
-  onEvalError: (err) => {
-    _lastEvalHadError = true;
-    const located = setError(editor.editor, err);
-    let entryId = null;
-    const message = err?.message || String(err);
-    try {
-      // When the content-based heuristic found a line, pass it as
-      // structured data so the console panel can render a [line N] badge
-      // even for errors that don't carry line numbers natively.
-      const data = { error: err };
-      if (located) data.line = located.line;
-      if (located?.column != null) data.column = located.column;
-      entryId = consolePanel?.error(message, data) ?? null;
-    } catch (panelErr) {
-      console.warn("[strasbeat/console] error() failed:", panelErr);
-    }
-    registerEvalError(err, entryId, located);
-  },
+  // Eval failures routed into eval-feedback.js via forward-ref.
+  onEvalError: (err) => evalFeedback?.handleEvalError(err),
   onDraw: (haps, time) => {
     const mode = bottomModes.getMode();
     if (mode === "scope") {
@@ -266,103 +211,7 @@ const editor = new StrudelMirror({
       renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor });
     }
   },
-  prebake: async () => {
-    try {
-      initAudioOnFirstClick();
-      setBootProgress(0.05, "loading modules…");
-      const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelExt); // prettier-ignore
-      await loadModules;
-      setBootProgress(0.15, "loading synth sounds…");
-
-      const failures = [];
-      const safe = (label, p) =>
-        Promise.resolve(p).catch((e) => {
-          console.warn(`[strasbeat] failed to load ${label}:`, e);
-          failures.push(label);
-        });
-
-      // Timeout wrapper — if a phase takes longer than `ms`, continue with
-      // whatever loaded rather than hanging the boot sequence forever. The
-      // CDN (strudel.cc, GitHub) can be slow or unreachable; the user
-      // should still get a working editor with degraded sound coverage.
-      const BOOT_TIMEOUT_MS = 15_000;
-      const withTimeout = (label, p, ms = BOOT_TIMEOUT_MS) =>
-        safe(
-          label,
-          Promise.race([
-            p,
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error(`${label}: timed out after ${ms}ms`)),
-                ms,
-              ),
-            ),
-          ]),
-        );
-
-      // Phase 1: synth sounds + ZZFX (small, fast — no timeout needed)
-      await safe("synth sounds", registerSynthSounds());
-      safe("ZZFX sounds", registerZZFXSounds());
-      setBootProgress(0.3, "loading soundfonts…");
-
-      // Phase 2: soundfonts (medium — timeout protects against CDN issues)
-      await withTimeout("soundfonts", registerSoundfonts());
-      setBootProgress(0.5, "loading samples…");
-
-      // Phase 3: sample banks (large, in parallel as they're independent)
-      // strudel.cc has no CORS headers, so we proxy via vite.config.js
-      await Promise.all([
-        withTimeout("dirt-samples", samples("github:tidalcycles/dirt-samples")),
-        withTimeout('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/')), // prettier-ignore
-        withTimeout(
-          "uzu-drumkit",
-          samples(
-            "https://raw.githubusercontent.com/tidalcycles/uzu-drumkit/main/strudel.json",
-          ),
-        ),
-      ]);
-      setBootProgress(0.9, "running user setup…");
-
-      // Phase 4: user setup — opt-in packages, user samples, setup script.
-      // Runs after core prebake so everything the user's code might reference
-      // is already available.
-      await safe("user setup", runUserSetup({ evalScope, samples }));
-      setBootProgress(1.0);
-
-      // ── Finalize boot state ──
-      bootFailures = failures;
-      bootReady = true;
-      exportBtn.disabled = false;
-      shellEl.classList.remove("is-booting");
-      shellEl.classList.add("is-ready");
-
-      if (failures.length === 0) {
-        status.textContent = "Ready to play";
-      } else {
-        status.textContent = `Ready with ${failures.length} load warning${failures.length === 1 ? "" : "s"}`;
-        console.warn("[strasbeat] boot completed with failures:", failures);
-      }
-
-      // Fade out progress bar.
-      progressBar.classList.add("boot-progress--done");
-      setTimeout(() => progressBar.remove(), 600);
-
-      _bootResolve();
-    } catch (fatalErr) {
-      // Top-level error boundary — boot must ALWAYS resolve so the
-      // editor is at least usable (even if sounds didn't load). Without
-      // this, an unhandled throw leaves the boot promise hanging forever.
-      console.error("[strasbeat] fatal boot error:", fatalErr);
-      bootReady = true;
-      exportBtn.disabled = false;
-      shellEl.classList.remove("is-booting");
-      shellEl.classList.add("is-ready");
-      status.textContent = "Boot failed. Check console.";
-      progressBar.classList.add("boot-progress--done");
-      setTimeout(() => progressBar.remove(), 600);
-      _bootResolve();
-    }
-  },
+  prebake,
 });
 
 function focusEditorLocation({ line, column } = {}) {
@@ -426,7 +275,7 @@ const leftRail = mountLeftRail({
   onSelect(name) {
     flushToStore();
     clearError(editor.editor);
-    resetRuntimeErrors();
+    evalFeedback?.resetRuntimeErrors();
     setCurrentName(name);
     const record = store.get(name);
     if (record) editor.setCode(record.code);
@@ -457,7 +306,7 @@ const leftRail = mountLeftRail({
     lastDirtyState.delete(name);
     if (currentName === name) {
       clearError(editor.editor);
-      resetRuntimeErrors();
+      evalFeedback?.resetRuntimeErrors();
       editor.setCode(patterns[name]);
     }
     leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
@@ -484,19 +333,19 @@ transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
   getAudioContext,
   onErrorBadgeClick: () => {
-    if (activeTransportError?.entryId != null) {
+    const ate = evalFeedback?.getActiveTransportError();
+    if (ate?.entryId != null) {
       rightRail.activate("console");
-      consolePanel?.scrollToEntry(activeTransportError.entryId);
+      consolePanel?.scrollToEntry(ate.entryId);
       return;
     }
-    if (activeTransportError?.location) {
-      focusEditorLocation(activeTransportError.location);
+    if (ate?.location) {
+      focusEditorLocation(ate.location);
       return;
     }
     rightRail.activate("console");
   },
 });
-let playbackRequestId = 0;
 
 // Keeps the top-bar wordmark, left rail highlight, and `currentName` in sync.
 function setCurrentName(name) {
@@ -604,540 +453,72 @@ const rightRail = mountRightRail({
   onFocusEditor: () => editor.editor.focus(),
 });
 
-const learnPanel = createLearnPanel({
-  onTry: (code) =>
-    tryReferenceExample(code, {
-      editor,
-      patterns,
-      getCurrentName: () => currentName,
-      confirm,
-    }),
-  onCopyToNewPattern: async (code, title) => {
-    const before = currentName;
-    await handleNewPatternClick({
-      store,
-      patterns,
-      editor,
-      leftRail,
-      transport,
-      setCurrentName: (n) => {
-        currentName = n;
-      },
-      flushToStore,
-      prompt,
-      isDev: import.meta.env.DEV,
-    });
-    // If a new pattern was created, seed it with the learn content.
-    if (currentName !== before) {
-      editor.setCode(code);
-      saveBtn?.click();
-    }
-  },
-  onFocusEditor: () => editor.editor.focus(),
-  onOpenReference: (name) => {
-    rightRail.activate("reference");
-    referencePanel?.focusEntry?.(name);
-  },
-});
-rightRail.registerPanel(learnPanel);
-
-const soundBrowser = createSoundBrowserPanel({
-  getSoundMap: () => soundMap.get(),
-  onPreview: (name) =>
-    previewSoundName(name, {
-      getAudioContext,
-      getSound,
-      superdough,
-      setStatus: (s) => transport.setStatus(s),
-    }),
-  onInsert: (name) => insertSoundName(name, editor.editor),
-  onFocusEditor: () => editor.editor.focus(),
-});
-rightRail.registerPanel(soundBrowser);
-
-referencePanel = createReferencePanel({
-  docs: strudelDocs,
-  onTry: (exampleCode) =>
-    tryReferenceExample(exampleCode, {
-      editor,
-      patterns,
-      getCurrentName: () => currentName,
-      confirm,
-    }),
-  onInsert: (name, template) =>
-    insertFunctionTemplate(name, template, editor.editor),
-  onFocusEditor: () => editor.editor.focus(),
-});
-rightRail.registerPanel(referencePanel);
-// Seed "in use" highlights immediately — buildEntries runs synchronously.
-referencePanel.setBufferText(editor.code ?? "");
-
-consolePanel = createConsolePanel({
-  onFocusEditor: () => editor.editor.focus(),
-  onJumpToLine: focusEditorLocation,
-  onClear: () => dismissRuntimeErrors(),
-});
-rightRail.registerPanel(consolePanel);
-
-// prettier-ignore
-const exportPanel = createExportPanel({
-  onFocusEditor: () => editor.editor.focus(),
-  onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, onBeforeContextTeardown: () => scope.disconnect(), onAfterContextRestore: () => { if (bottomModes.getMode() === "scope") { try { scope.connect(getAudioContext()); } catch {} } } }),
-  getPatternName: () => currentName || "untitled",
-});
-rightRail.registerPanel(exportPanel);
-
-let accentSaveTimer;
-const settingsPanel = createSettingsPanel({
-  onFocusEditor: () => editor.editor.focus(),
-  getSettings: () => codemirrorSettings.get?.() ?? {},
-  onChangeSetting: (key, value) => applyPanelSetting(editor, key, value),
-  onAccentChange: (hue, lightness) => {
-    applyAccent(hue, lightness);
-    clearTimeout(accentSaveTimer);
-    accentSaveTimer = setTimeout(() => saveStoredAccent(hue, lightness), 100);
-  },
-  onAccentReset: () => {
-    clearStoredAccent();
-    resetAccent();
-  },
-  getStoredAccent: () => readStoredAccent(),
-  getSoundCount: () => Object.keys(soundMap.get() ?? {}).length,
-  themes: THEME_OPTIONS,
-  appVersion: APP_VERSION,
-  strudelVersion: STRUDEL_VERSION,
-});
-rightRail.registerPanel(settingsPanel);
-
-const setupPanel = createSetupPanel({
-  onFocusEditor: () => editor.editor.focus(),
-  onReloadRequired: () => {
-    status.textContent = "Reload to apply changes";
-  },
+const {
+  consolePanel: cp,
+  soundBrowser,
+  referencePanel: rp,
+  exportPanel,
+} = registerPanels({
+  rightRail,
+  editor,
+  transport,
+  patterns,
+  getCurrentName: () => currentName,
   confirm,
+  prompt,
+  store,
+  leftRail,
+  setCurrentName,
+  flushToStore,
+  handleNewPatternClick,
+  focusEditorLocation,
+  getEvalFeedback: () => evalFeedback,
+  strudelDocs,
+  soundMap,
+  getAudioContext,
+  getSound,
+  superdough,
+  setLogger,
+  setAudioContext,
+  setSuperdoughAudioController,
+  resetGlobalEffects,
+  initAudio,
+  scope,
+  bottomModes,
+  saveBtn,
+  exportBtn,
+  status,
+  APP_VERSION,
+  STRUDEL_VERSION,
+  isDev: import.meta.env.DEV,
+  bootPromise,
 });
-rightRail.registerPanel(setupPanel);
+consolePanel = cp;
+referencePanel = rp;
 
-// ─── First-run orientation ───────────────────────────────────────────────
-// Auto-open the right rail to the Learn panel on first visit so new users
-// discover the in-app learning surface and the panel system. The flag is
-// cleared after the first visit; after that, the rail remembers the user's
-// choice.
-{
-  const FIRST_RUN_KEY = "strasbeat:first-run-done";
-  if (!localStorage.getItem(FIRST_RUN_KEY)) {
-    localStorage.setItem(FIRST_RUN_KEY, "1");
-    rightRail.activate("learn");
-  }
-}
-
-// Strudel's `logger()` dispatches a `strudel.log` CustomEvent on document
-// for every internal log message — route into the console panel.
-document.addEventListener("strudel.log", (e) => {
-  if (!consolePanel) return;
-  const detail = e?.detail ?? {};
-  const type = typeof detail.type === "string" ? detail.type : "";
-  const message = detail.message ?? "";
-  const data = detail.data ?? null;
-  if (shouldIgnoreStrudelLog(message)) return;
-  try {
-    if (type === "error") {
-      // Only count as runtime error when NOT mid-eval. Eval-time errors
-      // land in strudel.log too (logger fires before onEvalError), but
-      // those are handled by onEvalError → inline marks, not the badge.
-      if (!_evalInProgress && editor.repl?.scheduler?.started) {
-        // Try to show inline mark for runtime errors that carry line data
-        // (e.g. mini-notation parse errors that surface mid-playback).
-        const located = setError(editor.editor, { message });
-        // Pass located line to the console so it can render a [line N]
-        // badge even for errors found via the content-based heuristic.
-        let entryData = data;
-        if (located) {
-          if (
-            entryData &&
-            typeof entryData === "object" &&
-            !Array.isArray(entryData)
-          ) {
-            entryData = { ...entryData, line: located.line };
-          } else {
-            entryData = { line: located.line };
-          }
-          if (located.column != null) entryData.column = located.column;
-        }
-        const entryId = consolePanel.error(message, entryData);
-        registerRuntimeError(entryId);
-      } else {
-        consolePanel.error(message, data);
-      }
-    } else if (type === "warning") consolePanel.warn(message, data);
-    else consolePanel.log(message, data);
-  } catch (panelErr) {
-    console.warn("[strasbeat/console] dispatch failed:", panelErr);
-  }
+// ─── Eval feedback (error infra + sound validation + patched evaluate) ───
+evalFeedback = installEvalFeedback({
+  editor,
+  transport,
+  transportEl,
+  consolePanel,
+  soundBrowser,
+  referencePanel,
+  soundMap,
+  getSound,
+  getAudioContext,
+  setAudioContext,
+  setSuperdoughAudioController,
+  resetGlobalEffects,
+  initAudio,
+  bootPromise,
+  getBootReady,
+  clearError,
+  setError,
+  extractErrorLine,
+  prewarmSounds,
+  getCurrentName: () => currentName,
 });
-
-// Refresh the sound browser once prebake completes and the soundMap is populated.
-bootPromise.then(() => {
-  const count = Object.keys(soundMap.get() ?? {}).length;
-  if (count > 0) {
-    soundBrowser.refresh();
-    soundBrowser.setBufferText(editor.code ?? "");
-  } else {
-    console.warn(
-      "[strasbeat/sound-browser] soundMap still empty after boot — " +
-        "the panel will stay empty until reload",
-    );
-  }
-});
-
-// Wrap editor.evaluate to fire a console divider, rescan "in use" sounds,
-// refresh the reference panel on every eval entry point, and gate on boot.
-// The first evaluate after boot awaits prewarm so all instruments are ready
-// before the scheduler plays cycle 1; subsequent evals fire-and-forget.
-let _firstEvalDone = false;
-let runtimeErrorCount = 0;
-let activeTransportError = null;
-let lastWarnedUnknownSounds = new Set();
-// Flag set by onEvalError — lets the patched evaluate know whether
-// _editorEvaluate produced an error (it catches internally, never throws).
-let _lastEvalHadError = false;
-// True while _editorEvaluate is in flight — strudel.log errors during eval
-// are eval errors (handled by onEvalError + inline marks), not runtime errors.
-let _evalInProgress = false;
-const _editorEvaluate = editor.evaluate.bind(editor);
-
-function resetRuntimeErrors() {
-  runtimeErrorCount = 0;
-  activeTransportError = null;
-  transport?.clearErrorState();
-}
-
-function dismissRuntimeErrors() {
-  runtimeErrorCount = 0;
-  if (activeTransportError?.source === "runtime") {
-    activeTransportError = null;
-    transport?.clearErrorState();
-  }
-}
-
-function registerEvalError(err, entryId, located) {
-  const message = readErrorMessage(err);
-  const isSyntaxError =
-    err?.name === "SyntaxError" ||
-    Boolean(err?.loc) ||
-    /\[mini\]\s*parse error/i.test(message);
-
-  showTransportError({
-    source: "eval",
-    kind: isSyntaxError ? "parse" : "eval",
-    label: isSyntaxError ? "syntax error" : "eval error",
-    title: `Open console: ${firstLine(message) || "error"}`,
-    entryId,
-    location: located ?? extractErrorLine(err),
-  });
-}
-
-function registerRuntimeError(entryId) {
-  if (activeTransportError?.source === "eval") return;
-
-  runtimeErrorCount += 1;
-  const firstEntryId =
-    activeTransportError?.source === "runtime" &&
-    Number.isInteger(activeTransportError.entryId)
-      ? activeTransportError.entryId
-      : Number.isInteger(entryId)
-        ? entryId
-        : null;
-  const label =
-    runtimeErrorCount === 1
-      ? "runtime error"
-      : `${runtimeErrorCount} runtime errors`;
-
-  showTransportError({
-    source: "runtime",
-    kind: "runtime",
-    label,
-    title: `Open console: ${label}`,
-    entryId: firstEntryId,
-  });
-}
-
-function showTransportError({
-  source,
-  kind,
-  label,
-  title,
-  entryId = null,
-  location = null,
-}) {
-  activeTransportError = {
-    source,
-    entryId: Number.isInteger(entryId) ? entryId : null,
-    location: normalizeTransportLocation(location),
-  };
-  transport?.setErrorState({ kind, label, title });
-}
-
-function normalizeTransportLocation(location) {
-  if (!location || !Number.isInteger(location.line) || location.line < 1) {
-    return null;
-  }
-  const next = { line: location.line };
-  if (typeof location.column === "number") next.column = location.column;
-  return next;
-}
-
-function readErrorMessage(err) {
-  if (typeof err === "string") return err;
-  return err?.message || String(err ?? "");
-}
-
-function firstLine(text) {
-  return String(text ?? "")
-    .split(/\r?\n/, 1)[0]
-    .trim();
-}
-
-function collectOnsets(haps) {
-  return haps.filter((hap) => hap?.hasOnset?.());
-}
-
-function soundKeyFromHap(hap) {
-  const value = hap?.value;
-  if (!value || typeof value !== "object") return null;
-  let soundKey = value.s ?? "triangle";
-  if (value.bank && soundKey) soundKey = `${value.bank}_${soundKey}`;
-  if (typeof soundKey !== "string") return null;
-  if (["-", "~", "_"].includes(soundKey)) return null;
-  return soundKey;
-}
-
-function findSoundSuggestions(query) {
-  const allSounds = Object.keys(soundMap.get() ?? {});
-  if (!query) return [];
-
-  let matches = [];
-  try {
-    const re = new RegExp(query, "i");
-    matches = allSounds.filter((soundName) => re.test(soundName));
-  } catch {
-    const needle = String(query).toLowerCase();
-    matches = allSounds.filter((soundName) =>
-      soundName.toLowerCase().includes(needle),
-    );
-  }
-
-  if (matches.length === 0 && String(query).includes("_")) {
-    const tail = String(query).split("_").pop();
-    matches = allSounds.filter((soundName) =>
-      soundName.toLowerCase().includes(String(tail).toLowerCase()),
-    );
-  }
-
-  return matches.slice(0, 5);
-}
-
-function isExplicitSilencePattern(code) {
-  const lines = String(code ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !line.startsWith("//"));
-
-  if (lines.length === 0) return false;
-  return lines.every(
-    (line) => /^setcp[sm]\(/.test(line) || /^silence(?:\(\))?$/.test(line),
-  );
-}
-
-function warnIfPatternStartsSilent(firstCycleOnsets, nearbyOnsets) {
-  if (firstCycleOnsets.length > 0) return;
-  if (nearbyOnsets.length > 0) return;
-  if (isExplicitSilencePattern(editor.code)) return;
-  consolePanel?.warn(
-    "Pattern evaluated but produced no sound events in the first 4 cycles. Check your sound names and pattern structure.",
-  );
-}
-
-function warnForUnknownSounds(haps) {
-  const soundMapObj = soundMap.get() ?? {};
-  const unknownSounds = new Set();
-
-  for (const hap of haps) {
-    const soundKey = soundKeyFromHap(hap);
-    if (!soundKey) continue;
-    if (!soundMapObj[soundKey.toLowerCase()]) {
-      unknownSounds.add(soundKey);
-    }
-  }
-
-  for (const soundName of unknownSounds) {
-    if (lastWarnedUnknownSounds.has(soundName)) continue;
-    const suggestions = findSoundSuggestions(soundName);
-    const message = suggestions.length
-      ? `Sound "${soundName}" not found. Did you mean: ${suggestions.join(", ")}?`
-      : `Sound "${soundName}" not found. Use strasbeat.findSounds('${soundName}') in the console to search.`;
-    consolePanel?.warn(message);
-  }
-
-  lastWarnedUnknownSounds = unknownSounds;
-}
-
-editor.evaluate = async function patchedEvaluate(...args) {
-  const evalRequestId = ++playbackRequestId;
-
-  try {
-    // If prebake is still in progress, keep Play live and queue the start.
-    if (!bootReady) {
-      transport.setPlaybackState("queued");
-      transport.setStatus("Loading sounds…");
-      await bootPromise;
-      if (evalRequestId !== playbackRequestId) return null;
-    }
-
-    transport.setPlaybackState("loading");
-
-    // Health-check: if the AudioContext is closed (e.g. post-export bug,
-    // tab backgrounded on iOS), restore it before evaluating. A suspended
-    // context is normal (autoplay policy) — resume will un-gate it.
-    try {
-      const ac = getAudioContext();
-      if (ac.state === "closed") {
-        console.warn("[strasbeat] AudioContext was closed — restoring");
-        setAudioContext(null);
-        setSuperdoughAudioController(null);
-        resetGlobalEffects();
-        await initAudio();
-      } else if (ac.state === "suspended") {
-        await ac.resume();
-      }
-    } catch (err) {
-      console.warn("[strasbeat] audio context health check failed:", err);
-    }
-    if (evalRequestId !== playbackRequestId) return null;
-
-    try {
-      consolePanel?.divider(currentName || "eval");
-    } catch (err) {
-      console.warn("[strasbeat/console] divider failed:", err);
-    }
-    _lastEvalHadError = false;
-    _evalInProgress = true;
-    // Reset badge at eval start — new eval = fresh error slate.
-    resetRuntimeErrors();
-    const result = await _editorEvaluate(...args);
-    _evalInProgress = false;
-    if (evalRequestId !== playbackRequestId) return result;
-
-    // Only clear inline marks on success — on failure, onEvalError
-    // already called setError.
-    if (!_lastEvalHadError) {
-      clearError(editor.editor);
-    } else {
-      // Eval failed — skip post-eval diagnostics (prewarm, silence
-      // detection, sound validation). The error is already surfaced.
-      // Restore transport state: if the scheduler is still running the
-      // old pattern, stay "playing"; otherwise revert to "idle".
-      if (evalRequestId === playbackRequestId) {
-        transport.setPlaybackState(
-          editor.repl?.scheduler?.started ? "playing" : "idle",
-        );
-      }
-      return result;
-    }
-
-    try {
-      soundBrowser.setBufferText(editor.code ?? "");
-    } catch (err) {
-      console.warn("[strasbeat/sound-browser] in-use scan failed:", err);
-    }
-    try {
-      referencePanel.setBufferText(editor.code ?? "");
-    } catch (err) {
-      console.warn("[strasbeat/reference-panel] in-use scan failed:", err);
-    }
-
-    // Pre-warm: trigger loading of all sounds the pattern uses.
-    // First play: AWAIT pre-warm so every instrument is ready before
-    // cycle 1 — eliminates the "sounds appear gradually" artifact.
-    // Subsequent plays: fire-and-forget (sounds are already cached).
-    try {
-      const pattern = editor.repl?.state?.pattern;
-      const cps = editor.repl?.scheduler?.cps ?? 1;
-      if (pattern) {
-        const firstCycleHaps = pattern.queryArc(0, 1, { _cps: cps });
-        const firstCycleOnsets = collectOnsets(firstCycleHaps);
-        const haps = pattern.queryArc(0, 4, { _cps: cps });
-        const nearbyOnsets = collectOnsets(haps);
-
-        warnIfPatternStartsSilent(firstCycleOnsets, nearbyOnsets);
-        warnForUnknownSounds(nearbyOnsets);
-
-        const onsetCount = nearbyOnsets.length;
-
-        if (!_firstEvalDone) {
-          _firstEvalDone = true;
-          transport.setStatus("loading instruments…");
-          const { warmed, failed } = await prewarmSounds(haps, {
-            getSound,
-            getAudioContext,
-          });
-          if (evalRequestId !== playbackRequestId) return result;
-          if (failed.length) {
-            console.warn(
-              `[strasbeat/prewarm] ${failed.length} sound(s) failed to warm:`,
-              failed,
-            );
-            transport.setStatus(
-              `playing · ${failed.length} sound(s) couldn't load`,
-            );
-          } else if (onsetCount > 0) {
-            transport.setStatus(`playing · ${warmed} instruments ready`);
-          } else {
-            transport.setStatus("playing");
-          }
-        } else {
-          prewarmSounds(haps, { getSound, getAudioContext }).catch((err) =>
-            console.warn("[strasbeat/prewarm] background warm failed:", err),
-          );
-        }
-      }
-    } catch (err) {
-      console.warn("[strasbeat/prewarm] failed to kick off pre-warm:", err);
-    }
-
-    if (
-      evalRequestId === playbackRequestId &&
-      !editor.repl?.scheduler?.started
-    ) {
-      transport.setPlaybackState("idle");
-    }
-
-    return result;
-  } catch (err) {
-    _evalInProgress = false;
-    if (evalRequestId === playbackRequestId) {
-      transport.setPlaybackState("idle");
-    }
-    throw err;
-  }
-};
-
-const _editorStop = editor.stop.bind(editor);
-editor.stop = function patchedStop(...args) {
-  const state = transportEl?.dataset.transportState ?? "idle";
-  playbackRequestId += 1;
-  const result = _editorStop(...args);
-  clearError(editor.editor);
-  resetRuntimeErrors();
-  transport.setPlaybackState("idle");
-  if (state === "queued" || state === "loading") {
-    transport.setStatus("play canceled");
-  } else {
-    transport.setStatus("Stopped");
-  }
-  return result;
-};
 
 // Cmd/Ctrl+B toggles the right rail (matches VSCode's sidebar toggle).
 document.addEventListener(
@@ -1158,77 +539,14 @@ document.addEventListener(
 
 // ─── Command palette (Cmd+Shift+P) ──────────────────────────────────────
 const palette = mountCommandPalette({
-  commands: buildCommands({
-    onEvaluate: () => editor.evaluate(),
-    onStop: () => editor.stop(),
-    onSave: () => saveBtn?.click(),
-    onExportWav: () => exportBtn?.click(),
-    onShare: () => shareBtn?.click(),
-    onFormatCode: () => formatCommand(editor.editor),
-    onToggleComment: () => {
-      editor.editor.focus();
-      toggleComment(editor.editor);
-    },
-    onMuteTrack: () =>
-      toggleLabelAtCursor(
-        editor.editor,
-        () => editor.evaluate(),
-        toggleMute,
-        "input.track-mute",
-      ),
-    onSoloTrack: () =>
-      toggleLabelAtCursor(
-        editor.editor,
-        () => editor.evaluate(),
-        toggleSolo,
-        "input.track-solo",
-      ),
-    onSelectNext: () => {
-      editor.editor.focus();
-      selectNextOccurrence(editor.editor);
-    },
-    onSelectAllOccurrences: () => {
-      editor.editor.focus();
-      selectSelectionMatches(editor.editor);
-    },
-    onSelectLine: () => {
-      editor.editor.focus();
-      selectLine(editor.editor);
-    },
-    onDeleteLine: () => {
-      editor.editor.focus();
-      deleteLine(editor.editor);
-    },
-    onMoveLineUp: () => {
-      editor.editor.focus();
-      moveLineUp(editor.editor);
-    },
-    onMoveLineDown: () => {
-      editor.editor.focus();
-      moveLineDown(editor.editor);
-    },
-    onIndent: () => {
-      editor.editor.focus();
-      indentMore(editor.editor);
-    },
-    onDedent: () => {
-      editor.editor.focus();
-      indentLess(editor.editor);
-    },
-    onOpenLearn: () => rightRail.activate("learn"),
-    onOpenSounds: () => rightRail.activate("sounds"),
-    onOpenReference: () => rightRail.activate("reference"),
-    onOpenConsole: () => rightRail.activate("console"),
-    onOpenExport: () => rightRail.activate("export"),
-    onOpenSettings: () => rightRail.activate("settings"),
-    onOpenSetup: () => rightRail.activate("setup"),
-    onClosePanel: () => rightRail.collapse(),
-    onFocusPatterns: () => leftRail.focusSearch(),
-    onSwitchToRoll: () => bottomModes.setMode("roll"),
-    onSwitchToScope: () => {
-      bottomModes.enableScope();
-      bottomModes.setMode("scope");
-    },
+  commands: buildPaletteCommands({
+    editor,
+    rightRail,
+    leftRail,
+    bottomModes,
+    saveBtn,
+    exportBtn,
+    shareBtn,
   }),
 });
 
@@ -1357,244 +675,18 @@ midi.start();
 // Capture button lives inside the MIDI bar now; find it there.
 const captureBtn = midiBar.getCaptureButton();
 
-// ─── Capture preview modal ───────────────────────────────────────────────
-// Shows generated pattern code with Play/Save/Discard buttons and a
-// quantization grid selector. Returns { code } on save, null on discard.
-function showCapturePreviewModal({ initialCode, onGridChange, onPlay }) {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.setAttribute("role", "dialog");
-    overlay.setAttribute("aria-modal", "true");
-    overlay.setAttribute("aria-label", "Capture preview");
-
-    const dialog = document.createElement("div");
-    dialog.className = "modal capture-preview";
-    overlay.appendChild(dialog);
-
-    const titleEl = document.createElement("div");
-    titleEl.className = "modal__title";
-    titleEl.textContent = "Capture preview";
-    dialog.appendChild(titleEl);
-
-    // Grid selector
-    const gridSection = document.createElement("div");
-    gridSection.className = "capture-preview__grid";
-    const gridLabel = document.createElement("span");
-    gridLabel.className = "capture-preview__grid-label";
-    gridLabel.textContent = "Quantize:";
-    gridSection.appendChild(gridLabel);
-
-    const GRID_OPTIONS = [
-      { value: "", label: "Auto" },
-      { value: "4", label: "1/4" },
-      { value: "8", label: "1/8" },
-      { value: "16", label: "1/16" },
-    ];
-    let currentCode = initialCode;
-
-    for (const opt of GRID_OPTIONS) {
-      const radioLabel = document.createElement("label");
-      radioLabel.className = "capture-preview__grid-option";
-      const radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = "capture-grid";
-      radio.value = opt.value;
-      radio.checked = opt.value === "";
-      radio.addEventListener("change", () => {
-        const grid = radio.value ? Number(radio.value) : undefined;
-        const newCode = onGridChange(grid);
-        if (newCode) {
-          currentCode = newCode;
-          codeEl.textContent = currentCode;
-        }
-      });
-      radioLabel.appendChild(radio);
-      radioLabel.appendChild(document.createTextNode(" " + opt.label));
-      gridSection.appendChild(radioLabel);
-    }
-    dialog.appendChild(gridSection);
-
-    // Code preview
-    const codeWrap = document.createElement("div");
-    codeWrap.className = "capture-preview__code-wrap";
-    const codeEl = document.createElement("pre");
-    codeEl.className = "capture-preview__code";
-    codeEl.textContent = currentCode;
-    codeWrap.appendChild(codeEl);
-    dialog.appendChild(codeWrap);
-
-    // Actions
-    const actions = document.createElement("div");
-    actions.className = "modal__actions";
-    dialog.appendChild(actions);
-
-    const discardBtn = document.createElement("button");
-    discardBtn.type = "button";
-    discardBtn.className = "btn btn--ghost modal__cancel";
-    discardBtn.textContent = "Discard";
-    actions.appendChild(discardBtn);
-
-    const playBtn = document.createElement("button");
-    playBtn.type = "button";
-    playBtn.className = "btn btn--ghost";
-    playBtn.textContent = "Play";
-    actions.appendChild(playBtn);
-
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "btn modal__confirm";
-    saveBtn.textContent = "Save";
-    actions.appendChild(saveBtn);
-
-    function close(value) {
-      overlay.classList.remove("modal-overlay--open");
-      overlay.classList.add("modal-overlay--exiting");
-      document.removeEventListener("keydown", onKeydown, true);
-      setTimeout(() => {
-        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      }, 80);
-      resolve(value);
-    }
-
-    discardBtn.addEventListener("click", () => close(null));
-    playBtn.addEventListener("click", () => onPlay(currentCode));
-    saveBtn.addEventListener("click", () => close({ code: currentCode }));
-
-    function onKeydown(e) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close(null);
-      }
-    }
-    document.addEventListener("keydown", onKeydown, true);
-    overlay.addEventListener("mousedown", (e) => {
-      if (e.target === overlay) close(null);
-    });
-
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => overlay.classList.add("modal-overlay--open"));
-    saveBtn.focus();
-  });
-}
-
-captureBtn.addEventListener("click", async () => {
-  if (!midi.isCaptureEnabled()) {
-    midi.setCaptureEnabled(true);
-    midiBar.setCaptureState({ recording: true, count: 0 });
-    transport.setStatus(
-      "capturing MIDI · play something · click again to save",
-    );
-    return;
-  }
-  // stop capture
-  midi.setCaptureEnabled(false);
-  midiBar.setCaptureState({ recording: false });
-
-  if (midi.getCaptureCount() === 0) {
-    transport.setStatus("capture stopped — no notes recorded");
-    return;
-  }
-
-  // Build initial pattern code. Use metronome BPM as hint if it was enabled.
-  const bpmHint = midi.isMetronomeEnabled() ? midi.getMetronomeBpm() : undefined;
-  let selectedGrid = undefined;
-  let code = midi.buildPatternFromCapture({ bpmHint, gridSubdivision: selectedGrid });
-  if (!code) {
-    transport.setStatus("capture stopped — no notes recorded");
-    return;
-  }
-
-  // Show capture preview modal
-  const prevCode = editor.code;
-  const result = await showCapturePreviewModal({
-    initialCode: code,
-    onGridChange: (grid) => {
-      selectedGrid = grid || undefined;
-      code = midi.buildPatternFromCapture({ bpmHint, gridSubdivision: selectedGrid });
-      return code;
-    },
-    onPlay: (previewCode) => {
-      editor.setCode(previewCode);
-      editor.evaluate();
-    },
-  });
-
-  if (!result) {
-    // Discard — restore previous editor code
-    editor.setCode(prevCode);
-    transport.setStatus("capture discarded");
-    return;
-  }
-
-  // Save flow with the (possibly re-quantized) code
-  code = result.code;
-
-  if (import.meta.env.PROD) {
-    // No filesystem in prod — save as a user pattern in the store.
-    const stamp = new Date()
-      .toISOString()
-      .replace(/[-:T.]/g, "")
-      .slice(0, 14);
-    const captureName = `captured-${stamp}`;
-    try {
-      store.set(captureName, {
-        code,
-        modified: new Date().toISOString(),
-        isUserPattern: true,
-      });
-      const idx = store.getIndex();
-      idx.userPatterns = [
-        ...idx.userPatterns.filter((n) => n !== captureName),
-        captureName,
-      ];
-      idx.lastOpen = captureName;
-      store.setIndex(idx);
-    } catch (err) {
-      if (err?.name === "QuotaExceededError") {
-        transport.setStatus(
-          "\u26a0 couldn\u2019t save \u2014 browser storage full",
-        );
-      }
-      return;
-    }
-    leftRail.addUserPattern(captureName);
-    editor.setCode(code);
-    setCurrentName(captureName);
-    transport.setStatus(`captured phrase → "${captureName}"`);
-    return;
-  }
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:T.]/g, "")
-    .slice(0, 14);
-  const suggestion = `captured-${stamp}`;
-  const name = await prompt({
-    title: "Save captured phrase",
-    placeholder: "filename without .js",
-    defaultValue: suggestion,
-    confirmLabel: "Save",
-    validate: (v) =>
-      /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
-  });
-  if (!name) {
-    editor.setCode(prevCode);
-    transport.setStatus("capture discarded");
-    return;
-  }
-  const res = await fetch("/api/save", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, code }),
-  });
-  if (!res.ok) {
-    transport.setStatus(`save failed: ${await res.text()}`);
-    return;
-  }
-  const { path } = await res.json();
-  store.delete(name); // disk is canonical, clear working copy
-  transport.setStatus(`captured phrase → ${path} (HMR will reload)`);
-});
+captureBtn.addEventListener("click", () =>
+  handleCaptureClick({
+    midi,
+    midiBar,
+    transport,
+    editor,
+    store,
+    leftRail,
+    prompt,
+    setCurrentName,
+  }),
+);
 
 // prettier-ignore
 window.strasbeat = mountDebugHelpers({ soundMap, getSound, editor, getConsolePanel: () => consolePanel, getAudioContext, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough });
