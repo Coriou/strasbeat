@@ -12,14 +12,46 @@ drums: stack(
   s("808bd*2 ~ 808bd*1 808bd*2")
     .n("<C^7 Fo7 C^7 F#>")
     .add(sine.range(0, 2))
-    .pan(sine.slow(2))
+    .pan(sine.slow(4))
     .gain(0.25),
 )
 
-melo: progression('Am F C G')
+const chords = 'C Am C G'
+const chords_alt_a = 'C ~ C ~'
+const chords_alt_b = '~ Am ~ G'
+
+melo: stack(
+  progression(chords).room(0.7).roomsize(2).s("bytebeat").lpf(800),
+
+  progression(chords_alt_a)
+    .s("gm_pad_poly")
+    .lpf(sine.range(1000, 800))
+    .pan(sine.slow(4)),
+  progression(chords_alt_b)
+    .s("gm_pad_poly")
+    .lpf(sine.range(800, 1000))
+    .pan(sine.slow(8)),
+).slice(2, "0 1 <2 2> 3")
+
+bells: progression(chords)
   .slice(2, "0 1 <2 2> 3")
-  .room(0.7)
-  .roomsize(2)
-  .s("bytebeat")
-  .lpf(800)
+  .decay(0.25)
+  .sustain(0.9)
+  .s("gm_tubular_bells")
+  .lpf(sine.range(800, 1200))
+  .pan(sine.slow(4))
+  .gain(0.5)
+
+choir: stack(
+  progression(chords_alt_a)
+    .slice(2, "0 1 <2 2> 3")
+    .s("gm_choir_aahs")
+    .pan(sine.slow(8)),
+  progression(chords_alt_b)
+    .slice(2, "0 1 <2 2> 3")
+    .s("gm_choir_aahs")
+    .decay(0.3)
+    .sustain(0.9)
+    .pan(sine.slow(2)),
+).gain(0.5)
 `;
