@@ -9,11 +9,6 @@ drums: stack(
     .mask("<0 0 1 0 1 0 0 0 1 0 0 1 0 0 0 1>")
     .gain(0.25),
   s("[hh]/2 hh hh/2 hh"),
-  s("808bd*2 ~ 808bd*1 808bd*2")
-    .n("<C^7 Fo7 C^7 F#>")
-    .add(sine.range(0, 2))
-    .pan(sine.slow(4))
-    .gain(0.25),
 )
 
 const chords = 'C Am C G'
@@ -21,17 +16,26 @@ const chords_alt_a = 'C ~ C ~'
 const chords_alt_b = '~ Am ~ G'
 
 melo: stack(
-  progression(chords).room(0.7).roomsize(2).s("bytebeat").lpf(800),
+  progression(chords).room(0.7).roomsize(2).s("gm_lead_8_bass_lead").lpf(800),
 
-  progression(chords_alt_a)
-    .s("gm_pad_poly")
-    .lpf(sine.range(1000, 800))
-    .pan(sine.slow(4)),
-  progression(chords_alt_b)
-    .s("gm_pad_poly")
-    .lpf(sine.range(800, 1000))
-    .pan(sine.slow(8)),
-).slice(2, "0 1 <2 2> 3")
+  stack(
+    progression(chords_alt_a)
+      .s("gm_pad_poly")
+      .lpf(sine.range(1000, 800))
+      .pan(sine.slow(4)),
+    progression(chords_alt_b)
+      .s("gm_pad_poly")
+      .lpf(sine.range(800, 1000))
+      .pan(sine.slow(8)),
+  )
+    .lpdepth(0.25)
+    .lpdc(2)
+    .lpa(0.5)
+    .lpenv("<3 2 1 0 -1 -2 -4>/4")
+    .gain(sine.range(0.5, 0.75)),
+)
+  .slice(2, "0 1 <2 2> 3")
+  .gain(sine.range(0.7, 0.9))
 
 bells: progression(chords)
   .slice(2, "0 1 <2 2> 3")
