@@ -3,6 +3,11 @@ dist
 .DS_Store
 *.log
 
+# Local env overrides (Vite convention). Keep out of git so per-machine
+# secrets (e.g. a dev Umami website id) stay local.
+.env.local
+.env.*.local
+
 # upstream Strudel source kept locally for reference / grep'ing
 strudel-source
 

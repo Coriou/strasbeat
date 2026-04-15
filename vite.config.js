@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,8 +85,42 @@ function patternSavePlugin() {
   };
 }
 
+// Inject the self-hosted Umami <script> into index.html ONLY when both env
+// vars are set. When either is blank (default in .env.production, always
+// in dev unless a local override exists) the tag is omitted entirely — no
+// network request, no console noise, no way for analytics to break the
+// app. The `async` + `defer` attributes keep the fetch off the critical
+// path regardless.
+function umamiPlugin() {
+  let src = "";
+  let id = "";
+  return {
+    name: "strasbeat:umami",
+    config(_, { mode }) {
+      const env = loadEnv(mode, __dirname, "VITE_");
+      src = env.VITE_UMAMI_SRC || "";
+      id = env.VITE_UMAMI_WEBSITE_ID || "";
+    },
+    transformIndexHtml() {
+      if (!src || !id) return;
+      return [
+        {
+          tag: "script",
+          attrs: {
+            async: true,
+            defer: true,
+            "data-website-id": id,
+            src,
+          },
+          injectTo: "head",
+        },
+      ];
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [patternSavePlugin()],
+  plugins: [patternSavePlugin(), umamiPlugin()],
   // Don't let Vite's dep scanner wander into strudel-source/.
   optimizeDeps: {
     entries: ["index.html", "src/**/*.{js,mjs,ts}", "patterns/*.js"],

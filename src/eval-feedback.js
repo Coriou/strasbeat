@@ -1,4 +1,5 @@
 import { shouldIgnoreStrudelLog } from "./strudel-logger.js";
+import { track } from "./analytics.js";
 
 /**
  * Installs the eval feedback infrastructure: error tracking, sound validation,
@@ -251,6 +252,9 @@ export function installEvalFeedback({
 
   editor.evaluate = async function patchedEvaluate(...args) {
     const evalRequestId = ++playbackRequestId;
+    // Strudel's evaluate(play = true) — the export pipeline passes `false`
+    // to compile without playing. Only count true plays as engagement.
+    if (args[0] !== false) track("pattern_played");
 
     try {
       // If prebake is still in progress, keep Play live and queue the start.

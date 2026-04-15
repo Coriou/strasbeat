@@ -1,3 +1,5 @@
+import { track } from "./analytics.js";
+
 // ─── Capture preview modal ───────────────────────────────────────────────
 // Shows generated pattern code with Play/Save/Discard buttons and a
 // quantization grid selector. Returns { code } on save, null on discard.
@@ -135,6 +137,7 @@ export async function handleCaptureClick({
     transport.setStatus(
       "capturing MIDI · play something · click again to save",
     );
+    track("midi_capture_started");
     return;
   }
   // stop capture

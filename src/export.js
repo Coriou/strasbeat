@@ -2,6 +2,7 @@ import {
   installDefaultStrudelLogger,
   shouldIgnoreStrudelLog,
 } from "./strudel-logger.js";
+import { track } from "./analytics.js";
 
 // ─── Export current pattern → WAV ────────────────────────────────────────
 // We don't use upstream `renderPatternAudio` because it has a bug: it
@@ -538,6 +539,7 @@ export async function runExport(options, ctx) {
     // wasteful but harmless at typical export sizes.
     const wavBytes = new Uint8Array(wavArrayBuffer);
     downloadWav(wavArrayBuffer, filename);
+    track("wav_exported", { cycles, sampleRate });
 
     const errorCount = captured.filter((c) => c.type === "error").length;
     if (errorCount) {

@@ -1,3 +1,5 @@
+import { track } from "./analytics.js";
+
 // ─── Shareable URL helpers ───────────────────────────────────────────────
 // In production we have no /api/save (Vercel filesystem is read-only), so
 // the persistence story for visitors is "encode the editor buffer into a
@@ -78,4 +80,5 @@ export async function shareCurrent({ getCode, getName, setStatus }) {
   } catch {
     setStatus("share link is in the URL bar — copy from there");
   }
+  track("pattern_shared");
 }
