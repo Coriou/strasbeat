@@ -1,7 +1,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseArrangements, locatePlayhead } from './arrange-parse.js';
+import {
+  parseArrangements,
+  locatePlayhead,
+  findTrailingDurationTransform,
+} from './arrange-parse.js';
 
 describe('parseArrangements()', () => {
   test('extracts cycles and labels for bare-identifier sections', () => {
@@ -167,5 +171,39 @@ describe('locatePlayhead()', () => {
 
   test('returns null for empty arrangement', () => {
     assert.equal(locatePlayhead({ sections: [], totalCycles: 0 }, 0), null);
+  });
+});
+
+describe('findTrailingDurationTransform()', () => {
+  test('finds .slow() chained after arrange', () => {
+    const code = 'arrange([4, a], [4, b]).slow(2)';
+    const [arr] = parseArrangements(code);
+    const t = findTrailingDurationTransform(code, arr);
+    assert.equal(t?.method, 'slow');
+    assert.equal(code.slice(t.argStart, t.argEnd), '2');
+  });
+
+  test('skips non-duration methods to find a later .fast()', () => {
+    const code = 'arrange([4, a], [4, b]).room(0.5).fast(0.5).color("red")';
+    const [arr] = parseArrangements(code);
+    const t = findTrailingDurationTransform(code, arr);
+    assert.equal(t?.method, 'fast');
+  });
+
+  test('returns null when no duration-affecting transforms are chained', () => {
+    const code = 'arrange([4, a], [4, b]).cutoff(900).punchcard()';
+    const [arr] = parseArrangements(code);
+    assert.equal(findTrailingDurationTransform(code, arr), null);
+  });
+
+  test('tolerates whitespace and newlines between calls', () => {
+    const code = 'arrange([4, a], [4, b])\n  .room(0.5)\n  .slow(3)';
+    const [arr] = parseArrangements(code);
+    const t = findTrailingDurationTransform(code, arr);
+    assert.equal(t?.method, 'slow');
+  });
+
+  test('returns null when arrangement is null', () => {
+    assert.equal(findTrailingDurationTransform('', null), null);
   });
 });

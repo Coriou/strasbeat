@@ -6,3 +6,4 @@
 // to this barrel is available in `patterns/*.js` with no extra wiring.
 
 export { progression } from "./progression.js";
+export { arrange } from "./arrange.js";

@@ -577,6 +577,7 @@ mountArrangeBar({
   container: document.getElementById("arrange-bar"),
   view: editor.editor,
   getScheduler: () => editor?.repl?.scheduler ?? null,
+  onEvaluate: () => editor.evaluate(),
 });
 
 // ─── Transport ───────────────────────────────────────────────────────────

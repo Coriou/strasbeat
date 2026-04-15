@@ -7578,6 +7578,42 @@
     "params": [],
     "examples": []
   },
+  "primeArrangementParser": {
+    "signature": "primeArrangementParser(parsedList: Array)",
+    "doc": "Called by eval-feedback.js right before editor.evaluate fires. Stashes the parser's output so the wrapper can recover human-readable labels.",
+    "params": [
+      {
+        "name": "parsedList",
+        "type": "Array",
+        "doc": "output of parseArrangements(editor.code)"
+      }
+    ],
+    "examples": []
+  },
+  "subscribeRegistry": {
+    "signature": "subscribeRegistry()",
+    "doc": "Subscribe to registry/solo-state changes. Fires immediately with the current snapshot, then on every subsequent emit(). Returns an unsubscribe.",
+    "params": [],
+    "examples": []
+  },
+  "resetRegistry": {
+    "signature": "resetRegistry()",
+    "doc": "Reset the registry at the start of each evaluate. Solo state is intentionally NOT reset — it persists across evaluates so the user can iterate on a soloed section without re-toggling after each Cmd+Enter, and so WAV export respects the soloed selection.",
+    "params": [],
+    "examples": []
+  },
+  "setSolo": {
+    "signature": "setSolo()",
+    "doc": "Toggle the solo for a given arrange/section coordinate. If the same coordinate is already soloed, clears the solo. Any other coordinate replaces the current solo.  Callers are expected to trigger a re-evaluate after this (so the wrapper fires again and substitutes the soloed pattern into the scheduler). The UI does `setSolo(...); editor.evaluate();`.",
+    "params": [],
+    "examples": []
+  },
+  "validateSolo": {
+    "signature": "validateSolo()",
+    "doc": "Check whether the current solo coordinate still points at a valid section in the latest registry. If the user edited the arrange out of existence (or removed the section), the solo is silently cleared and the UI goes back to normal. Called by the arrange-bar after each registry rebuild.",
+    "params": [],
+    "examples": []
+  },
   "progression": {
     "signature": "progression(chords: string, options: object)",
     "doc": "Turn a one-line chord progression into a playable Strudel pattern.  Accepts absolute chord symbols or Roman numerals (when options.key is set). Voice leading, slash chords, and voicing dictionaries are delegated to strudel/tonal. Returns a real Pattern that chains with .slow(), .gain(), .every(), etc. like any other Strudel source.  Use single quotes in pattern files — the transpiler rewrites double-quoted strings to mini-notation, which silently breaks this function.",

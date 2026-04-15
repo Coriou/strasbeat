@@ -304,6 +304,59 @@ arpeggio + bass + drums in 30 lines. Source for the helper itself is in
 `src/strudel-ext/progression.js`; the spec (Phase 1–3) is in
 `design/work/07-chord-progression.md`.
 
+### `arrange()` — song-form timeline
+
+Behaviourally identical to upstream Strudel's `arrange(...)` — same
+`[cycles, section]` tuples, same audible output, same composability.
+The wrapper in `src/strudel-ext/arrange.js` layers a **timeline strip**
+and per-section **solo** control on top without changing the API.
+
+```js
+arrange(
+  [8, verse],
+  [8, chorus],
+  [16, bridge],
+);
+```
+
+When the pattern contains at least one `arrange(...)` call, a
+proportional song-form strip appears between the transport and the
+track bar — section names, widths proportional to cycles, and a
+playhead that follows the scheduler. Click a segment to jump the
+editor cursor to its source tuple. Hover a segment to reveal a small
+headphones button: click to **solo** (loop just that section); click
+again to clear. The soloed section shows a `SOLO` pill; other
+segments dim.
+
+Solo state **persists across evaluates** by design, so:
+
+- `Ctrl/Cmd+Enter` keeps playing just the soloed section — you can
+  iterate on its contents and hear only it on each re-evaluate.
+- Hitting **⤓ wav** while a section is soloed renders a WAV of that
+  section (whatever is currently playing is what exports). Clear the
+  solo first to export the full song.
+
+The wrapper degrades gracefully for less-canonical shapes:
+
+- **Multiple top-level `arrange(...)` calls** in one buffer render as
+  stacked strips, one per call.
+- **Dynamic section lists** (`arrange(...buildSections())`) still show
+  accurate cycle widths but fall back to numbered labels (`Section 1`,
+  `Section 2`, …) with a single console warning so the degradation is
+  visible.
+- **Nested arranges** (`arrange([4, arrange([2, a], [2, b])])`) each
+  register their own row, but label-matching may fall back to numbers
+  — flatten the arrangement if labels matter.
+- **Chained duration transforms** like `.slow(2)` or `.fast(0.5)` get
+  a badge on the strip so you know the audible duration differs from
+  the section sum.
+- **Arrange inside a muted track** (`_track:` or `track_:`) fades the
+  strip row to make the silence legible.
+
+Source: `src/strudel-ext/arrange.js` (wrapper + registry),
+`src/ui/arrange-bar.js` (strip UI). Spec:
+`design/work/18-arrangement-timeline.md`.
+
 ## Keyboard shortcuts (in the editor)
 
 | key                    | action                                   |

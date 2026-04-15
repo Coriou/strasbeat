@@ -1,9 +1,19 @@
 /*
  * Arrangement timeline strip — see src/ui/arrange-bar.js.
  *
- * Appears between the transport and the track bar when the pattern
- * contains an `arrange(...)` call. Hidden (display: none via [hidden])
- * when the parser finds nothing, so the grid row collapses to 0.
+ * One row per `arrange(...)` call that ran in the last evaluate (plus a
+ * parser-preview row for buffers that haven't been played yet). Each row:
+ *   .arrange-bar__row
+ *     .arrange-bar__meta     (title · current · badges · total)
+ *     .arrange-bar__strip    (sections + progress + playhead dot)
+ *
+ * Hidden (display: none via [hidden]) when the pattern has no arranges,
+ * so the grid row in shell.css collapses to 0. Shares surface with the
+ * track-bar below — flush, no border, no radius (SYSTEM.md §8).
+ *
+ * Height is capped via `max-height` so patterns with many arrangements
+ * never eat the viewport; content scrolls within the bar instead. When
+ * >4 arranges land, `data-density="dense"` tightens every row.
  */
 
 .arrange-bar {
@@ -11,20 +21,102 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  background: color-mix(in oklch, var(--surface-1) 94%, var(--surface-2));
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border-soft);
-  overflow: hidden;
+  background: var(--surface-1);
+  /* Cap at ~22vh so we never push the piano roll and track bar out of
+     sight. The `min()` also bounds us on very tall viewports. */
+  max-height: min(22vh, 180px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.arrange-bar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.arrange-bar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.arrange-bar::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: 999px;
 }
 
 .arrange-bar[hidden] {
   display: none;
 }
 
+.arrange-bar__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.arrange-bar__row + .arrange-bar__row {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Dense mode — triggered by JS when >4 arrangements are rendered.
+   Halves vertical spacing, trims the strip height, folds the meta row
+   into a single line with truncation. Still scrolls within the cap. */
+.arrange-bar[data-density="dense"] {
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+}
+
+.arrange-bar[data-density="dense"] .arrange-bar__row {
+  gap: 2px;
+}
+
+.arrange-bar[data-density="dense"] .arrange-bar__row + .arrange-bar__row {
+  padding-top: var(--space-1);
+  border-top-color: color-mix(in oklch, var(--border-soft) 50%, transparent);
+}
+
+.arrange-bar[data-density="dense"] .arrange-bar__strip {
+  height: 20px;
+}
+
+.arrange-bar[data-density="dense"] .arrange-bar__dot {
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  margin-left: -4px;
+}
+
+.arrange-bar[data-density="dense"] .arrange-bar__cycles {
+  display: none;
+}
+
+.arrange-bar[data-density="dense"] .arrange-bar__total {
+  display: none;
+}
+
+.arrange-bar[data-density="dense"] .arrange-bar__solo-btn {
+  width: 16px;
+  height: 16px;
+  top: 2px;
+  right: 2px;
+}
+
+.arrange-bar__row--preview .arrange-bar__strip {
+  opacity: 0.78;
+}
+
+.arrange-bar__row--muted .arrange-bar__strip {
+  opacity: 0.5;
+  filter: saturate(0.6);
+}
+
 .arrange-bar__meta {
   display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
+  align-items: center;
+  gap: var(--space-2);
   min-width: 0;
   font-family: var(--font-sans);
   font-size: var(--text-xs);
@@ -34,11 +126,11 @@
 }
 
 .arrange-bar__title {
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 9px;
   color: var(--text-dim);
+  font: 600 9px var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .arrange-bar__current {
@@ -50,21 +142,64 @@
   text-overflow: ellipsis;
 }
 
+/* Hide the current-section slot when empty so the meta row collapses cleanly. */
+.arrange-bar__current:empty {
+  display: none;
+}
+
+.arrange-bar__badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+.arrange-bar__badge {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font: 500 var(--text-xs) var(--font-sans);
+  color: var(--text-mut);
+  background: color-mix(in oklch, var(--surface-2) 82%, transparent);
+  border: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
+
+.arrange-bar__badge--parsed {
+  color: color-mix(in oklch, var(--accent-hi) 52%, var(--text-mut));
+  background: color-mix(in oklch, var(--accent-wash) 60%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 22%, var(--border-soft));
+}
+
+.arrange-bar__badge--muted {
+  color: var(--text-dim);
+}
+
+.arrange-bar__badge--transform {
+  color: color-mix(in oklch, var(--rec) 34%, var(--text-mut));
+  background: color-mix(in oklch, var(--rec) 8%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--rec) 22%, var(--border-soft));
+}
+
 .arrange-bar__total {
   margin-left: auto;
   color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .arrange-bar__strip {
   position: relative;
-  height: 28px;
+  height: 26px;
   background: color-mix(in oklch, var(--surface-2) 88%, var(--surface-1));
   border: 1px solid color-mix(in oklch, var(--border) 72%, var(--border-soft));
   border-radius: var(--radius-sm);
   overflow: hidden;
+  transition: opacity var(--t-hover);
 }
 
 .arrange-bar__sections {
@@ -103,12 +238,12 @@
 }
 
 .arrange-bar__section:hover {
-  background: color-mix(in oklch, var(--accent) 6%, transparent);
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
   color: var(--text);
 }
 
 .arrange-bar__section:focus-visible {
-  outline: 2px solid var(--accent-hi);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
@@ -118,7 +253,34 @@
 }
 
 .arrange-bar__section.is-active .arrange-bar__label {
-  font-weight: 650;
+  font-weight: 600;
+}
+
+.arrange-bar__section.is-dimmed {
+  opacity: 0.34;
+}
+
+.arrange-bar__section.is-dimmed:hover {
+  opacity: 0.7;
+}
+
+.arrange-bar__section.is-soloed {
+  background: color-mix(in oklch, var(--accent-wash) 78%, var(--surface-2));
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 28%, transparent);
+}
+
+.arrange-bar__section.is-soloed .arrange-bar__label {
+  font-weight: 600;
+}
+
+.arrange-bar__section.is-inert {
+  cursor: default;
+}
+
+.arrange-bar__section.is-inert:hover {
+  background: transparent;
+  color: var(--text-mut);
 }
 
 .arrange-bar__label {
@@ -142,42 +304,125 @@
   color: var(--text-mut);
 }
 
+/* Solo pill — shown on a soloed segment INSTEAD of the cycle count.
+   Clickable: un-solos the section. */
+.arrange-bar__solo-pill {
+  flex-shrink: 0;
+  padding: 0 6px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  font: 700 9px var(--font-sans);
+  letter-spacing: 0.08em;
+  color: var(--surface-0);
+  background: var(--accent);
+  cursor: pointer;
+  transition: background var(--t-hover);
+}
+
+.arrange-bar__solo-pill:hover {
+  background: var(--accent-hi);
+}
+
+.arrange-bar__solo-pill:focus-visible {
+  outline: 2px solid var(--accent-hi);
+  outline-offset: 2px;
+}
+
+/* Hover-revealed solo action — sits in the segment's top-right corner. */
+.arrange-bar__solo-btn {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--text-mut);
+  background: color-mix(in oklch, var(--surface-1) 88%, transparent);
+  border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.9);
+  transition:
+    opacity var(--t-hover),
+    transform var(--t-hover),
+    color var(--t-hover),
+    background var(--t-hover),
+    border-color var(--t-hover);
+  box-shadow: var(--shadow-low);
+}
+
+.arrange-bar__section:hover .arrange-bar__solo-btn,
+.arrange-bar__section:focus-within .arrange-bar__solo-btn,
+.arrange-bar__solo-btn.is-active {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.arrange-bar__solo-btn:hover {
+  color: var(--accent);
+  background: var(--surface-1);
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+}
+
+.arrange-bar__solo-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.arrange-bar__solo-btn.is-active {
+  color: var(--surface-0);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.arrange-bar__solo-btn svg {
+  display: block;
+}
+
+/* Progress fill and playhead — no transition: the rAF tick already updates
+   at 60Hz, and a transition would visibly lag the scheduler position. */
 .arrange-bar__progress {
   position: absolute;
   inset: 0 auto 0 0;
   width: 0;
-  background: color-mix(in oklch, var(--accent) 16%, transparent);
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
   pointer-events: none;
   z-index: 2;
-  transition: width 80ms linear;
 }
 
 .arrange-bar__dot {
   position: absolute;
   top: 50%;
   left: 0;
-  width: 10px;
-  height: 10px;
-  margin-top: -5px;
-  margin-left: -5px;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  margin-left: -4.5px;
   background: var(--accent);
   border: 2px solid var(--surface-1);
   border-radius: 50%;
   box-shadow: var(--shadow-low);
   pointer-events: none;
   z-index: 3;
-  transition: left 80ms linear;
 }
 
-/* When the scheduler is idle, dim everything so it reads as parked. */
+/* When the scheduler is idle, dim playhead so it reads as parked. */
 [data-playback="idle"] .arrange-bar__progress,
 [data-playback="idle"] .arrange-bar__dot {
   opacity: 0.38;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .arrange-bar__progress,
-  .arrange-bar__dot {
+  .arrange-bar__solo-btn,
+  .arrange-bar__section,
+  .arrange-bar__strip {
     transition: none;
   }
 }

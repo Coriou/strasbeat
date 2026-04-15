@@ -1,5 +1,13 @@
 import { shouldIgnoreStrudelLog } from "./strudel-logger.js";
 import { track } from "./analytics.js";
+import { parseArrangements } from "./editor/arrange-parse.js";
+import {
+  primeArrangementParser,
+  resetRegistry as resetArrangeRegistry,
+  beginEvaluate as beginArrangeEvaluate,
+  endEvaluate as endArrangeEvaluate,
+  markEvalAppliedFor as markArrangeEvalAppliedFor,
+} from "./strudel-ext/arrange.js";
 
 /**
  * Installs the eval feedback infrastructure: error tracking, sound validation,
@@ -295,7 +303,44 @@ export function installEvalFeedback({
       _evalInProgress = true;
       // Reset badge at eval start — new eval = fresh error slate.
       resetRuntimeErrors();
-      const result = await _editorEvaluate(...args);
+
+      // Arrange wrapper: parse source for labels, hand them to the
+      // wrapper via a FIFO queue, reset the runtime registry. The
+      // wrapper (src/strudel-ext/arrange.js) will dequeue one entry
+      // per arrange() call during evaluate. Solo state is NOT reset —
+      // it's sticky so users can iterate on a soloed section and so
+      // WAV export respects the soloed selection. beginEvaluate() /
+      // endEvaluate() bracket the call so validateSolo can't clear
+      // a valid solo during the transient empty-registry window.
+      // Snapshot the buffer text driving this evaluate so we can tag
+      // the registry with it after success. The UI uses that tag to
+      // decide whether to trust the registry or fall back to parser
+      // preview when the buffer drifts from what was last played.
+      const arrangeEvalCode = editor.code ?? "";
+      try {
+        const parsed = parseArrangements(arrangeEvalCode);
+        primeArrangementParser(parsed);
+        resetArrangeRegistry();
+        beginArrangeEvaluate();
+      } catch (err) {
+        console.warn("[strasbeat/arrange] failed to prime parser:", err);
+      }
+
+      let result;
+      let arrangeEvalSucceeded = false;
+      try {
+        result = await _editorEvaluate(...args);
+        arrangeEvalSucceeded = true;
+      } finally {
+        try {
+          endArrangeEvaluate();
+          if (arrangeEvalSucceeded) {
+            markArrangeEvalAppliedFor(arrangeEvalCode);
+          }
+        } catch (err) {
+          console.warn("[strasbeat/arrange] endEvaluate failed:", err);
+        }
+      }
       _evalInProgress = false;
       if (evalRequestId !== playbackRequestId) return result;
 

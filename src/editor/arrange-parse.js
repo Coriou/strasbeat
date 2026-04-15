@@ -235,6 +235,83 @@ function buildLineMap(code) {
   };
 }
 
+// Method names that, chained after `arrange(...)`, change how long the
+// arrangement audibly takes per loop. We don't enumerate *every* such
+// method — the goal is to flag the footguns so the UI can explain "your
+// strip shows 32 cycles but playback takes 16" rather than silently lying.
+const DURATION_AFFECTING_METHODS = new Set([
+  'slow',
+  'fast',
+  'stretch',
+  'segment',
+  'cps',
+  'cpm',
+  'setcps',
+  'setcpm',
+  'hurry',
+]);
+
+/**
+ * Scan the immediate method chain following an arrange call for duration-
+ * affecting transforms like `.slow(2)` or `.fast(0.5)`. Returns the first
+ * match found — the UI only needs to know whether to show a warning badge,
+ * not the full transform tree.
+ *
+ * Walks only the top-level chain (`arrange(...).slow(2)`), not nested
+ * calls inside the body. Comments, strings, and balanced brackets are
+ * skipped using the same tolerant scanner as parseArrangements.
+ *
+ * @param {string} code
+ * @param {Arrangement} arrangement
+ * @returns {{ method: string, argStart: number, argEnd: number } | null}
+ */
+export function findTrailingDurationTransform(code, arrangement) {
+  if (!arrangement) return null;
+  let i = arrangement.closeParen + 1;
+
+  while (i < code.length) {
+    const ch = code[i];
+
+    // Skip whitespace & line comments between method calls.
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (ch === '/' && code[i + 1] === '/') {
+      i = skipLineComment(code, i);
+      continue;
+    }
+    if (ch === '/' && code[i + 1] === '*') {
+      i = skipBlockComment(code, i);
+      continue;
+    }
+
+    // A method chain continues only with '.'. Anything else terminates it.
+    if (ch !== '.') return null;
+
+    i++;
+    while (i < code.length && /\s/.test(code[i])) i++;
+
+    let end = i;
+    while (end < code.length && IDENT_PART_RE.test(code[end])) end++;
+    if (end === i) return null;
+
+    const method = code.slice(i, end);
+    i = end;
+    while (i < code.length && /\s/.test(code[i])) i++;
+    if (code[i] !== '(') return null;
+
+    const callClose = findMatchingClose(code, i, '(', ')');
+    if (callClose < 0) return null;
+
+    if (DURATION_AFFECTING_METHODS.has(method)) {
+      return { method, argStart: i + 1, argEnd: callClose };
+    }
+    i = callClose + 1;
+  }
+  return null;
+}
+
 /**
  * Given a cycle position and an arrangement, return the index of the
  * section currently playing and its local progress in [0, 1).
