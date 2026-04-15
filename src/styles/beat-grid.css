@@ -1,0 +1,1017 @@
+/*
+ * Beat grid — step-sequencer view over the editor buffer's `$:` drum lanes.
+ * Sits as a flex sibling of #roll so the divider above stays draggable in
+ * every mode and the pane resize affordance is identical for Roll/Scope/
+ * Beats.
+ *
+ * Visual language (Phase 5 pass):
+ *   - Lane identity lives on the dot + sound name. Cells borrow a muted
+ *     tint of the lane hue so rows feel related, but no cell screams —
+ *     the grid should read as rhythm first, identity second.
+ *   - All state tokens (surface, text, accent, space, radii, motion) flow
+ *     from design/SYSTEM.md via CSS variables. No hardcoded hex.
+ *   - Dark mode only. Cell tint levels are tuned for the default surface-1
+ *     background; nothing degrades when the accent variable is overridden.
+ *   - Motion is musical: ~80-120ms transitions, no springs, no ambient
+ *     animation. Menus fade+lift in; cells pulse on flip; the playhead
+ *     sweeps on GPU transform.
+ */
+
+/* ─── Container ───────────────────────────────────────────────────────── */
+
+.beat-grid {
+  /* Cell-tint levels — collected here so adjustments don't chase through
+     dozens of color-mix calls. All percentages are "how much lane hue"
+     in the resulting color-mix with the relevant surface token. */
+  --cell-tint-rest: 5%; /* idle/empty cell base tint */
+  --cell-tint-hover: 22%; /* hover on an empty cell */
+  --cell-tint-on: 55%; /* a filled hit */
+  --cell-tint-on-hover: 70%; /* hover on a filled hit */
+  --cell-tint-variant: 48%; /* filled with :N variant (mixed with white for hue-shift) */
+  --cell-tint-off-sound: 28%; /* filled but sound differs from lane primary */
+  --cell-tint-paint-on: 38%; /* drag-paint preview: about-to-turn-on */
+  --cell-tint-paint-off: 30%; /* drag-paint preview: about-to-turn-off */
+  --cell-tint-dim: 22%; /* muted/read-only "on" cells */
+
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  overflow: auto;
+
+  /* Headroom for the mode pill (top-right of the roll pane) so the first
+     lane never collides with it. Pulled from the space scale. */
+  padding: var(--space-7) var(--space-4) var(--space-4);
+}
+
+.beat-grid[hidden] {
+  display: none;
+}
+
+/* When the grid is showing, the canvas yields its flex slot entirely so
+   beat-grid claims the same vertical space the canvas would. */
+.shell--beat-grid .roll-canvas {
+  display: none;
+}
+
+/* ─── Empty state ─────────────────────────────────────────────────────── */
+
+.beat-grid__empty {
+  margin: auto;
+  padding: var(--space-6);
+  max-width: 460px;
+  color: var(--text-mut);
+  font-family: var(--font-sans);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.beat-grid__empty[hidden] {
+  display: none;
+}
+
+.beat-grid__empty-lead {
+  color: var(--text);
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+
+.beat-grid__empty-hint {
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.beat-grid__empty-code {
+  display: inline-block;
+  padding: 2px var(--space-2);
+  margin: 0 2px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ─── Lanes container ────────────────────────────────────────────────── */
+
+.beat-grid__lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ─── Lane row ────────────────────────────────────────────────────────── */
+
+.beat-grid__lane {
+  display: grid;
+  /* Rail flexes between a compact minimum and a readable max; cells take
+     what's left; controls hug their content. The 160px sweet spot fits
+     `bd` + `kick` + `×8` without clipping on the common case. */
+  grid-template-columns: minmax(140px, 164px) 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition:
+    background var(--t-hover),
+    opacity var(--t-hover);
+}
+
+.beat-grid__lane:hover {
+  background: color-mix(in oklch, var(--surface-2) 45%, transparent);
+}
+
+.beat-grid__lane:focus-within {
+  background: color-mix(in oklch, var(--surface-2) 65%, transparent);
+}
+
+.beat-grid__lane--muted {
+  opacity: 0.55;
+}
+
+.beat-grid__lane--soloed {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.beat-grid__lane--readonly {
+  background: color-mix(in oklch, var(--surface-2) 25%, transparent);
+}
+
+.beat-grid__lane--readonly:hover {
+  background: color-mix(in oklch, var(--surface-2) 45%, transparent);
+}
+
+/* ─── Rail (left column) ─────────────────────────────────────────────── */
+
+.beat-grid__rail {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-left: var(--space-1);
+}
+
+.beat-grid__lane-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  cursor: grab;
+  transition:
+    transform 120ms ease-out,
+    box-shadow 120ms ease-out;
+}
+
+.beat-grid__lane-dot:hover {
+  transform: scale(1.35);
+  box-shadow: 0 0 0 3px
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 25%, transparent);
+}
+
+.beat-grid__lane-dot:active,
+.beat-grid__lane--dragging .beat-grid__lane-dot {
+  cursor: grabbing;
+}
+
+.beat-grid__lane-dot:focus-visible {
+  outline: 2px solid
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 70%, white 20%);
+  outline-offset: 3px;
+}
+
+.beat-grid__rail-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+  gap: 1px;
+}
+
+/* Sound name — treated as code: mono, regular weight, full-contrast text. */
+.beat-grid__sound {
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: 400;
+  color: var(--text);
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nickname — secondary label in sans. Lowercase (no uppercase transform),
+   dim color so it sits under the sound name without competing. */
+.beat-grid__nickname {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.beat-grid__step-chip {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-3) 70%, transparent);
+  color: var(--text-mut);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* ─── Step grid (middle column, editable lanes) ──────────────────────── */
+
+.beat-grid__cells {
+  display: grid;
+  gap: 2px;
+  height: 36px;
+  position: relative;
+}
+
+/* Playhead — hairline sweeping across the cells strip in sync with the
+   scheduler. Single element per lane, absolute-positioned over the cells
+   grid, translated via transform for GPU animation. Hidden when stopped. */
+.beat-grid__playhead {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 0;
+  width: 2px;
+  pointer-events: none;
+  background: color-mix(in oklch, var(--accent) 85%, white 12%);
+  box-shadow:
+    0 0 6px color-mix(in oklch, var(--accent) 55%, transparent),
+    0 0 14px color-mix(in oklch, var(--accent) 28%, transparent);
+  transform: translateX(0);
+  will-change: transform;
+  opacity: 1;
+  transition: opacity 120ms ease-out;
+  z-index: 2;
+}
+
+.beat-grid__playhead[hidden] {
+  display: none;
+}
+
+/* Cells */
+
+.beat-grid__cell {
+  /* The per-lane accent is set inline via `style="--cell-accent: …"`.
+     Falling back to --accent keeps the look sane for any cell that forgets
+     to set it (e.g. during hot swaps). */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  height: 100%;
+  padding: 0;
+  border: 1px solid
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 18%, var(--border-soft));
+  border-radius: var(--radius-sm);
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-rest),
+    var(--surface-1)
+  );
+  color: transparent;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    transform 80ms ease-out,
+    box-shadow var(--t-hover);
+}
+
+.beat-grid__cell:disabled {
+  cursor: default;
+}
+
+.beat-grid__cell:not(:disabled):hover {
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-hover),
+    var(--surface-1)
+  );
+  border-color: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) 45%,
+    var(--border-soft)
+  );
+}
+
+.beat-grid__cell:not(:disabled):active {
+  transform: scale(0.94);
+}
+
+.beat-grid__cell:focus-visible {
+  outline: 2px solid
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 70%, white 20%);
+  outline-offset: 2px;
+  z-index: 1;
+}
+
+.beat-grid__cell--on {
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-on),
+    var(--surface-2)
+  );
+  border-color: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) 65%,
+    transparent
+  );
+  box-shadow: inset 0 1px 0
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 75%, white 20%);
+  /* Subtle flip-in so toggling a cell feels like an edit, not a config
+     change. Shorter than the hover transition so it reads as direct. */
+  animation: beat-grid-cell-flip-in 140ms ease-out;
+}
+
+.beat-grid__cell--on:not(:disabled):hover {
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-on-hover),
+    var(--surface-2)
+  );
+}
+
+@keyframes beat-grid-cell-flip-in {
+  from {
+    transform: scale(0.82);
+    opacity: 0.4;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Quarter-beat dividers: a small extra gap on every step that starts a new
+   beat group. On 4-step lanes this has no effect (every cell is a quarter);
+   on 8-step and 16-step it groups cells into visually readable bars of 2
+   or 4. Kept as margin (not border) so the cells stay the same width. */
+.beat-grid__cell--quarter-start {
+  margin-left: 4px;
+}
+
+/* Variant tag — tiny monospace badge top-right of a filled cell. */
+.beat-grid__variant-tag {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: color-mix(in oklch, var(--surface-0) 65%, white 30%);
+  letter-spacing: -0.02em;
+  pointer-events: none;
+}
+
+.beat-grid__cell--variant {
+  /* Slight lightness bump (mix with white) so the variant is legible as a
+     different sample without a hue shift — keeps the lane color coherent. */
+  background: color-mix(
+    in oklch,
+    color-mix(
+      in oklch,
+      var(--cell-accent, var(--accent)) var(--cell-tint-variant),
+      var(--surface-2)
+    ) 88%,
+    white 8%
+  );
+}
+
+/* Off-sound cells: the cell's sound name differs from the lane's primary
+   sound (mixed-sound rows like `bd:2 sd:1 bd:2 sd:1 …`). Render dimmer so
+   the lane's main hue still shows through, and surface the sound name
+   centred so the user sees which drum each step is. */
+.beat-grid__cell--off-sound {
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-off-sound),
+    var(--surface-3)
+  );
+  border-color: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) 40%,
+    var(--border-soft)
+  );
+  box-shadow: none;
+}
+
+.beat-grid__cell-sound {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: color-mix(in oklch, var(--text) 85%, transparent);
+  text-transform: lowercase;
+  pointer-events: none;
+}
+
+/* When a cell carries both off-sound *and* a variant tag, nudge the sound
+   label down so the variant stays in the corner. */
+.beat-grid__cell--off-sound.beat-grid__cell--variant .beat-grid__cell-sound {
+  padding-top: 4px;
+}
+
+/* Read-only / muted: dim the "on" cells so they read as inactive rhythm. */
+.beat-grid__lane--readonly .beat-grid__cell--on,
+.beat-grid__lane--muted .beat-grid__cell--on {
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-dim),
+    var(--surface-2)
+  );
+  border-color: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) 30%,
+    var(--border-soft)
+  );
+  box-shadow: none;
+}
+
+/* Paint-drag preview — the target state while mid-stroke. Inset ring so it
+   reads as "about to commit" rather than "already on". */
+.beat-grid__cell--painting {
+  box-shadow: inset 0 0 0 2px
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 70%, white 15%);
+}
+
+.beat-grid__cell--painting-on:not(.beat-grid__cell--on) {
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-paint-on),
+    var(--surface-1)
+  );
+}
+
+.beat-grid__cell--painting-off.beat-grid__cell--on {
+  background: color-mix(
+    in oklch,
+    var(--cell-accent, var(--accent)) var(--cell-tint-paint-off),
+    var(--surface-2)
+  );
+  box-shadow: inset 0 0 0 2px
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 45%, white 10%);
+}
+
+/* Shift+arrow selection range */
+.beat-grid__cell--selected {
+  outline: 2px solid
+    color-mix(in oklch, var(--cell-accent, var(--accent)) 70%, white 20%);
+  outline-offset: -1px;
+  z-index: 1;
+}
+
+/* ─── Read-only stripe (replaces the cell grid) ──────────────────────── */
+
+.beat-grid__stripe {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: 1px solid color-mix(in oklch, var(--border-soft) 90%, transparent);
+  /* Left accent stripe in text-dim communicates "read-only" without
+     competing with the lane dot for identity. Turns up on hover. */
+  border-left: 3px solid color-mix(in oklch, var(--text-dim) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-2) 30%, transparent);
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.beat-grid__stripe:hover {
+  background: color-mix(in oklch, var(--surface-2) 55%, transparent);
+  border-left-color: var(--text-dim);
+}
+
+.beat-grid__stripe:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 20%);
+  outline-offset: 1px;
+}
+
+.beat-grid__snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-1) 80%, transparent);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.beat-grid__badge {
+  flex: 0 0 auto;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-3) 85%, transparent);
+  color: var(--text-mut);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.beat-grid__stripe-hint {
+  flex: 0 1 auto;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Read-only preview — visually kin to the editable cells, just flatter and
+   desaturated. Same gap + aspect so rhythm is comparable across lanes. */
+.beat-grid__preview {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  height: 14px;
+  margin-left: auto;
+  max-width: 50%;
+}
+
+.beat-grid__preview-cell {
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--border-soft) 65%, transparent);
+  border-radius: 2px;
+}
+
+.beat-grid__preview-cell--on {
+  background: color-mix(in oklch, var(--text-dim) 55%, transparent);
+  border-color: transparent;
+}
+
+/* ─── Controls (right column) ────────────────────────────────────────── */
+
+.beat-grid__controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-right: var(--space-1);
+}
+
+/* Bank chip — code identifier, treat as mono. Drop aggressive uppercase /
+   bold — the name already reads loud enough. */
+.beat-grid__bank {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-3) 85%, transparent);
+  color: var(--text-mut);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.beat-grid__bank--empty {
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px dashed color-mix(in oklch, var(--border-soft) 70%, var(--text-dim));
+}
+
+.beat-grid__bank--button {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.beat-grid__bank--button:hover {
+  background: color-mix(in oklch, var(--surface-3) 90%, var(--accent) 14%);
+  color: var(--text);
+}
+
+.beat-grid__bank--empty.beat-grid__bank--button:hover {
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-2));
+  color: var(--text);
+  border-color: var(--text-dim);
+  border-style: solid;
+}
+
+.beat-grid__bank--button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 20%);
+  outline-offset: 1px;
+}
+
+/* Mute / Solo — always rendered so the row geometry is consistent. Inactive
+   buttons keep a faint pill so they read as buttons, not text. */
+.beat-grid__states {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.beat-grid__state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-3) 55%, transparent);
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.beat-grid__state--button {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover);
+}
+
+.beat-grid__state--button:not([aria-pressed="true"]):hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.beat-grid__state--button[aria-pressed="true"] {
+  color: var(--text);
+}
+
+.beat-grid__state--button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 20%);
+  outline-offset: 1px;
+}
+
+.beat-grid__state--muted {
+  background: color-mix(in oklch, var(--rec) 40%, var(--surface-3));
+  color: var(--text);
+}
+
+.beat-grid__state--soloed {
+  background: color-mix(in oklch, var(--accent) 45%, var(--surface-3));
+  color: var(--text);
+}
+
+/* ─── Sound chip (clickable) ─────────────────────────────────────────── */
+
+.beat-grid__sound--button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+  transition: color var(--t-hover);
+}
+
+.beat-grid__sound--button:not(:disabled):hover {
+  color: color-mix(in oklch, var(--accent) 75%, var(--text) 25%);
+}
+
+.beat-grid__sound--button:disabled {
+  cursor: default;
+  color: var(--text-dim);
+}
+
+.beat-grid__sound--button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 20%);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ─── Drag-reorder ───────────────────────────────────────────────────── */
+
+.beat-grid__lane--dragging {
+  z-index: 2;
+  opacity: 0.95;
+  background: color-mix(in oklch, var(--surface-2) 90%, transparent);
+  box-shadow: var(--shadow-pop);
+  pointer-events: auto;
+  transition: none;
+}
+
+.beat-grid__lane--drop-target {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+body.beat-grid-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* ─── Read-only "Expand to N cells" action ───────────────────────────── */
+
+.beat-grid__stripe-action {
+  appearance: none;
+  cursor: pointer;
+  flex: 0 0 auto;
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--accent) 20%, var(--surface-2));
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.beat-grid__stripe-action:hover {
+  background: color-mix(in oklch, var(--accent) 36%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+}
+
+.beat-grid__stripe-action:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 20%);
+  outline-offset: 1px;
+}
+
+/* ─── "+ Add drum" button ────────────────────────────────────────────── */
+
+/* Aligned under the rail column so it visually belongs to the lane stack,
+   not floating centered in no-man's-land. The left padding matches the
+   rail's left padding so dot + "+" sit on the same vertical axis. */
+.beat-grid__add-row {
+  display: flex;
+  justify-content: flex-start;
+  padding: var(--space-2) 0 0 calc(var(--space-2) + 2px);
+}
+
+.beat-grid__add-btn {
+  appearance: none;
+  cursor: pointer;
+  padding: 5px var(--space-3);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.beat-grid__add-btn--ghost {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px dashed color-mix(in oklch, var(--border-soft) 70%, var(--text-dim));
+}
+
+.beat-grid__add-btn--ghost:hover {
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface-2));
+  color: var(--text);
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--text-dim));
+  border-style: solid;
+}
+
+.beat-grid__add-btn--primary {
+  background: color-mix(in oklch, var(--accent) 28%, var(--surface-2));
+  color: var(--text);
+  border: 1px solid color-mix(in oklch, var(--accent) 50%, transparent);
+}
+
+.beat-grid__add-btn--primary:hover {
+  background: color-mix(in oklch, var(--accent) 45%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 65%, transparent);
+}
+
+.beat-grid__add-btn:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--accent) 70%, white 20%);
+  outline-offset: 2px;
+}
+
+/* ─── Floating menu (variant + list) ─────────────────────────────────── */
+
+.beat-grid__menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 140px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: beat-grid-menu-in 120ms ease-out;
+}
+
+@keyframes beat-grid-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.beat-grid__menu-header {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 2px;
+}
+
+.beat-grid__menu-empty {
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-mut);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.beat-grid__menu-item {
+  appearance: none;
+  display: block;
+  width: 100%;
+  padding: 5px var(--space-2);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 80ms ease-out,
+    color 80ms ease-out;
+}
+
+.beat-grid__menu-item:hover,
+.beat-grid__menu-item:focus-visible {
+  background: var(--surface-3);
+  outline: none;
+}
+
+.beat-grid__menu-item.is-current {
+  color: color-mix(in oklch, var(--accent) 75%, var(--text) 25%);
+  font-weight: 600;
+}
+
+.beat-grid__menu-item.is-current::before {
+  content: "●  ";
+  color: var(--accent);
+}
+
+/* ─── List menu (bank / sound / lane-context / add-lane) ─────────────── */
+
+.beat-grid__menu--list {
+  min-width: 220px;
+  max-width: 340px;
+}
+
+.beat-grid__menu-search {
+  margin: 2px var(--space-1);
+  padding: 5px var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  outline: none;
+  transition: border-color var(--t-hover);
+}
+
+.beat-grid__menu-search:focus {
+  border-color: color-mix(in oklch, var(--accent) 70%, var(--border));
+}
+
+.beat-grid__menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.beat-grid__menu-heading {
+  padding: 6px var(--space-2) 2px;
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.beat-grid__menu--list .beat-grid__menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.beat-grid__menu-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.beat-grid__menu-item-hint {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.beat-grid__menu-item--destructive {
+  color: color-mix(in oklch, var(--rec, #d66) 70%, var(--text) 30%);
+}
+
+.beat-grid__menu-item--destructive:hover,
+.beat-grid__menu-item--destructive:focus-visible {
+  background: color-mix(in oklch, var(--rec, #d66) 22%, var(--surface-3));
+  color: var(--text);
+}
+
+/* ─── Screen-reader-only live region ─────────────────────────────────── */
+
+.beat-grid__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ─── Responsive squeeze ─────────────────────────────────────────────── */
+
+@media (max-width: 720px) {
+  .beat-grid {
+    padding: var(--space-7) var(--space-2) var(--space-3);
+  }
+
+  .beat-grid__lane {
+    grid-template-columns: 104px 1fr auto;
+    gap: var(--space-2);
+  }
+
+  .beat-grid__nickname {
+    display: none;
+  }
+
+  .beat-grid__add-row {
+    padding-left: var(--space-2);
+  }
+}

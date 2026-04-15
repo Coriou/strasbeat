@@ -27,6 +27,7 @@ import { registerPanels } from "./panels.js";
 import { renderRoll } from "./ui/piano-roll.js";
 import { createScope } from "./ui/scope.js";
 import { createBottomPanelModes } from "./ui/bottom-panel-modes.js";
+import { mountBeatGrid } from "./ui/beat-grid.js";
 import { mountTrackBar } from "./ui/track-bar.js";
 import { mountArrangeBar } from "./ui/arrange-bar.js";
 import { prompt, confirm } from "./ui/modal.js";
@@ -181,6 +182,9 @@ const { bootPromise, getBootReady, prebake } = createBoot({
 let consolePanel = null;
 let transport = null;
 let evalFeedback = null;
+// Forward decl — mounted after the transport so its init playback-state
+// callback (which fires synchronously with `idle`) can safely reference it.
+let beatGrid = null;
 
 const editor = new StrudelMirror({
   defaultOutput: webaudioOutput,
@@ -194,6 +198,9 @@ const editor = new StrudelMirror({
   onEvalError: (err) => evalFeedback?.handleEvalError(err),
   onDraw: (haps, time) => {
     const mode = bottomModes.getMode();
+    // Beat grid renders DOM over the canvas — no canvas paint to do, and
+    // keeping the renderer running underneath would just waste cycles.
+    if (mode === "beats") return;
     if (mode === "scope") {
       const dpr = window.devicePixelRatio || 1;
       scope.render(drawCtx, canvas.width / dpr, canvas.height / dpr);
@@ -332,7 +339,10 @@ transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
   getAudioContext,
   rootEl: shellEl,
-  onPlaybackStateChange: (s) => bottomModes.setPlaybackState(s),
+  onPlaybackStateChange: (s) => {
+    bottomModes.setPlaybackState(s);
+    beatGrid?.setPlaybackState(s);
+  },
   onErrorBadgeClick: () => {
     const ate = evalFeedback?.getActiveTransportError();
     if (ate?.entryId != null) {
@@ -578,6 +588,65 @@ mountArrangeBar({
   view: editor.editor,
   getScheduler: () => editor?.repl?.scheduler ?? null,
   onEvaluate: () => editor.evaluate(),
+});
+
+// ─── Beat grid (bottom-panel "Beat grid" mode) ───────────────────────────
+// Mounts as a flex sibling of the #roll canvas inside .roll-pane, hidden
+// by default. When shown, CSS hides the canvas (display:none) so the grid
+// claims the canvas's flex slot — the divider at the top of the pane
+// remains the single resize handle for all three views.
+// Visibility follows two signals:
+//   1. parser: any `$:` drum lane in the buffer → tab available
+//   2. mode  : user picked "beats" → DOM shown, canvas paint skipped
+// See design/work/19-beat-grid.md.
+beatGrid = mountBeatGrid({
+  container: canvas.parentElement,
+  view: editor.editor,
+  onLanesChange: (count) => bottomModes.setBeatsAvailable(count > 0),
+  getSoundMap: () => soundMap.get(),
+  // Playhead sweep reads editor.repl.scheduler.now() each frame — same
+  // hook arrange-bar and transport use. Guarded against a missing REPL.
+  getScheduler: () => editor?.repl?.scheduler ?? null,
+  // Fire a one-shot audition when the user turns on a cell / picks a
+  // variant. Mirrors the sound-browser preview: tuned envelope + passed
+  // bank so variant-N from a Roland kit actually plays that kit's N.
+  onPreview: (name, opts = {}) => previewDrumCell(name, opts),
+  // Auto-replay after any grid edit so changes are immediately audible
+  // during playback — same mechanism track-bar's mute/solo uses.
+  onEvaluate: () => editor.evaluate(),
+});
+async function previewDrumCell(name, { bank, variant } = {}) {
+  const audioCtx = getAudioContext();
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended") {
+    try {
+      await audioCtx.resume();
+    } catch {}
+  }
+  if (audioCtx.state !== "running") return;
+  const value = {
+    s: name,
+    note: 60,
+    gain: 0.7,
+    attack: 0.002,
+    decay: 0.35,
+    sustain: 0,
+    release: 0.25,
+  };
+  if (bank) value.bank = bank;
+  if (variant != null) value.n = variant;
+  Promise.resolve(
+    superdough(value, audioCtx.currentTime + 0.01, 0.4),
+  ).catch((err) =>
+    console.warn(`[beat-grid] preview "${name}" failed:`, err),
+  );
+}
+bottomModes.setBeatsAvailable(beatGrid.getLaneCount() > 0);
+bottomModes.setOnChange((mode) => {
+  const isBeats = mode === "beats";
+  shellEl.classList.toggle("shell--beat-grid", isBeats);
+  if (isBeats) beatGrid.show();
+  else beatGrid.hide();
 });
 
 // ─── Transport ───────────────────────────────────────────────────────────

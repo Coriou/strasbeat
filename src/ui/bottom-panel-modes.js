@@ -1,10 +1,15 @@
 // Bottom panel mode switcher — a floating segmented pill in the top-right
-// of the roll pane that toggles between Roll, Scope, and an optional
-// Custom draw surface. Absolute-positioned so it never steals canvas
-// height — the roll and scope both render into the full #roll canvas.
+// of the roll pane that toggles between Roll, Scope, Beat grid, and an
+// optional Custom draw surface. Absolute-positioned so it never steals
+// canvas height. Roll and Scope both render into the full #roll canvas;
+// the beat grid is a flex sibling of the canvas that swaps into the same
+// slot when active (see src/styles/beat-grid.css). All three views share
+// the roll-pane height, so the divider at the top resizes them uniformly.
 //
-// Roll and Scope are always available; Custom only appears when a
-// pattern registers a custom draw function via setCustomDraw().
+// Roll and Scope are always available. Beat grid only appears when the
+// current pattern has at least one $: drum lane (editable or read-only)
+// — see src/editor/drum-parse.js. Custom only appears when a pattern
+// registers a custom draw function via setCustomDraw().
 //
 // The pill also carries a playback status dot (idle / queued / loading /
 // playing) driven by transport.onPlaybackStateChange. It lives here
@@ -15,6 +20,7 @@
 const MODES = [
   { id: "roll", label: "Roll" },
   { id: "scope", label: "Scope" },
+  { id: "beats", label: "Beat grid" },
   { id: "custom", label: "Custom" },
 ];
 
@@ -65,6 +71,21 @@ export function createBottomPanelModes() {
 
   function getCustomDraw() {
     return customDraw;
+  }
+
+  // Beat grid availability is driven by the parser: visible iff the pattern
+  // has at least one $: drum lane. We don't auto-switch when it appears
+  // (unlike Custom) — the roll/scope already in view stays put; the user
+  // opts into the grid when they want it. We do switch back to roll if the
+  // grid disappears while it's the active view.
+  function setBeatsAvailable(available) {
+    if (available) {
+      modesAvailable.add("beats");
+    } else {
+      modesAvailable.delete("beats");
+      if (currentMode === "beats") setMode("roll");
+    }
+    updateToggle();
   }
 
   function mountToggle(container) {
@@ -134,6 +155,7 @@ export function createBottomPanelModes() {
     setMode,
     setCustomDraw,
     getCustomDraw,
+    setBeatsAvailable,
     mountToggle,
     setOnChange,
     setPlaybackState,

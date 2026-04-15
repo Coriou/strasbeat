@@ -36,6 +36,7 @@
 @import "./styles/midi-bar.css";
 @import "./styles/roll.css";
 @import "./styles/bottom-panel.css";
+@import "./styles/beat-grid.css";
 @import "./styles/editor.css";
 @import "./styles/error-marks.css";
 @import "./styles/autocomplete.css";
