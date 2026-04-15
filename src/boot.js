@@ -3,6 +3,10 @@ import * as strudelDraw from "@strudel/draw";
 import * as strudelMini from "@strudel/mini";
 import * as strudelTonal from "@strudel/tonal";
 import * as strudelWebaudio from "@strudel/webaudio";
+// slider.mjs exports `sliderWithID`, the function the Strudel transpiler
+// rewrites `slider(value, min, max, step)` calls into. Without it in scope,
+// any pattern using slider() throws "sliderWithID is not defined" at eval.
+import * as strudelSlider from "@strudel/codemirror/slider.mjs";
 import * as strudelExt from "./strudel-ext/index.js";
 import { registerSoundfonts } from "@strudel/soundfonts";
 import { runUserSetup } from "./user-setup.js";
@@ -44,7 +48,7 @@ export function createBoot({ shellEl, exportBtn, status }) {
     try {
       initAudioOnFirstClick();
       setBootProgress(0.05, "loading modules…");
-      const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelExt); // prettier-ignore
+      const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelSlider, strudelExt); // prettier-ignore
       await loadModules;
       setBootProgress(0.15, "loading synth sounds…");
 
