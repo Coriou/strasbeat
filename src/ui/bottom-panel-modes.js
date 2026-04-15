@@ -1,23 +1,38 @@
-// Bottom panel mode switcher — manages visualization modes (Roll / Scope / Custom).
-// See design/work/14-strudel-learning-and-extensibility.md Phase 5.
+// Bottom panel mode switcher — a floating segmented pill in the top-right
+// of the roll pane that toggles between Roll, Scope, and an optional
+// Custom draw surface. Absolute-positioned so it never steals canvas
+// height — the roll and scope both render into the full #roll canvas.
 //
-// The tab bar only appears when more than one mode is available.
-// When only Roll mode is in use, the UI is invisible — zero noise.
-
-import { makeIcon } from "./icons.js";
+// Roll and Scope are always available; Custom only appears when a
+// pattern registers a custom draw function via setCustomDraw().
+//
+// The pill also carries a playback status dot (idle / queued / loading /
+// playing) driven by transport.onPlaybackStateChange. It lives here
+// because this strip is anchored to the roll canvas — the same place the
+// user looks to decide "is this thing alive" — so a second indicator
+// across the page would just split attention.
 
 const MODES = [
-  { id: "roll", label: "Roll", icon: "bar-chart" },
-  { id: "scope", label: "Scope", icon: "waves" },
-  { id: "custom", label: "Custom", icon: "paintbrush" },
+  { id: "roll", label: "Roll" },
+  { id: "scope", label: "Scope" },
+  { id: "custom", label: "Custom" },
 ];
+
+const PLAYBACK_LABELS = {
+  idle: "Stopped",
+  queued: "Queued",
+  loading: "Loading",
+  playing: "Playing",
+};
 
 export function createBottomPanelModes() {
   let currentMode = "roll";
   let customDraw = null;
-  let tabBarEl = null;
+  let toggleEl = null;
+  let statusEl = null;
   let onChange = null;
-  let modesAvailable = new Set(["roll"]);
+  let playbackState = "idle";
+  const modesAvailable = new Set(["roll", "scope"]);
 
   function setOnChange(fn) {
     onChange = fn;
@@ -30,9 +45,9 @@ export function createBottomPanelModes() {
   function setMode(mode) {
     if (mode === currentMode) return;
     if (!MODES.find((m) => m.id === mode)) return;
+    if (!modesAvailable.has(mode)) return;
     currentMode = mode;
-    modesAvailable.add(mode);
-    updateTabBar();
+    updateToggle();
     if (onChange) onChange(mode);
   }
 
@@ -40,30 +55,35 @@ export function createBottomPanelModes() {
     customDraw = fn;
     if (fn) {
       modesAvailable.add("custom");
-      if (currentMode !== "custom") setMode("custom");
+      setMode("custom");
     } else {
       modesAvailable.delete("custom");
       if (currentMode === "custom") setMode("roll");
     }
-    updateTabBar();
+    updateToggle();
   }
 
   function getCustomDraw() {
     return customDraw;
   }
 
-  function enableScope() {
-    modesAvailable.add("scope");
-    updateTabBar();
-  }
+  function mountToggle(container) {
+    const bar = document.createElement("div");
+    bar.className = "bottom-panel__bar";
 
-  // ─── Tab bar DOM ────────────────────────────────────────────────────
+    statusEl = document.createElement("div");
+    statusEl.className = "bottom-panel__status";
+    statusEl.setAttribute("role", "status");
+    statusEl.setAttribute("aria-live", "polite");
+    statusEl.innerHTML =
+      '<span class="bottom-panel__status-dot" aria-hidden="true"></span>' +
+      '<span class="bottom-panel__status-label"></span>';
+    bar.appendChild(statusEl);
 
-  function mountTabBar(container) {
-    tabBarEl = document.createElement("div");
-    tabBarEl.className = "bottom-panel__modes";
-    tabBarEl.setAttribute("role", "tablist");
-    tabBarEl.setAttribute("aria-label", "Visualization mode");
+    toggleEl = document.createElement("div");
+    toggleEl.className = "bottom-panel__modes";
+    toggleEl.setAttribute("role", "tablist");
+    toggleEl.setAttribute("aria-label", "Bottom panel view");
 
     for (const mode of MODES) {
       const btn = document.createElement("button");
@@ -71,26 +91,20 @@ export function createBottomPanelModes() {
       btn.className = "bottom-panel__mode-btn";
       btn.dataset.mode = mode.id;
       btn.setAttribute("role", "tab");
-      btn.setAttribute(
-        "aria-selected",
-        mode.id === currentMode ? "true" : "false",
-      );
-      btn.title = mode.label;
       btn.textContent = mode.label;
       btn.addEventListener("click", () => setMode(mode.id));
-      tabBarEl.appendChild(btn);
+      toggleEl.appendChild(btn);
     }
+    bar.appendChild(toggleEl);
 
-    container.prepend(tabBarEl);
-    updateTabBar();
+    container.appendChild(bar);
+    updateToggle();
+    updateStatus();
   }
 
-  function updateTabBar() {
-    if (!tabBarEl) return;
-    const showBar = modesAvailable.size > 1;
-    tabBarEl.hidden = !showBar;
-
-    for (const btn of tabBarEl.querySelectorAll(".bottom-panel__mode-btn")) {
+  function updateToggle() {
+    if (!toggleEl) return;
+    for (const btn of toggleEl.querySelectorAll(".bottom-panel__mode-btn")) {
       const mode = btn.dataset.mode;
       const isActive = mode === currentMode;
       const isAvailable = modesAvailable.has(mode);
@@ -100,13 +114,28 @@ export function createBottomPanelModes() {
     }
   }
 
+  function setPlaybackState(state) {
+    if (!PLAYBACK_LABELS[state]) return;
+    playbackState = state;
+    updateStatus();
+  }
+
+  function updateStatus() {
+    if (!statusEl) return;
+    statusEl.dataset.state = playbackState;
+    const label = PLAYBACK_LABELS[playbackState];
+    statusEl.setAttribute("aria-label", label);
+    const labelEl = statusEl.querySelector(".bottom-panel__status-label");
+    if (labelEl) labelEl.textContent = label;
+  }
+
   return {
     getMode,
     setMode,
     setCustomDraw,
     getCustomDraw,
-    enableScope,
-    mountTabBar,
+    mountToggle,
     setOnChange,
+    setPlaybackState,
   };
 }

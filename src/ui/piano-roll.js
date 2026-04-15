@@ -74,10 +74,11 @@ function ensureState(canvas) {
       // Last frame's t1 in cycles, for detecting backward time jumps
       // (stop+play, scrub, pattern eval that resets time).
       lastT1: -Infinity,
-      // Hover state: the currently hovered hit-map entry, or null. Updated
-      // by the mousemove listener, consumed by the renderer to draw a
-      // highlight ring and by the cursor-style logic.
-      hoveredHit: null,
+      // Mouse position in canvas CSS px, or null when the pointer is not
+      // over the canvas. The renderer re-hit-tests against this every
+      // frame so the hover ring tracks the pill as the roll scrolls —
+      // caching a screen-space hit would pin the ring to a dead rectangle.
+      mousePos: null,
       // Error flash: performance.now() timestamp until which to draw a
       // brief red tint at the top of the note area. Set by the click
       // handler when a CM6 dispatch call fails.
@@ -310,7 +311,9 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   }
   ctx.stroke();
 
-  // Cycle labels in the bottom strip.
+  // Cycle labels in the bottom strip. Numeric-only ("1", "2", …) —
+  // cycles are the only horizontal unit on the roll, so a "cyc" prefix
+  // would just be visual noise next to the pills.
   const fontSize = parseInt(tokens.textXs, 10) || 11;
   ctx.fillStyle = tokens.textDim;
   ctx.font = `500 ${fontSize}px ${tokens.fontSans}`;
@@ -320,7 +323,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   for (let c = firstCycle; c <= t1 + 1e-9; c += 1) {
     const x = Math.round(timeToX(c));
     if (x < -20 || x > w) continue;
-    ctx.fillText(`cyc ${c}`, x + 4, labelY);
+    ctx.fillText(String(c), x + 4, labelY);
   }
 
   // ── Note pills ───────────────────────────────────────────────────────
@@ -427,10 +430,21 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   }
 
   // ── Hover highlight ───────────────────────────────────────────────────
-  // Draw a subtle ring around the hovered pill so users know the roll is
-  // clickable before they click. Only drawn when the cursor is over a pill.
-  if (state.hoveredHit) {
-    const hh = state.hoveredHit;
+  // Re-hit-test against this frame's pills so the ring tracks whichever
+  // pill is under the cursor *now* — pills scroll under a stationary
+  // pointer, so a cached screen-space hit would anchor the ring to a
+  // dead rectangle.
+  const hoveredHit = state.mousePos
+    ? hitTest(state, state.mousePos.x, state.mousePos.y)
+    : null;
+  // Sync cursor against the fresh hit so a stationary pointer over a
+  // scrolling pill still shows the pointer affordance.
+  if (state.mousePos) {
+    const nextCursor = hoveredHit ? "pointer" : "";
+    if (canvas.style.cursor !== nextCursor) canvas.style.cursor = nextCursor;
+  }
+  if (hoveredHit) {
+    const hh = hoveredHit;
     const r = Math.max(
       0,
       Math.min(PILL_RADIUS + 1, (hh.h + 2) / 2, (hh.w + 2) / 2),
@@ -596,16 +610,21 @@ function bindInteraction(canvas, state) {
     }
   });
 
-  // Mousemove → cursor affordance + hover highlight for clickable pills.
+  // Mousemove → stash the pointer position so the renderer can re-hit-test
+  // against the live pill layout each frame. The cursor flip happens here
+  // against the most recent hits — good enough between frames, and the
+  // next frame's render snaps the ring back into alignment.
   canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
-    const hit = hitTest(state, e.clientX - rect.left, e.clientY - rect.top);
-    state.hoveredHit = hit;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    state.mousePos = { x, y };
+    const hit = hitTest(state, x, y);
     canvas.style.cursor = hit ? "pointer" : "";
   });
 
   canvas.addEventListener("mouseleave", () => {
-    state.hoveredHit = null;
+    state.mousePos = null;
     canvas.style.cursor = "";
   });
 }

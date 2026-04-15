@@ -92,9 +92,6 @@ export function buildPaletteCommands({
     onClosePanel: () => rightRail.collapse(),
     onFocusPatterns: () => leftRail.focusSearch(),
     onSwitchToRoll: () => bottomModes.setMode("roll"),
-    onSwitchToScope: () => {
-      bottomModes.enableScope();
-      bottomModes.setMode("scope");
-    },
+    onSwitchToScope: () => bottomModes.setMode("scope"),
   });
 }

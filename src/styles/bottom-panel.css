@@ -1,51 +1,162 @@
-/* Bottom panel mode switcher — thin tab bar above the roll/scope/custom canvas.
-   Hidden when only the default Roll mode is active. */
+/* Bottom panel overlay bar — a small floating strip in the top-right of
+   the roll pane that carries the playback status dot and the mode
+   switcher (Roll / Scope / Custom). Absolute-positioned so it never
+   steals canvas height; shares the chrome grammar of Figma's canvas
+   overlays. Hidden when the roll is collapsed.
 
-.bottom-panel__modes {
-  display: flex;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  height: 24px;
-  background: var(--surface-1);
-  border-bottom: 1px solid var(--border-soft);
-  flex: 0 0 auto;
+   Structure:
+     .bottom-panel__bar       flex container, floats above canvas
+     ├─ .bottom-panel__status dot + label, anchored to playback state
+     └─ .bottom-panel__modes  segmented Roll/Scope toggle */
+
+.bottom-panel__bar {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  z-index: 2;
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+
+  pointer-events: none; /* re-enabled on individual controls below */
+}
+.bottom-panel__bar > * {
+  pointer-events: auto;
 }
 
-.bottom-panel__modes[hidden] {
+.shell--roll-collapsed .bottom-panel__bar {
   display: none;
+}
+
+/* ─── Playback status pill (Stopped / Queued / Loading / Playing) ───── */
+.bottom-panel__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 24px;
+  padding: 0 10px 0 var(--space-2);
+
+  background: color-mix(in oklch, var(--surface-2) 92%, transparent);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  box-shadow: var(--shadow-low);
+
+  color: var(--text-mut);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+
+  user-select: none;
+  transition: color var(--t-hover);
+}
+
+.bottom-panel__status-dot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 60%, transparent);
+  transition:
+    background var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+/* Idle: muted grey dot, dim label. */
+.bottom-panel__status[data-state="idle"] {
+  color: var(--text-dim);
+}
+.bottom-panel__status[data-state="idle"] .bottom-panel__status-dot {
+  background: var(--text-dim);
+}
+
+/* Playing: accent dot with a steady soft pulse. The animation exists only
+   while the state attr says "playing" so there's zero ambient motion in
+   any other state — matches SYSTEM.md §9 "Motion exists to explain
+   change". */
+.bottom-panel__status[data-state="playing"] {
+  color: var(--text);
+}
+.bottom-panel__status[data-state="playing"] .bottom-panel__status-dot {
+  background: var(--accent);
+  animation: bottom-panel-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bottom-panel-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 50%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent);
+  }
+}
+
+/* Transient states (queued / loading) read as "on its way" — same accent
+   as playing but paler, no pulse so the user can tell the difference. */
+.bottom-panel__status[data-state="queued"],
+.bottom-panel__status[data-state="loading"] {
+  color: var(--text-mut);
+}
+.bottom-panel__status[data-state="queued"] .bottom-panel__status-dot,
+.bottom-panel__status[data-state="loading"] .bottom-panel__status-dot {
+  background: color-mix(in oklch, var(--accent) 60%, var(--text-dim));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bottom-panel__status[data-state="playing"] .bottom-panel__status-dot {
+    animation: none;
+  }
+}
+
+/* ─── Mode switcher (Roll / Scope / Custom) ─────────────────────────── */
+.bottom-panel__modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+
+  background: color-mix(in oklch, var(--surface-2) 92%, transparent);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-low);
 }
 
 .bottom-panel__mode-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 18px;
+  height: 20px;
   padding: 0 var(--space-2);
+
   background: transparent;
   color: var(--text-dim);
-  border: 1px solid transparent;
+  border: none;
   border-radius: var(--radius-sm);
+
   font: inherit;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+
   cursor: pointer;
   transition:
     background var(--t-hover),
-    color var(--t-hover),
-    border-color var(--t-hover);
+    color var(--t-hover);
 }
 
 .bottom-panel__mode-btn:hover {
   color: var(--text-mut);
-  background: color-mix(in oklch, var(--surface-2) 60%, var(--surface-1));
+  background: var(--surface-3);
 }
 
 .bottom-panel__mode-btn.is-active {
   color: var(--text);
-  background: color-mix(in oklch, var(--accent) 10%, var(--surface-2));
-  border-color: color-mix(in oklch, var(--accent) 40%, var(--border-soft));
+  background: color-mix(in oklch, var(--accent) 18%, var(--surface-2));
   font-weight: 600;
 }
 
@@ -56,4 +167,24 @@
 
 .bottom-panel__mode-btn[hidden] {
   display: none;
+}
+
+/* ─── Stopped-state canvas treatment ────────────────────────────────────
+   Strudel has no real pause state — it's either idle or playing. When
+   idle, the drawer stops firing new frames and the canvas freezes on
+   whatever was last rendered. Without this treatment the frozen frame
+   reads as "broken"; with a muted saturate/brightness filter it reads
+   as "this is the snapshot, press play to go live". */
+.shell[data-playback="idle"] .roll-canvas,
+.shell[data-playback="queued"] .roll-canvas {
+  filter: saturate(0.55) brightness(0.78);
+  transition: filter var(--t-panel);
+}
+.shell[data-playback="loading"] .roll-canvas {
+  filter: saturate(0.75) brightness(0.88);
+  transition: filter var(--t-panel);
+}
+.shell[data-playback="playing"] .roll-canvas {
+  filter: none;
+  transition: filter var(--t-panel);
 }

@@ -1,30 +1,24 @@
-// Scope (oscilloscope) visualization — renders a real-time waveform of
-// the audio output to a canvas. Used as an alternative bottom-panel
-// mode alongside the piano roll.
-// See design/work/14-strudel-learning-and-extensibility.md Phase 5.
+// Scope (oscilloscope) — taps superdough's main output and renders a
+// real-time waveform to the roll canvas.
 //
-// Usage:
-//   const scope = createScope();
-//   scope.connect(audioContext);          // lazy AnalyserNode creation
-//   scope.render(ctx, width, height);     // call in onDraw
-//   scope.disconnect();                   // cleanup
+// Audio routing: SuperdoughAudioController builds a fixed chain at
+// construction time — channelMerger → destinationGain → ctx.destination —
+// and every voice connects through destinationGain. We tap that node
+// directly. Intercepting ctx.destination (the previous approach) cannot
+// work: superdough's chain is connected to the real destination at
+// construction, so a later getter swap on ctx.destination is bypassed.
 //
-// Audio routing: AudioDestinationNode has no output channels, so the
-// naive `destination.connect(analyser)` silently produces zero data.
-// Instead we override the context's `destination` getter to return a
-// proxy GainNode that routes to both the real destination and our
-// analyser. All future audio routed to `ctx.destination` (including
-// superdough's one-shot calls) will be captured. Existing connections
-// made before connect() are unaffected — those are rare since Strudel
-// creates and connects nodes per-event.
+// The connection is lazy + idempotent: render() calls ensureConnected()
+// each frame, so the scope transparently survives context teardown/
+// restore (WAV export) and late audio-controller construction.
+
+import { getSuperdoughAudioController } from "@strudel/webaudio";
 
 export function createScope() {
   let analyser = null;
   let dataArray = null;
-  let proxyGain = null;
-  let realDestination = null;
-  let patchedContext = null;
-  // Cache token values so we don't call getComputedStyle every frame.
+  let tappedOutput = null;
+
   let cachedTokenCanvas = null;
   let cachedTokens = null;
   let tokenTimer = null;
@@ -39,8 +33,6 @@ export function createScope() {
       gridColor:
         cs.getPropertyValue("--border-soft").trim() || "oklch(0.26 0 0)",
     };
-    // Invalidate cached tokens after a short delay so theme changes are
-    // picked up without needing an explicit refresh.
     clearTimeout(tokenTimer);
     tokenTimer = setTimeout(() => {
       cachedTokens = null;
@@ -48,124 +40,107 @@ export function createScope() {
     return cachedTokens;
   }
 
-  function connect(audioContext) {
-    if (analyser) return;
+  function ensureConnected() {
+    let controller;
     try {
-      analyser = audioContext.createAnalyser();
+      controller = getSuperdoughAudioController();
+    } catch {
+      return false;
+    }
+    // SuperdoughAudioController → SuperdoughOutput (`.output`) holds the
+    // destinationGain node that every voice flows through.
+    const out = controller?.output?.destinationGain;
+    if (!out) return false;
+    if (tappedOutput === out && analyser) return true;
+
+    // Controller was rebuilt (post-export restore) — drop stale analyser.
+    disconnect();
+
+    try {
+      analyser = out.context.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.4;
       dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-      // Intercept the destination getter so all future audio routes
-      // through a pass-through gain node that splits the signal to
-      // both the real destination and our analyser.
-      realDestination = audioContext.destination;
-      proxyGain = audioContext.createGain();
-      proxyGain.connect(realDestination);
-      proxyGain.connect(analyser);
-
-      Object.defineProperty(audioContext, "destination", {
-        get: () => proxyGain,
-        configurable: true,
-      });
-      patchedContext = audioContext;
+      out.connect(analyser);
+      tappedOutput = out;
+      return true;
     } catch (err) {
-      console.warn(
-        "[strasbeat/scope] failed to tap audio output:",
-        err,
-        "— scope will show flat line",
-      );
-      // Leave analyser created so render() at least clears the canvas.
+      console.warn("[strasbeat/scope] failed to tap output:", err);
+      disconnect();
+      return false;
     }
   }
 
   function disconnect() {
-    // Restore the original destination getter.
-    if (patchedContext && realDestination) {
+    if (tappedOutput && analyser) {
       try {
-        Object.defineProperty(patchedContext, "destination", {
-          get: () => realDestination,
-          configurable: true,
-        });
-      } catch {
-        // Context may already be closed post-export.
-      }
-    }
-    if (proxyGain) {
-      try {
-        proxyGain.disconnect();
+        tappedOutput.disconnect(analyser);
       } catch {}
-      proxyGain = null;
     }
     if (analyser) {
       try {
         analyser.disconnect();
       } catch {}
-      analyser = null;
-      dataArray = null;
     }
-    realDestination = null;
-    patchedContext = null;
-    cachedTokenCanvas = null;
-    cachedTokens = null;
-    clearTimeout(tokenTimer);
+    analyser = null;
+    dataArray = null;
+    tappedOutput = null;
   }
 
   function render(ctx, width, height) {
-    if (!analyser || !dataArray) {
-      drawFlatLine(ctx, width, height);
-      return;
-    }
-
-    analyser.getByteTimeDomainData(dataArray);
     const t = readTokens(ctx.canvas);
 
-    // Background
     ctx.fillStyle = t.bg;
     ctx.fillRect(0, 0, width, height);
 
-    // Center line
+    const centerY = height / 2;
+
+    // Subtle baseline — always visible so the panel never reads as empty.
     ctx.strokeStyle = t.gridColor;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    ctx.moveTo(0, height / 2);
-    ctx.lineTo(width, height / 2);
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(width, centerY);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Waveform
+    const ready = ensureConnected();
+    if (!ready || !analyser || !dataArray) return;
+
+    analyser.getByteTimeDomainData(dataArray);
+
+    // Falling-edge trigger: find where the signal crosses the center line
+    // going downward, so the waveform locks to pitch instead of wobbling.
+    // Search only the first half so we always have room to draw.
+    const len = dataArray.length;
+    let start = 0;
+    const scanEnd = len >> 1;
+    for (let i = 1; i < scanEnd; i++) {
+      if (dataArray[i - 1] > 128 && dataArray[i] <= 128) {
+        start = i;
+        break;
+      }
+    }
+
+    const drawCount = len - start;
+    const sliceWidth = width / drawCount;
+
     ctx.strokeStyle = t.accent;
     ctx.lineWidth = 1.5;
     ctx.lineJoin = "round";
     ctx.beginPath();
 
-    const sliceWidth = width / dataArray.length;
     let x = 0;
-    for (let i = 0; i < dataArray.length; i++) {
-      const v = dataArray[i] / 128.0; // normalize 0-255 → 0-2
+    for (let i = 0; i < drawCount; i++) {
+      const v = dataArray[start + i] / 128.0;
       const y = (v * height) / 2;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
       x += sliceWidth;
     }
-    ctx.lineTo(width, height / 2);
     ctx.stroke();
   }
 
-  function drawFlatLine(ctx, width, height) {
-    const t = readTokens(ctx.canvas);
-    ctx.fillStyle = t.bg;
-    ctx.fillRect(0, 0, width, height);
-    ctx.strokeStyle = t.gridColor;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(0, height / 2);
-    ctx.lineTo(width, height / 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  return { connect, disconnect, render };
+  return { ensureConnected, disconnect, render };
 }

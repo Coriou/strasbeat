@@ -132,17 +132,12 @@ new ResizeObserver(() => resizeCanvas()).observe(canvas);
 const drawCtx = canvas.getContext("2d");
 const drawTime = [-2, 2]; // seconds before / after now to render
 
-// Bottom panel mode switcher (Roll / Scope / Custom)
+// Bottom panel mode switcher (Roll / Scope / Custom) — the toggle is a
+// floating pill in the top-right of the roll pane; scope taps superdough's
+// destinationGain lazily on first render, so nothing to wire here.
 const scope = createScope();
 const bottomModes = createBottomPanelModes();
-bottomModes.mountTabBar(canvas.parentElement);
-bottomModes.setOnChange((mode) => {
-  if (mode === "scope") {
-    try {
-      scope.connect(getAudioContext());
-    } catch {}
-  }
-});
+bottomModes.mountToggle(canvas.parentElement);
 
 // ─── Editor ──────────────────────────────────────────────────────────────
 // Boot sequence: share link > store lastOpen > first shipped pattern.
@@ -335,6 +330,8 @@ const leftRail = mountLeftRail({
 transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
   getAudioContext,
+  rootEl: shellEl,
+  onPlaybackStateChange: (s) => bottomModes.setPlaybackState(s),
   onErrorBadgeClick: () => {
     const ate = evalFeedback?.getActiveTransportError();
     if (ate?.entryId != null) {

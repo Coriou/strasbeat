@@ -25,12 +25,16 @@ const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
  * @param {() => AudioContext|null} [opts.getAudioContext]  returns the live AudioContext
  * @param {() => void} [opts.onErrorBadgeClick]  opens the current error context
+ * @param {HTMLElement} [opts.rootEl]  element that should mirror the playback state as `data-playback` for cross-app CSS targeting (scope tint, roll dim, etc.)
+ * @param {(state: "idle" | "queued" | "loading" | "playing") => void} [opts.onPlaybackStateChange]  fires when the visible playback state changes
  * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, setErrorState: (s: {kind?: string, label: string, title?: string} | null) => void, clearErrorState: () => void, dispose: () => void }}
  */
 export function mountTransport({
   getScheduler,
   getAudioContext,
   onErrorBadgeClick = () => {},
+  rootEl = null,
+  onPlaybackStateChange = () => {},
 }) {
   const transportEl = mustEl("transport");
   const stopBtn = mustEl("stop");
@@ -56,6 +60,7 @@ export function mountTransport({
   let lastPct = -1;
   let lastIdle = null;
   let playbackState = "idle";
+  let lastAppliedState = null;
   let lastAcWarning = ""; // debounce audio context health warnings
   let lastErrorSignature = "";
 
@@ -221,6 +226,15 @@ export function mountTransport({
 
   function applyPlaybackState(state) {
     transportEl.dataset.transportState = state;
+    if (rootEl) rootEl.dataset.playback = state;
+    if (state !== lastAppliedState) {
+      lastAppliedState = state;
+      try {
+        onPlaybackStateChange(state);
+      } catch (err) {
+        console.warn("[strasbeat/transport] onPlaybackStateChange threw:", err);
+      }
+    }
     stopBtn.disabled = state === "idle";
     if (state === "queued") {
       stopBtn.title = "Cancel queued playback";

@@ -127,7 +127,7 @@ export function registerPanels({
   // prettier-ignore
   const exportPanel = createExportPanel({
     onFocusEditor: () => editor.editor.focus(),
-    onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, onBeforeContextTeardown: () => scope.disconnect(), onAfterContextRestore: () => { if (bottomModes.getMode() === "scope") { try { scope.connect(getAudioContext()); } catch {} } } }),
+    onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, onBeforeContextTeardown: () => scope.disconnect() }),
     getPatternName: () => getCurrentName() || "untitled",
   });
   rightRail.registerPanel(exportPanel);
