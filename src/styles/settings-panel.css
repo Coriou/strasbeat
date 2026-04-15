@@ -493,3 +493,324 @@
     flex-wrap: wrap;
   }
 }
+
+/* ─── Section description ────────────────────────────────────────────── */
+
+.settings-panel__section-desc {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+}
+
+/* ─── Reload banner ──────────────────────────────────────────────────── */
+
+/* [hidden] display: none is set by UA stylesheet; :not([hidden]) applies
+   display:flex so the class-level display never overrides the hidden attr. */
+.settings-panel__reload-banner:not([hidden]) {
+  display: flex;
+}
+
+.settings-panel__reload-banner {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in oklch, var(--accent) 9%, var(--surface-1));
+  border: 1px solid color-mix(in oklch, var(--accent) 28%, var(--border-soft));
+  border-radius: var(--radius-sm);
+}
+
+.settings-panel__reload-banner-text {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-mut);
+}
+
+.settings-panel__reload-btn {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 var(--space-2);
+  background: color-mix(in oklch, var(--accent) 16%, var(--surface-2));
+  border: 1px solid color-mix(in oklch, var(--accent) 42%, var(--border-soft));
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover);
+}
+.settings-panel__reload-btn:hover {
+  background: color-mix(in oklch, var(--accent) 26%, var(--surface-3));
+  border-color: var(--accent);
+}
+.settings-panel__reload-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ─── Package rows — extends toggle-row with a two-line label ────────── */
+
+.settings-panel__toggle-row--pkg {
+  min-height: 48px;
+}
+
+.settings-panel__pkg-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-panel__pkg-desc {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+/* ─── Generic buttons (samples + script sections) ────────────────────── */
+
+.settings-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--surface-2);
+  color: var(--text-mut);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover);
+}
+.settings-panel__btn:hover {
+  background: var(--surface-3);
+  border-color: var(--border);
+  color: var(--text);
+}
+.settings-panel__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-panel__btn--primary {
+  background: color-mix(in oklch, var(--accent) 13%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 52%, var(--border-soft));
+  color: var(--text);
+  font-weight: 600;
+}
+.settings-panel__btn--primary:hover {
+  background: color-mix(in oklch, var(--accent) 22%, var(--surface-3));
+  border-color: var(--accent);
+}
+.settings-panel__btn--danger {
+  color: oklch(0.7 0.15 25);
+}
+.settings-panel__btn--danger:hover {
+  background: color-mix(in oklch, oklch(0.6 0.2 25) 12%, var(--surface-2));
+  border-color: color-mix(in oklch, oklch(0.6 0.2 25) 42%, var(--border-soft));
+  color: oklch(0.75 0.18 25);
+}
+
+.settings-panel__btn-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* ─── Samples section ────────────────────────────────────────────────── */
+
+.settings-panel__import-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.settings-panel__url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  background: color-mix(in oklch, var(--surface-2) 92%, var(--surface-0));
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-xs);
+  outline: none;
+  transition:
+    border-color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+.settings-panel__url-input:focus {
+  border-color: color-mix(in oklch, var(--accent) 62%, var(--border-soft));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.settings-panel__url-input::placeholder {
+  color: var(--text-dim);
+}
+
+.settings-panel__banks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.settings-panel__bank-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: color-mix(in oklch, var(--surface-2) 88%, var(--surface-1));
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.settings-panel__bank-name {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-panel__bank-del {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover);
+}
+.settings-panel__bank-del:hover {
+  background: color-mix(in oklch, oklch(0.6 0.2 25) 14%, var(--surface-2));
+  color: oklch(0.7 0.2 25);
+}
+
+.settings-panel__empty {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  padding: var(--space-1) 0;
+}
+
+/* ─── Script section ─────────────────────────────────────────────────── */
+
+.settings-panel__script {
+  width: 100%;
+  min-height: 100px;
+  padding: var(--space-2);
+  background: color-mix(in oklch, var(--surface-0) 88%, var(--surface-1));
+  color: var(--text);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  transition:
+    border-color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+.settings-panel__script::placeholder {
+  color: var(--text-dim);
+}
+.settings-panel__script:focus {
+  border-color: color-mix(in oklch, var(--accent) 62%, var(--border-soft));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+/* ─── OSC subsection ─────────────────────────────────────────────────── */
+
+.settings-panel__osc {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  margin-top: var(--space-1);
+}
+
+.settings-panel__osc-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settings-panel__osc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-panel__osc-label {
+  font: 500 var(--text-xs) / 1 var(--font-sans);
+  color: var(--text-mut);
+}
+
+.settings-panel__osc-value {
+  font: var(--text-xs) / 1 var(--font-mono);
+  color: var(--text);
+  padding: 2px var(--space-1);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  user-select: all;
+}
+
+.settings-panel__osc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-dim);
+  opacity: 0.4;
+  transition:
+    background 0.2s,
+    opacity 0.2s;
+}
+.settings-panel__osc-dot[data-status="connected"] {
+  background: oklch(0.7 0.18 145);
+  opacity: 1;
+}
+.settings-panel__osc-dot[data-status="error"] {
+  background: oklch(0.65 0.2 25);
+  opacity: 1;
+}
+.settings-panel__osc-dot[data-status="connecting"] {
+  background: oklch(0.75 0.15 85);
+  opacity: 1;
+}
+
+.settings-panel__osc-status-text {
+  font: var(--text-xs) / 1 var(--font-sans);
+  color: var(--text-dim);
+}

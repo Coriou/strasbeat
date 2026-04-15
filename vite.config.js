@@ -14,6 +14,18 @@ if (process.env.VERCEL_PROJECT_PRODUCTION_URL && !process.env.VITE_SITE_URL) {
 }
 const PATTERNS_DIR = path.join(__dirname, "patterns");
 
+// Read version strings at config time so they're baked into the bundle
+// as literals — no manual sync required when packages are upgraded.
+const appPkg = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "package.json"), "utf8"),
+);
+const strudelCorePkg = JSON.parse(
+  fs.readFileSync(
+    path.join(__dirname, "node_modules/@strudel/core/package.json"),
+    "utf8",
+  ),
+);
+
 // Vite middleware: write the editor's current code to patterns/<name>.js
 // so the dev workflow is: iterate in the browser → save → commit.
 function patternSavePlugin() {
@@ -121,6 +133,10 @@ function umamiPlugin() {
 
 export default defineConfig({
   plugins: [patternSavePlugin(), umamiPlugin()],
+  define: {
+    __APP_VERSION__: JSON.stringify(appPkg.version),
+    __STRUDEL_VERSION__: JSON.stringify(strudelCorePkg.version),
+  },
   // Don't let Vite's dep scanner wander into strudel-source/.
   optimizeDeps: {
     entries: ["index.html", "src/**/*.{js,mjs,ts}", "patterns/*.js"],

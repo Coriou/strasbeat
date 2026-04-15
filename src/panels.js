@@ -5,7 +5,6 @@ import { createConsolePanel } from "./ui/console-panel.js";
 import { createExportPanel } from "./ui/export-panel.js";
 import { createSettingsPanel } from "./ui/settings-panel.js";
 import { createLearnPanel } from "./ui/learn-panel.js";
-import { createSetupPanel } from "./ui/setup-panel.js";
 import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate } from "./editor-actions.js"; // prettier-ignore
 import { runExport } from "./export.js";
 import { applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
@@ -153,17 +152,12 @@ export function registerPanels({
     themes: THEME_OPTIONS,
     appVersion: APP_VERSION,
     strudelVersion: STRUDEL_VERSION,
-  });
-  rightRail.registerPanel(settingsPanel);
-
-  const setupPanel = createSetupPanel({
-    onFocusEditor: () => editor.editor.focus(),
     onReloadRequired: () => {
       status.textContent = "Reload to apply changes";
     },
     confirm,
   });
-  rightRail.registerPanel(setupPanel);
+  rightRail.registerPanel(settingsPanel);
 
   // ─── First-run orientation ───────────────────────────────────────────────
   // Auto-open the right rail to the Learn panel on first visit so new users

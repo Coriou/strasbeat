@@ -35,11 +35,14 @@ import { readSharedFromHash, shareCurrent } from "./share.js";
 import { prewarmSounds, isExportRunning } from "./export.js";
 import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
-import { discoverPatterns, computeDirtySet, getUserPatternNames, createAutosave, handleNewPatternClick } from "./patterns.js";
 import {
-  showMidiImportDialog,
-  getMidiFile,
-} from "./ui/midi-import-dialog.js";
+  discoverPatterns,
+  computeDirtySet,
+  getUserPatternNames,
+  createAutosave,
+  handleNewPatternClick,
+} from "./patterns.js";
+import { showMidiImportDialog, getMidiFile } from "./ui/midi-import-dialog.js";
 import {
   readStoredCmSettingsFromLocalStorage,
   applyInitialSettings,
@@ -55,9 +58,9 @@ import { buildPaletteCommands } from "./command-palette-actions.js";
 const { getAudioContext, webaudioOutput, initAudio, setLogger, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
 
 // Version strings surfaced in the settings panel's "About" section.
-// Keep in sync with `package.json`.
-const APP_VERSION = "0.1.0";
-const STRUDEL_VERSION = "1.2.6";
+// Injected at build/dev time by vite.config.js — always match package.json.
+const APP_VERSION = __APP_VERSION__;
+const STRUDEL_VERSION = __STRUDEL_VERSION__;
 
 // ─── Auto-discover patterns ──────────────────────────────────────────────
 // Every .js file in /patterns must `export default` a string of Strudel code.
