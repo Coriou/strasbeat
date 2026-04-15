@@ -1,0 +1,194 @@
+/*
+ * Arrangement timeline strip — see src/ui/arrange-bar.js.
+ *
+ * Appears between the transport and the track bar when the pattern
+ * contains an `arrange(...)` call. Hidden (display: none via [hidden])
+ * when the parser finds nothing, so the grid row collapses to 0.
+ */
+
+.arrange-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: color-mix(in oklch, var(--surface-1) 94%, var(--surface-2));
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.arrange-bar[hidden] {
+  display: none;
+}
+
+.arrange-bar__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.arrange-bar__title {
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.arrange-bar__current {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.arrange-bar__total {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.arrange-bar__strip {
+  position: relative;
+  height: 28px;
+  background: color-mix(in oklch, var(--surface-2) 88%, var(--surface-1));
+  border: 1px solid color-mix(in oklch, var(--border) 72%, var(--border-soft));
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.arrange-bar__sections {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  z-index: 1;
+}
+
+.arrange-bar__section {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+  color: var(--text-mut);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover);
+}
+
+.arrange-bar__section:last-child {
+  border-right: 0;
+}
+
+.arrange-bar__section:hover {
+  background: color-mix(in oklch, var(--accent) 6%, transparent);
+  color: var(--text);
+}
+
+.arrange-bar__section:focus-visible {
+  outline: 2px solid var(--accent-hi);
+  outline-offset: -2px;
+}
+
+.arrange-bar__section.is-active {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: var(--text);
+}
+
+.arrange-bar__section.is-active .arrange-bar__label {
+  font-weight: 650;
+}
+
+.arrange-bar__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.arrange-bar__cycles {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.arrange-bar__section:hover .arrange-bar__cycles,
+.arrange-bar__section.is-active .arrange-bar__cycles {
+  color: var(--text-mut);
+}
+
+.arrange-bar__progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+  pointer-events: none;
+  z-index: 2;
+  transition: width 80ms linear;
+}
+
+.arrange-bar__dot {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  margin-left: -5px;
+  background: var(--accent);
+  border: 2px solid var(--surface-1);
+  border-radius: 50%;
+  box-shadow: var(--shadow-low);
+  pointer-events: none;
+  z-index: 3;
+  transition: left 80ms linear;
+}
+
+/* When the scheduler is idle, dim everything so it reads as parked. */
+[data-playback="idle"] .arrange-bar__progress,
+[data-playback="idle"] .arrange-bar__dot {
+  opacity: 0.38;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrange-bar__progress,
+  .arrange-bar__dot {
+    transition: none;
+  }
+}
+
+/* Tight screens: hide the per-section cycle count and meta suffix. */
+@media (max-width: 900px) {
+  .arrange-bar__cycles {
+    display: none;
+  }
+
+  .arrange-bar__total {
+    display: none;
+  }
+}

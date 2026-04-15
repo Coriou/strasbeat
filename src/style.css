@@ -31,6 +31,7 @@
 @import "./styles/export.css";
 @import "./styles/settings-panel.css";
 @import "./styles/transport.css";
+@import "./styles/arrange-bar.css";
 @import "./styles/track-bar.css";
 @import "./styles/midi-bar.css";
 @import "./styles/roll.css";

@@ -7,6 +7,8 @@
  *   ├──────┴───────────────────────────────────┴───────────┤
  *   │ transport (full)                                     │  --transport-h
  *   ├──────────────────────────────────────────────────────┤
+ *   │ arrange bar (full, auto, hidden when no arrange())   │  auto
+ *   ├──────────────────────────────────────────────────────┤
  *   │ track bar (full, auto-height, hidden when no labels) │  auto
  *   ├──────────────────────────────────────────────────────┤
  *   │ midi bar (full, auto-height, hidden when no device)  │  auto
@@ -14,8 +16,9 @@
  *   │ roll (full, collapsible via --roll-h)                │  var(--roll-h)
  *   └──────────────────────────────────────────────────────┘
  *
- * The `auto` track-bar and midi-bar rows collapse to 0 when the element
- * is hidden (display: none), so they take no space in the default state.
+ * The `auto` arrange-bar, track-bar and midi-bar rows collapse to 0 when
+ * the element is hidden (display: none), so they take no space in the
+ * default state.
  *
  * --right-rail-w defaults to the collapsed strip width (just the tab bar)
  * and is grown to the user's chosen panel width by JS when expanded. See
@@ -25,16 +28,16 @@
 .shell {
   display: grid;
   grid-template-columns: var(--left-rail-w) 1fr var(--right-rail-w);
-  grid-template-rows: var(--top-bar-h) 1fr var(--transport-h) auto auto var(
-      --roll-h
-    );
+  grid-template-rows:
+    var(--top-bar-h) 1fr var(--transport-h) auto auto auto var(--roll-h);
   grid-template-areas:
-    "topbar    topbar  topbar"
-    "rail      editor  right-rail"
-    "transport transport transport"
-    "trackbar  trackbar trackbar"
-    "midibar   midibar  midibar"
-    "roll      roll    roll";
+    "topbar      topbar      topbar"
+    "rail        editor      right-rail"
+    "transport   transport   transport"
+    "arrangebar  arrangebar  arrangebar"
+    "trackbar    trackbar    trackbar"
+    "midibar     midibar     midibar"
+    "roll        roll        roll";
   height: 100dvh;
   width: 100vw;
   overflow: hidden;
@@ -113,6 +116,11 @@
 }
 .transport {
   grid-area: transport;
+}
+.arrange-bar {
+  grid-area: arrangebar;
+  min-width: 0;
+  min-height: 0;
 }
 .track-bar {
   grid-area: trackbar;

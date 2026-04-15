@@ -28,6 +28,7 @@ import { renderRoll } from "./ui/piano-roll.js";
 import { createScope } from "./ui/scope.js";
 import { createBottomPanelModes } from "./ui/bottom-panel-modes.js";
 import { mountTrackBar } from "./ui/track-bar.js";
+import { mountArrangeBar } from "./ui/arrange-bar.js";
 import { prompt, confirm } from "./ui/modal.js";
 import { applyStoredAccent } from "./ui/settings-drawer.js";
 import { createLocalStore } from "./store.js";
@@ -571,6 +572,11 @@ mountTrackBar({
   container: document.getElementById("track-bar"),
   view: editor.editor,
   onEvaluate: () => editor.evaluate(),
+});
+mountArrangeBar({
+  container: document.getElementById("arrange-bar"),
+  view: editor.editor,
+  getScheduler: () => editor?.repl?.scheduler ?? null,
 });
 
 // ─── Transport ───────────────────────────────────────────────────────────
