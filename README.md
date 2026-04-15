@@ -246,9 +246,15 @@ midi.isCaptureEnabled()              // is live capture on
 - `strudel-source/packages/` — read the source of any function you're
   curious about (the upstream repo is gitignored but kept locally).
 
-## License note
+## License
 
-Strudel is AGPL-3.0. Code that runs in the same process as Strudel and
-extends it (which is what strasbeat does) is generally considered a
-derivative work. If strasbeat is ever distributed, it falls under the
-same license. For private/local use there's no obligation.
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
+
+strasbeat is licensed under the **GNU Affero General Public License v3.0
+(AGPL-3.0)**. See [LICENSE](./LICENSE) for the full text.
+
+Strudel — the live-coding engine strasbeat is built on — is also
+AGPL-3.0. Because strasbeat runs in the same process as Strudel and
+extends its eval scope, it is a derivative work and inherits the same
+license. Any public deployment of a modified version must provide access
+to the corresponding source code.
