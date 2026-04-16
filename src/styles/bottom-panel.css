@@ -169,6 +169,179 @@
   display: none;
 }
 
+/* ─── Scope controls strip ───────────────────────────────────────────────
+   Mounted as a child of .bottom-panel__bar and shown only when Scope
+   mode is active. Visual polish (dividers, fine spacing, hover states)
+   is deferred to a follow-up /polish pass; this is the minimum viable
+   layout per design/work/20-scope-upgrades.md §Notes. */
+
+.scope-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+
+  height: 24px;
+  padding: 0 var(--space-2);
+
+  background: color-mix(in oklch, var(--surface-2) 92%, transparent);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  box-shadow: var(--shadow-low);
+
+  color: var(--text-mut);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+
+  user-select: none;
+}
+
+.scope-controls[hidden] {
+  display: none;
+}
+
+.scope-controls__modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.scope-controls__mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 var(--space-2);
+
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: var(--radius-sm);
+
+  font: inherit;
+
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover);
+}
+
+.scope-controls__mode-btn:hover {
+  color: var(--text-mut);
+  background: var(--surface-3);
+}
+
+.scope-controls__mode-btn.is-active {
+  color: var(--text);
+  background: color-mix(in oklch, var(--accent) 18%, var(--surface-2));
+  font-weight: 600;
+}
+
+.scope-controls__mode-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.scope-controls__field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.scope-controls__field[hidden] {
+  display: none;
+}
+
+.scope-controls__label {
+  color: var(--text-dim);
+}
+
+.scope-controls__value {
+  color: var(--text-mut);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: right;
+}
+
+.scope-controls__slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 72px;
+  height: 4px;
+  padding: 0;
+  margin: 0;
+  background: var(--surface-3);
+  border: none;
+  border-radius: 999px;
+  cursor: ew-resize;
+}
+
+.scope-controls__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: ew-resize;
+  box-shadow: var(--shadow-low);
+}
+
+.scope-controls__slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  cursor: ew-resize;
+  box-shadow: var(--shadow-low);
+}
+
+.scope-controls__slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.scope-controls__smear {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 18px;
+  padding: 0 var(--space-2);
+
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+
+  font: inherit;
+  cursor: pointer;
+
+  transition:
+    background var(--t-hover),
+    color var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.scope-controls__smear:hover {
+  color: var(--text-mut);
+  background: var(--surface-3);
+}
+
+.scope-controls__smear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.scope-controls__smear[data-level="low"],
+.scope-controls__smear[data-level="high"] {
+  color: var(--text);
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface-2));
+}
+
 /* ─── Stopped-state canvas treatment ────────────────────────────────────
    Strudel has no real pause state — it's either idle or playing. When
    idle, the drawer stops firing new frames and the canvas freezes on

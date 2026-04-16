@@ -426,6 +426,13 @@ export function mountBeatGrid({
     const hadFocusInside =
       document.activeElement != null && root.contains(document.activeElement);
 
+    // Capture scroll position BEFORE teardown — removing every child from
+    // lanesEl collapses the scroll container's contentHeight, which zeroes
+    // root.scrollTop. Without this the grid jumps back to the top on any
+    // docChange-driven rebuild (typing into a lane near the bottom, any
+    // cell toggle in a tall pattern, etc.).
+    const scrollTop = root.scrollTop;
+
     // Tear down old per-lane resize observers before blowing away the DOM.
     for (const ph of lanePlayheads) {
       ph.ro?.disconnect();
@@ -517,8 +524,12 @@ export function mountBeatGrid({
         updateRovingTabindex(target);
         // Only restore browser focus if focus was already inside the
         // grid. Don't steal it when the user has moved on to the editor.
+        // preventScroll: true so the focus call doesn't undo our scrollTop
+        // restore below — the cell the user just clicked is, by definition,
+        // the cell they were looking at; preserving the prior viewport
+        // beats snapping it to the browser's nearest-edge default.
         if (hadFocusInside) {
-          focusCell(target);
+          focusCell(target, { preventScroll: true });
         }
       }
     }
@@ -527,6 +538,21 @@ export function mountBeatGrid({
     selection = null;
     repaintSelection();
     updatePlayheadVisibility();
+
+    // Restore scroll position. Without this the grid snaps back to the top
+    // on any docChange-driven rebuild — typing into a bottom lane in the
+    // editor, clicking a cell on a lane that's been scrolled into view,
+    // toggling via keyboard, all looked like an unwanted "jump back to
+    // start" because the teardown collapses lanesEl's contentHeight which
+    // zeroes scrollTop. Clamp to the new maxScroll so a shrinking pattern
+    // (lane deleted) doesn't leave us past the end. The focusCell above
+    // uses preventScroll:true so this restore wins; keyboard nav scrolls
+    // happen through the keydown handler's own focusCell call (which still
+    // uses preventScroll:false), not through this rebuild path.
+    if (scrollTop > 0) {
+      const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
+      root.scrollTop = Math.min(scrollTop, maxScroll);
+    }
   }
 
   // Snap a focus pair to an existing editable cell. Returns null when no
@@ -580,10 +606,10 @@ export function mountBeatGrid({
     if (el) el.setAttribute("tabindex", "0");
   }
 
-  function focusCell(target) {
+  function focusCell(target, { preventScroll = false } = {}) {
     const el = cellFor(target);
     if (!el) return;
-    el.focus({ preventScroll: false });
+    el.focus({ preventScroll });
   }
 
   function repaintSelection() {

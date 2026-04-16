@@ -26,6 +26,7 @@ import { mountRightRail } from "./ui/right-rail.js";
 import { registerPanels } from "./panels.js";
 import { renderRoll } from "./ui/piano-roll.js";
 import { createScope } from "./ui/scope.js";
+import { mountScopeControls } from "./ui/scope-controls.js";
 import { createBottomPanelModes } from "./ui/bottom-panel-modes.js";
 import { mountBeatGrid } from "./ui/beat-grid.js";
 import { mountTrackBar } from "./ui/track-bar.js";
@@ -140,6 +141,11 @@ const drawTime = [-2, 2]; // seconds before / after now to render
 const scope = createScope();
 const bottomModes = createBottomPanelModes();
 bottomModes.mountToggle(canvas.parentElement);
+mountScopeControls({
+  container: bottomModes.getBarEl(),
+  scope,
+  modes: bottomModes,
+});
 
 // ─── Editor ──────────────────────────────────────────────────────────────
 // Boot sequence: share link > store lastOpen > first shipped pattern.

@@ -34,14 +34,30 @@ const PLAYBACK_LABELS = {
 export function createBottomPanelModes() {
   let currentMode = "roll";
   let customDraw = null;
+  let barEl = null;
   let toggleEl = null;
   let statusEl = null;
-  let onChange = null;
   let playbackState = "idle";
   const modesAvailable = new Set(["roll", "scope"]);
+  const onChangeListeners = new Set();
 
+  // Adds a mode-change listener. Multiple subscribers are allowed — main
+  // wires beat grid visibility here, scope-controls wires its own strip.
+  // Returns an unsubscribe fn.
   function setOnChange(fn) {
-    onChange = fn;
+    if (typeof fn !== "function") return () => {};
+    onChangeListeners.add(fn);
+    return () => onChangeListeners.delete(fn);
+  }
+
+  function emitChange(mode) {
+    for (const fn of onChangeListeners) {
+      try {
+        fn(mode);
+      } catch (err) {
+        console.warn("[bottom-panel] onChange listener threw:", err);
+      }
+    }
   }
 
   function getMode() {
@@ -54,7 +70,7 @@ export function createBottomPanelModes() {
     if (!modesAvailable.has(mode)) return;
     currentMode = mode;
     updateToggle();
-    if (onChange) onChange(mode);
+    emitChange(mode);
   }
 
   function setCustomDraw(fn) {
@@ -91,6 +107,7 @@ export function createBottomPanelModes() {
   function mountToggle(container) {
     const bar = document.createElement("div");
     bar.className = "bottom-panel__bar";
+    barEl = bar;
 
     statusEl = document.createElement("div");
     statusEl.className = "bottom-panel__status";
@@ -150,6 +167,10 @@ export function createBottomPanelModes() {
     if (labelEl) labelEl.textContent = label;
   }
 
+  function getBarEl() {
+    return barEl;
+  }
+
   return {
     getMode,
     setMode,
@@ -157,6 +178,7 @@ export function createBottomPanelModes() {
     getCustomDraw,
     setBeatsAvailable,
     mountToggle,
+    getBarEl,
     setOnChange,
     setPlaybackState,
   };
