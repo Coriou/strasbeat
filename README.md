@@ -3,6 +3,16 @@
 A version-controlled, IDE-quality workspace for making music with
 [Strudel](https://strudel.cc) — TidalCycles ported to JavaScript.
 
+<p align="center">
+  <a href="https://strasbeat.vercel.app">
+    <img src="./docs/screenshot.jpg" alt="strasbeat — live coding music in the browser with Strudel: IDE-grade editor, patterns library, workshops panel, and Canvas piano roll showing a playing pattern">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://strasbeat.vercel.app"><b>Try it live →</b></a>
+</p>
+
 It's Strudel inside a real editor: autocomplete and hover docs for every
 function, Prettier formatting, VSCode keybindings, drag-to-scrub on
 numeric literals, a Canvas2D piano roll, a hardware MIDI bridge with
