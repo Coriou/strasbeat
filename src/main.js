@@ -149,7 +149,7 @@ mountScopeControls({
 
 // ─── Editor ──────────────────────────────────────────────────────────────
 // Boot sequence: share link > store lastOpen > first shipped pattern.
-const shared = readSharedFromHash();
+const shared = await readSharedFromHash();
 const storeIndex = store.getIndex();
 const fallbackName = patternNames[0] ?? "empty";
 
@@ -698,15 +698,34 @@ if (import.meta.env.DEV) {
   });
 }
 
-shareBtn.addEventListener("click", () =>
-  shareCurrent({
-    getCode: () => editor.code ?? "",
-    getName: () => currentName,
-    setStatus: (s) => {
-      status.textContent = s;
-    },
-  }),
-);
+// Share flow is async (gzip + base64 + clipboard write). Guard against
+// double-clicks while in flight, and flash the button on resolve so the
+// user has a visual confirmation at the cursor — the status text in the
+// transport bar is the secondary, aria-live channel.
+let sharing = false;
+shareBtn.addEventListener("click", async () => {
+  if (sharing) return;
+  sharing = true;
+  shareBtn.setAttribute("aria-busy", "true");
+  shareBtn.disabled = true;
+  let ok = false;
+  try {
+    ok = await shareCurrent({
+      getCode: () => editor.code ?? "",
+      getName: () => currentName,
+      setStatus: (s) => {
+        status.textContent = s;
+      },
+    });
+  } finally {
+    sharing = false;
+    shareBtn.disabled = false;
+    shareBtn.removeAttribute("aria-busy");
+    const flash = ok ? "is-flash-ok" : "is-flash-err";
+    shareBtn.classList.add(flash);
+    setTimeout(() => shareBtn.classList.remove(flash), 700);
+  }
+});
 
 // Toolbar WAV button → open the export panel and auto-start a render.
 exportBtn.addEventListener("click", () => {

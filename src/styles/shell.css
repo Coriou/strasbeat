@@ -222,6 +222,21 @@
   background: var(--btn-bg);
 }
 
+/* Post-action flashes for async buttons. The class is added for ~700ms
+   after the action resolves, then removed — the existing .btn transition
+   smooths the fade back to rest. Placed after :hover so higher specificity
+   wins while the cursor is still on the button. */
+.btn.is-flash-ok {
+  --btn-bg: var(--accent-wash);
+  --btn-fg: var(--accent-hi);
+  --btn-bd: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+.btn.is-flash-err {
+  --btn-bg: color-mix(in oklch, var(--rec) 12%, transparent);
+  --btn-fg: var(--rec);
+  --btn-bd: color-mix(in oklch, var(--rec) 40%, transparent);
+}
+
 .btn--ghost {
   --btn-bg: transparent;
   --btn-bd: transparent;
