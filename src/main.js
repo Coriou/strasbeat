@@ -1,5 +1,5 @@
 import { StrudelMirror } from "@strudel/codemirror";
-import { transpiler } from "@strudel/transpiler";
+import { transpiler } from "./transpiler-patch.js";
 // Strudel packages — imported as namespaces to avoid the static+dynamic
 // chunking warning. Boot-only packages (strudelDraw, soundfonts) live in
 // boot.js; the rest are still needed here for installSoundCompletion.

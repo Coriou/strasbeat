@@ -77,6 +77,9 @@ importers:
       '@tonejs/midi':
         specifier: ^2.0.28
         version: 2.0.28
+      acorn:
+        specifier: ^8.16.0
+        version: 8.16.0
       lucide:
         specifier: ^1.8.0
         version: 1.8.0
