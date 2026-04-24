@@ -137,6 +137,12 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(appPkg.version),
     __STRUDEL_VERSION__: JSON.stringify(strudelCorePkg.version),
   },
+  // Bumped from Vite's default (es2020) so top-level await is emitted
+  // as-is. es2022 is the lowest target that ships TLA natively; the
+  // share-link flow relies on it (src/main.js awaits readSharedFromHash).
+  // The effective browser floor is already Safari 16.4+ / Chrome 80+
+  // because of CompressionStream, so this does not regress support.
+  build: { target: "es2022" },
   // Don't let Vite's dep scanner wander into strudel-source/.
   optimizeDeps: {
     entries: ["index.html", "src/**/*.{js,mjs,ts}", "patterns/*.js"],
