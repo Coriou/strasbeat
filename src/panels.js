@@ -9,6 +9,7 @@ import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionT
 import { runExport } from "./export.js";
 import { applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
 import { THEME_OPTIONS, applyPanelSetting } from "./editor-setup.js";
+import { applyKeymapProfile } from "./editor/keymap-apply.js";
 
 /**
  * Creates and registers all right-rail panels. Call after `mountRightRail`.
@@ -137,6 +138,9 @@ export function registerPanels({
     onFocusEditor: () => editor.editor.focus(),
     getSettings: () => codemirrorSettings.get?.() ?? {},
     onChangeSetting: (key, value) => applyPanelSetting(editor, key, value),
+    onKeymapChange: (profileId) => applyKeymapProfile(editor, profileId, {
+      onEvaluate: () => editor.evaluate(),
+    }),
     onAccentChange: (hue, lightness) => {
       applyAccent(hue, lightness);
       clearTimeout(accentSaveTimer);

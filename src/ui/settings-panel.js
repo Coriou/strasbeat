@@ -48,6 +48,11 @@ import {
   deleteUserSampleBank,
   deleteAllUserSamples,
 } from "../user-setup.js";
+import {
+  KEYMAP_PROFILES,
+  getStoredProfileId,
+} from "../editor/keymap-profiles.js";
+import { subscribeKeymapChange } from "../editor/keymap-apply.js";
 
 // ─── Default accent values (mirror settings-drawer.js / tokens.css) ──────
 const DEFAULT_HUE = 358;
@@ -134,6 +139,7 @@ export function createSettingsPanel({
   strudelVersion = "",
   onReloadRequired = () => {},
   confirm: confirmFn = window.confirm,
+  onKeymapChange = () => {},
 }) {
   // ─── State ────────────────────────────────────────────────────────────
   let settings = { ...getSettings() };
@@ -394,6 +400,35 @@ export function createSettingsPanel({
 
   function buildEditorSection() {
     const section = buildSection("Editor");
+
+    // Keymap row — first in the Editor section. Mirrors the transport-bar
+    // chip popover; both write to the same canonical state via
+    // applyKeymapProfile / subscribeKeymapChange.
+    const keymapRow = buildRow("Keymap");
+    const keymapSelect = el("select", "settings-panel__select");
+    keymapSelect.setAttribute("aria-label", "Keymap");
+    for (const profile of KEYMAP_PROFILES) {
+      const opt = document.createElement("option");
+      opt.value = profile.id;
+      opt.textContent = profile.isDefault ? `${profile.label} (default)` : profile.label;
+      keymapSelect.appendChild(opt);
+    }
+    keymapSelect.value = getStoredProfileId();
+    keymapSelect.addEventListener("change", () => {
+      onKeymapChange(keymapSelect.value);
+    });
+    keymapSelect.addEventListener("keydown", onControlKeydown);
+    keymapRow.control.appendChild(keymapSelect);
+    section.body.appendChild(keymapRow.row);
+
+    // Keep the dropdown in sync when the chip popover or other entry
+    // points change the profile. `subscribeKeymapChange` returns an
+    // unsubscribe function; the panel is not torn down mid-session so we
+    // don't track it further.
+    subscribeKeymapChange((profile) => {
+      if (keymapSelect.value !== profile.id) keymapSelect.value = profile.id;
+    });
+
     for (const { key, label, hint } of EDITOR_TOGGLES) {
       const row = el("div", "settings-panel__toggle-row");
       row.title = hint;
