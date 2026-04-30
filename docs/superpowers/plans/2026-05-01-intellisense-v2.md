@@ -287,7 +287,9 @@ export function score(query, candidate) {
     if (q[qi] === cLow[ci]) {
       matched.push(ci);
       if (qi === 0 && ci === 0) isPrefix = true;
-      if (ci > 0 && isWordBoundary(candidate, ci)) boundaryBonus += W_BOUNDARY;
+      // Spec line 230: count ci === 0 as a boundary too. The fixture
+      // ranges in score.test.js were derived from this form.
+      if (ci === 0 || isWordBoundary(candidate, ci)) boundaryBonus += W_BOUNDARY;
       if (lastMatched !== -1 && ci - lastMatched === 1) runBonus += W_RUN;
       lastMatched = ci;
       qi++;
