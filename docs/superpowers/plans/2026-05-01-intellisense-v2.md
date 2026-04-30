@@ -528,6 +528,9 @@ function collectInsideQuotes(text, re, dest, splitFn) {
   while ((m = re.exec(text)) !== null) {
     for (const tok of splitFn(m[1])) {
       if (!tok || tok === "~") continue;
+      // Pure-numeric chunks (e.g. "4" from "hh*4") are operator operands,
+      // not sound names — drop them so they don't pollute the sound set.
+      if (/^\d+$/.test(tok)) continue;
       dest.add(stripVariantSuffix(tok));
     }
   }
