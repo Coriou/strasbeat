@@ -22,11 +22,26 @@
 // the input. Focus is trapped inside the overlay while open.
 
 import { makeIcon } from "./icons.js";
+import { getStoredProfileId } from "../editor/keymap-profiles.js";
+import { subscribeKeymapChange } from "../editor/keymap-apply.js";
 
 const STORAGE_KEY = "strasbeat:palette-recents";
 const MAX_RECENTS = 5;
 
 let instance = null;
+
+// Resolve the shortcut to display for a command based on the currently
+// active keymap profile. Modal profiles (vim/emacs/helix) can override
+// the default shortcut via vimShortcut / emacsShortcut / helixShortcut
+// fields on the command. Falls back to the default `shortcut` for
+// Strudel and VSCode.
+function shortcutForActiveProfile(cmd) {
+  const profileId = getStoredProfileId();
+  if (profileId === "vim" && cmd.vimShortcut) return cmd.vimShortcut;
+  if (profileId === "emacs" && cmd.emacsShortcut) return cmd.emacsShortcut;
+  if (profileId === "helix" && cmd.helixShortcut) return cmd.helixShortcut;
+  return cmd.shortcut ?? null;
+}
 
 export function mountCommandPalette({ commands }) {
   if (instance) {
@@ -94,10 +109,11 @@ export function mountCommandPalette({ commands }) {
       labelSpan.textContent = cmd.label;
       li.appendChild(labelSpan);
 
-      if (cmd.shortcut) {
+      const sc = shortcutForActiveProfile(cmd);
+      if (sc) {
         const kbd = document.createElement("kbd");
         kbd.className = "palette__item-kbd";
-        kbd.textContent = cmd.shortcut;
+        kbd.textContent = sc;
         li.appendChild(kbd);
       }
 
@@ -133,7 +149,7 @@ export function mountCommandPalette({ commands }) {
       const q = query.toLowerCase();
       filteredCommands = allCommands.filter((cmd) => {
         const label = cmd.label.toLowerCase();
-        const shortcut = (cmd.shortcut || "").toLowerCase();
+        const shortcut = (shortcutForActiveProfile(cmd) ?? "").toLowerCase();
         // Simple substring match — intentionally not fuzzy to keep it
         // predictable and fast.
         return label.includes(q) || shortcut.includes(q);
@@ -212,6 +228,12 @@ export function mountCommandPalette({ commands }) {
       e.preventDefault();
       close();
     }
+  });
+
+  // Re-render so the kbd chips reflect the new active profile. Harmless
+  // when the palette is closed (just refreshes the in-memory render).
+  subscribeKeymapChange(() => {
+    renderList();
   });
 
   // ─── Public API ───────────────────────────────────────────────────────
@@ -315,12 +337,27 @@ export function buildCommands({
       run: onEvaluate,
     },
     { id: "stop", label: "Stop Playback", shortcut: "Ctrl+.", run: onStop },
+    {
+      id: "evalStrudel",
+      label: "Eval (Strudel :w)",
+      // No shortcut — palette-only entry for searchability. The actual
+      // evaluate keybinding is :w in vim, Cmd+Enter universally.
+      run: onEvaluate,
+    },
+    {
+      id: "stopStrudel",
+      label: "Stop (Strudel :q)",
+      run: onStop,
+    },
 
     // ─── Editor ───────────────────
     {
       id: "comment",
       label: "Toggle Comment",
       shortcut: `${MOD}/`,
+      vimShortcut: "gc",
+      emacsShortcut: "C-/",
+      helixShortcut: "gc",
       run: onToggleComment,
     },
     {
