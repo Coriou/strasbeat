@@ -22,6 +22,7 @@ import {
   deleteLine,
   indentLess,
   indentMore,
+  indentWithTab,
   moveLineDown,
   moveLineUp,
   selectLine,
@@ -98,18 +99,27 @@ export function createVscodeKeymap({ onEvaluate }) {
     { key: "Alt-ArrowUp", run: moveLineUp },
     { key: "Alt-ArrowDown", run: moveLineDown },
 
-    // Comments — Mod-/ is the universal binding (QWERTY). On AZERTY macOS,
-    // "/" lives on Shift+: so Cmd+/ becomes Cmd+Shift+: → Cmd+?, which
-    // macOS intercepts as the Help menu shortcut. Mod-: gives AZERTY
-    // users an unshifted alternative that actually reaches CodeMirror.
+    // Comments — Mod-/ is the universal binding (QWERTY). Layout fallbacks:
+    //  - Mod-: for AZERTY mac (where "/" is Shift+: and Cmd+/ becomes
+    //    Cmd+? which macOS intercepts as Help).
+    //  - Mod-# for German QWERTZ (where "/" is Shift+7).
+    // Multi-binding is harmless on the wrong layout — the redundant
+    // shortcut just won't be reachable from that physical keyboard.
     { key: "Mod-/", run: toggleComment },
     { key: "Mod-:", run: toggleComment },
+    { key: "Mod-#", run: toggleComment },
 
     // Select line (Mod-L), matching VSCode's Cmd+L behavior.
     { key: "Mod-l", run: selectLine, preventDefault: true },
 
-    // Indentation
+    // Indentation. Tab / Shift-Tab are AZERTY/QWERTZ-friendly fallbacks
+    // for `]` / `[` (which require Alt+Shift on AZERTY mac and don't
+    // produce a stable event.key). CM6's `indentWithTab` (re-exported
+    // here as a regular keymap entry) only fires when there's a
+    // selection — plain Tab inside a single-line caret continues to
+    // insert a tab character.
     { key: "Mod-]", run: indentMore },
     { key: "Mod-[", run: indentLess },
+    indentWithTab,
   ]);
 }
