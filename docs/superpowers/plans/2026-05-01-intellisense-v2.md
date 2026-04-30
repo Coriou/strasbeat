@@ -845,6 +845,8 @@ Expected: previous tests still pass (importing `ViewPlugin` from `@codemirror/vi
 
 If the import crashes the test runner, mark this step as "investigate" and add a `try/catch` guard around the import, or move the ViewPlugin to a separate file (`context-cm6.js`) imported only at runtime. The pure module's tests must keep passing.
 
+**Per Task 4 code review: the regex walker is a fallback that doesn't distinguish source from comments / string literals.** The CM6 path SHOULD use `syntaxTree(state)` to skip comment nodes and string contents. Switch the `refresh(view)` body from `extractBufferTokens(view.state.doc.toString())` to a tree-walking implementation that only visits `s/sound/bank/chord/<word>(...)` CallExpressions. The regex walker stays as the first-paint fallback (when the tree isn't ready). When you add tree-walking, also add a small test fixture proving `// s("commented_bd")` and `'literal s("interior_bd")'` do NOT pollute the buffer set.
+
 - [ ] **Step 3: Commit**
 
 ```bash
