@@ -24,6 +24,7 @@ import {
 } from "../editor/keymap-profiles.js";
 import { applyKeymapProfile, subscribeKeymapChange } from "../editor/keymap-apply.js";
 import { formatChipLabel } from "./keymap-chip-format.js";
+import { makeIcon } from "./icons.js";
 
 export { formatChipLabel };
 
@@ -103,9 +104,36 @@ export function mountKeymapChip({ container, editor, onEvaluate }) {
   let modeUnsub = null;
   let tooltip = null;
 
+  // Persistent children — built once so mode flips don't tear down nodes.
+  // Layout: [label] [sep · mode]? [chevron]
+  const labelEl = document.createElement("span");
+  labelEl.className = "keymap-chip__label";
+  const modeWrap = document.createElement("span");
+  modeWrap.className = "keymap-chip__mode";
+  modeWrap.setAttribute("aria-hidden", "true");
+  const modeEl = document.createElement("span");
+  modeEl.className = "keymap-chip__mode-text";
+  modeWrap.appendChild(modeEl);
+  const chevron = makeIcon("chevron-down");
+  chevron.classList.add("keymap-chip__chevron");
+  el.appendChild(labelEl);
+  el.appendChild(modeWrap);
+  el.appendChild(chevron);
+
   function render() {
     const profile = getProfile(getStoredProfileId());
-    el.textContent = formatChipLabel(profile, currentMode);
+    labelEl.textContent = profile.label;
+    if (profile.isModal) {
+      modeWrap.dataset.shown = "1";
+      modeEl.textContent = currentMode || profile.modes[0];
+    } else {
+      modeWrap.dataset.shown = "0";
+      modeEl.textContent = "";
+    }
+    // Accessible label for screen readers — full string form, including the
+    // dropdown affordance, so screen readers announce e.g. "Vim · NORMAL,
+    // keymap profile picker, menu".
+    el.setAttribute("aria-label", `${formatChipLabel(profile, currentMode).replace(/\s*▾\s*$/, "")}, keymap profile`);
     el.dataset.profile = profile.id;
     el.dataset.modal = profile.isModal ? "1" : "0";
   }
@@ -252,7 +280,11 @@ function renderPopover({ anchor, activeId, onPick, onDismiss }) {
 
     const check = document.createElement("span");
     check.className = "keymap-popover__check";
-    check.textContent = profile.id === activeId ? "✓" : "";
+    check.setAttribute("aria-hidden", "true");
+    if (profile.id === activeId) {
+      const checkIcon = makeIcon("check");
+      check.appendChild(checkIcon);
+    }
     row.appendChild(check);
 
     const body = document.createElement("span");
@@ -280,12 +312,20 @@ function renderPopover({ anchor, activeId, onPick, onDismiss }) {
   });
 
   // Position above the chip (transport bar is at the bottom of the shell).
+  // Default to chip-left-aligned; if that would overflow the viewport on
+  // the right, fall back to chip-right-aligned. The chip lives near the
+  // right edge of the transport bar, so right-alignment is the common case.
   document.body.appendChild(popover);
   const rect = anchor.getBoundingClientRect();
   const popRect = popover.getBoundingClientRect();
+  const margin = 8;
+  const overflowRight = rect.left + popRect.width > window.innerWidth - margin;
+  const left = overflowRight
+    ? Math.max(margin, rect.right - popRect.width)
+    : Math.max(margin, rect.left);
   popover.style.position = "fixed";
-  popover.style.left = `${Math.max(8, rect.left)}px`;
-  popover.style.top = `${rect.top - popRect.height - 8}px`;
+  popover.style.left = `${left}px`;
+  popover.style.top = `${rect.top - popRect.height - margin}px`;
 
   // Initial focus on the active row (or first row if no row matched).
   const activeRow = rows.find((r) => r.dataset.profileId === activeId) ?? rows[0];

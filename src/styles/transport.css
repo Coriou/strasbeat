@@ -364,25 +364,84 @@
 /* Keymap chip — inherits `.transport__pill` base. The chip is *status*,
    not action-bait, so it sits at --text-dim by default and only brightens
    on hover or when its popover is open. Accent is reserved for the focus
-   ring and popover checkmark — color is signal here, not decoration. */
+   ring and popover checkmark — color is signal here, not decoration.
+
+   Layout: [label] [sep · mode] [chevron]. The mode block is fixed-width
+   in mono so rapid `i`/`Esc` cycling never shifts the chevron. */
 .keymap-chip {
   cursor: pointer;
-  gap: var(--space-1);
+  gap: 6px;
+  padding-right: 7px;
   transition:
     color var(--t-hover),
     background var(--t-hover),
     border-color var(--t-hover);
 }
 
+.keymap-chip__label {
+  letter-spacing: -0.005em;
+}
+
+.keymap-chip__mode {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-mut);
+}
+
+.keymap-chip[data-modal="1"] .keymap-chip__mode {
+  display: inline-flex;
+}
+
+.keymap-chip__mode::before {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 9px;
+  background: var(--border);
+}
+
+.keymap-chip__mode-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  /* Modal modes are NORMAL/INSERT/VISUAL/REPLACE/SELECT — REPLACE is the
+     longest at 7 chars. Pinning min-width prevents layout shift on flips. */
+  min-width: 7ch;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+.keymap-chip__chevron {
+  width: 11px;
+  height: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  transition:
+    transform var(--t-hover),
+    color var(--t-hover);
+}
+
 .keymap-chip:hover {
   color: var(--text-mut);
   background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.keymap-chip:hover .keymap-chip__chevron {
+  color: var(--text-mut);
 }
 
 .keymap-chip[aria-expanded="true"] {
   color: var(--text);
   background: var(--surface-2);
   border-color: var(--border);
+}
+
+.keymap-chip[aria-expanded="true"] .keymap-chip__chevron {
+  color: var(--text-mut);
+  transform: rotate(180deg);
 }
 
 .keymap-chip:focus-visible {
@@ -395,8 +454,8 @@
    pop-in animation. Mounted via JS to position: fixed; this rule only
    handles visual treatment. */
 .keymap-popover {
-  width: 320px;
-  padding: var(--space-1);
+  width: 312px;
+  padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -407,6 +466,7 @@
   font-family: var(--font-sans);
   z-index: 50;
   animation: keymap-popover-in var(--t-pop-in) both;
+  transform-origin: bottom left;
 }
 
 @keyframes keymap-popover-in {
@@ -422,10 +482,10 @@
 
 .keymap-popover__row {
   display: grid;
-  grid-template-columns: var(--space-3) 1fr auto;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2);
+  grid-template-columns: 14px 1fr auto;
+  align-items: start;
+  column-gap: 10px;
+  padding: 7px 9px 8px;
   border: none;
   background: transparent;
   text-align: left;
@@ -443,56 +503,77 @@
 }
 
 .keymap-popover__row--active {
-  background: var(--accent-wash);
+  background: color-mix(in oklch, var(--accent-wash) 55%, transparent);
 }
 
 .keymap-popover__row--active:hover,
 .keymap-popover__row--active:focus-visible {
-  background: color-mix(
-    in oklch,
-    var(--accent-wash) 65%,
-    var(--surface-3)
-  );
+  background: color-mix(in oklch, var(--accent-wash) 90%, var(--surface-3));
 }
 
 .keymap-popover__check {
-  font-size: var(--text-base);
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
   color: var(--accent);
-  text-align: center;
+}
+
+.keymap-popover__check svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.5;
 }
 
 .keymap-popover__body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
+  padding-top: 1px;
 }
 
 .keymap-popover__name {
   font-size: var(--text-base);
   font-weight: 500;
   letter-spacing: -0.005em;
+  line-height: 16px;
+  color: var(--text);
+}
+
+.keymap-popover__row--active .keymap-popover__name {
   color: var(--text);
 }
 
 .keymap-popover__desc {
-  font-size: var(--text-xs);
-  line-height: var(--lh-xs);
-  color: var(--text-mut);
-  white-space: nowrap;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--text-dim);
+  /* Allow descriptions to wrap to two lines so shortcut listings don't
+     get unceremoniously chopped by ellipsis. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.keymap-popover__row:hover .keymap-popover__desc,
+.keymap-popover__row:focus-visible .keymap-popover__desc,
+.keymap-popover__row--active .keymap-popover__desc {
+  color: var(--text-mut);
 }
 
 .keymap-popover__tag {
   align-self: center;
-  font-size: 10px;
+  font-family: var(--font-mono);
+  font-size: 9px;
   font-weight: 500;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
-  padding: 2px var(--space-1);
+  padding: 2px 5px;
+  background: var(--surface-1);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
 }
