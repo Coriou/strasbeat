@@ -1,3 +1,5 @@
+import { mountKeymapChip } from "./keymap-chip.js";
+
 // Transport bar — owns the cps/bpm + cycle + playhead readouts and the
 // status / midi pill text. The play, stop and roll-toggle buttons already
 // live in the static HTML (so main.js can attach the existing handlers
@@ -46,6 +48,9 @@ export function mountTransport({
   const statusEl = mustEl("status");
   const midiPillEl = mustEl("midi-status");
   const rightGroupEl = midiPillEl.parentElement;
+
+  const keymapChip = mountKeymapChip({ container: rightGroupEl });
+  rightGroupEl.insertBefore(keymapChip.el, midiPillEl);
 
   const errorBadgeEl = document.createElement("button");
   errorBadgeEl.type = "button";
@@ -252,6 +257,7 @@ export function mountTransport({
     if (raf != null) cancelAnimationFrame(raf);
     raf = null;
     clearInterval(poll);
+    keymapChip.destroy();
   }
 
   return {
@@ -261,6 +267,7 @@ export function mountTransport({
     setPlaybackState,
     setErrorState,
     clearErrorState,
+    keymapChip,
     dispose,
   };
 }

@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { formatChipLabel } from "./keymap-chip.js";
+import { formatChipLabel } from "./keymap-chip-format.js";
 import { getProfile } from "../editor/keymap-profiles.js";
 
 describe("formatChipLabel()", () => {
