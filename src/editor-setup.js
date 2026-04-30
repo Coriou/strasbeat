@@ -1,4 +1,6 @@
-import { Prec, StateEffect } from "@codemirror/state";
+import { Compartment, Prec, StateEffect } from "@codemirror/state";
+import { createUniversalKeymap } from "./editor/keymap-universal.js";
+import { getProfile, getStoredProfileId } from "./editor/keymap-profiles.js";
 import { codemirrorSettings, defaultSettings } from "@strudel/codemirror";
 import { formatExtension } from "./editor/format.js";
 import { errorMarksExtension } from "./editor/error-marks.js";
@@ -6,6 +8,12 @@ import { createVscodeKeymap } from "./editor/keymap.js";
 import { numericScrubber } from "./editor/numeric-scrubber.js";
 import { hoverDocs } from "./editor/hover-docs.js";
 import { signatureHint } from "./editor/signature-hint.js";
+
+// CodeMirror compartment for the strasbeat-side editing overlay
+// (createVscodeKeymap). Wrapped so we can swap it in/out when the user
+// changes profiles, without remounting the editor. See
+// design/work/21-keybindings.md §"CM compartment for the strasbeat overlay".
+const strasbeatOverlayCompartment = new Compartment();
 
 export function readStoredCmSettingsFromLocalStorage() {
   try {
@@ -88,32 +96,60 @@ export const STRASBEAT_DEFAULT_PREFERENCES = {
 // would round-trip defaults as if they were the user's stored
 // preferences.
 export function applyInitialSettings(editor, storedSettings) {
+  const profile = getProfile(getStoredProfileId());
   editor.updateSettings({
     ...defaultSettings,
     ...STRASBEAT_DEFAULT_PREFERENCES,
     ...(storedSettings ?? {}),
     ...STRASBEAT_REQUIRED_ON,
+    keybindings: profile.strudelKeybindings, // last so we win
   });
 }
 
-// Inject our editor extensions (Prettier formatter + VSCode-style keymap +
-// numeric scrubber) into the live EditorView via StateEffect.appendConfig.
+// Inject our editor extensions (Prettier formatter + keymaps + numeric
+// scrubber) into the live EditorView via StateEffect.appendConfig.
 //
 // Prec.highest on the keymaps: Strudel loads defaultKeymap at Prec.high
 // which binds Mod-Enter to insertBlankLine. Without explicit precedence,
 // our Mod-Enter → evaluate would lose to insertBlankLine.
+//
+// The universal keymap (Layer 2) is always loaded — it provides Mod-Enter
+// evaluate regardless of profile. The strasbeat overlay (createVscodeKeymap)
+// is wrapped in a Compartment so it can be swapped in/out at runtime when
+// the user changes profiles, without remounting the editor.
 export function dispatchEditorExtensions(editor, { onOpenReference }) {
+  const profile = getProfile(getStoredProfileId());
+  const onEvaluate = () => editor.evaluate();
+
   editor.editor.dispatch({
     effects: StateEffect.appendConfig.of([
       errorMarksExtension,
       Prec.highest(formatExtension),
-      Prec.highest(createVscodeKeymap({ onEvaluate: () => editor.evaluate() })),
+      Prec.highest(createUniversalKeymap({ onEvaluate })),
+      strasbeatOverlayCompartment.of(
+        profile.applyStrasbeatOverlay
+          ? Prec.highest(createVscodeKeymap({ onEvaluate }))
+          : [],
+      ),
       numericScrubber({
         evaluate: () => editor.repl.evaluate(editor.code, false),
       }),
       hoverDocs({ onOpenReference }),
       signatureHint,
     ]),
+  });
+}
+
+// Live-swap the strasbeat overlay extension. Called by applyKeymapProfile
+// when the user picks a new profile. CM6 compartment.reconfigure is
+// instant (single dispatch) — no editor remount, no scroll/cursor reset.
+export function reconfigureOverlay(editor, applyOverlay, onEvaluate) {
+  editor.editor.dispatch({
+    effects: strasbeatOverlayCompartment.reconfigure(
+      applyOverlay
+        ? Prec.highest(createVscodeKeymap({ onEvaluate }))
+        : [],
+    ),
   });
 }
 
