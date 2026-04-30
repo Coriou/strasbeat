@@ -3,6 +3,17 @@
 // Mounted next to the MIDI pill.
 //
 // See design/work/21-keybindings.md §"Keymap chip + popover".
+//
+// Vim mode subscription uses @replit/codemirror-vim's getCM() + cm.on().
+// getCM(view) returns the CM5-compat adapter stored at view.cm; that adapter
+// fires "vim-mode-change" events with { mode, subMode } whenever the Vim mode
+// flips. This is the same channel the built-in status panel uses (line ~8425
+// of @replit/codemirror-vim/dist/index.js).
+//
+// Helix: Strudel's keybindings.mjs has no helix entry — the profile is
+// aspirational. There is no vim-like adapter for it, so the subscription
+// attempt returns null and the mode stays at "NORMAL" (first entry in
+// profile.modes). That is the correct safe default.
 
 import { getProfile, getStoredProfileId } from "../editor/keymap-profiles.js";
 import { subscribeKeymapChange, applyKeymapProfile } from "../editor/keymap-apply.js";
@@ -10,6 +21,67 @@ import { KEYMAP_PROFILES } from "../editor/keymap-profiles.js";
 import { formatChipLabel } from "./keymap-chip-format.js";
 
 export { formatChipLabel };
+
+// Subscribes to Vim mode changes via the @replit/codemirror-vim CM5-compat
+// adapter. Returns a teardown function.
+//
+// @replit/codemirror-vim's ViewPlugin stores the adapter at `view.cm`
+// (source: @replit/codemirror-vim/dist/index.js line 8415). The adapter
+// fires "vim-mode-change" events and exposes cm.on() / cm.off() for
+// subscribe/unsubscribe. We read view.cm directly to avoid adding a static
+// import of @replit/codemirror-vim (which is a transitive dep, not in
+// package.json, so Rollup can't resolve it in production builds).
+//
+// If view.cm is not yet set (vim plugin initialises asynchronously on
+// first render), we retry once after 50 ms. If still null (helix profile
+// or non-vim context), we give up silently — the mode label stays at the
+// profile's first entry ("NORMAL").
+function subscribeVimMode(view, listener) {
+  let cm = null;
+  let torn = false;
+
+  function handler(e) {
+    if (torn) return;
+    const mode = (e.mode ?? "normal").toUpperCase();
+    listener(mode);
+  }
+
+  function attach(adapter) {
+    if (torn) return;
+    cm = adapter;
+    cm.on("vim-mode-change", handler);
+    // Prime with the current mode if already known (e.g. reload with vim active).
+    const primeMode = adapter.state?.vim?.mode;
+    if (primeMode) listener(primeMode.toUpperCase());
+  }
+
+  function tryAttach() {
+    if (torn) return;
+    // view.cm is set by the vim ViewPlugin constructor (same frame as
+    // applyKeymapProfile in practice, but a retry handles the edge case).
+    const adapter = view.cm ?? null;
+    if (adapter) {
+      attach(adapter);
+    } else {
+      setTimeout(() => {
+        if (torn) return;
+        const adapter2 = view.cm ?? null;
+        if (adapter2) attach(adapter2);
+        // If still null (e.g. helix profile), silently give up.
+      }, 50);
+    }
+  }
+
+  tryAttach();
+
+  return () => {
+    torn = true;
+    if (cm) {
+      cm.off("vim-mode-change", handler);
+      cm = null;
+    }
+  };
+}
 
 // Mounts the chip element into `container`. Returns an API object the
 // caller can use later — we expose `el`, a `setMode(mode)` setter for
@@ -23,6 +95,7 @@ export function mountKeymapChip({ container, editor, onEvaluate }) {
   el.setAttribute("aria-expanded", "false");
   let currentMode = null;
   let popover = null;
+  let modeUnsub = null;
 
   function render() {
     const profile = getProfile(getStoredProfileId());
@@ -31,11 +104,31 @@ export function mountKeymapChip({ container, editor, onEvaluate }) {
     el.dataset.modal = profile.isModal ? "1" : "0";
   }
 
+  // Attach or detach the mode subscription when the active profile changes.
+  // If entering a modal profile, wire up the vim-mode-change listener and
+  // prime currentMode to the profile's first mode label (e.g. "NORMAL").
+  // If leaving, tear down and clear the mode so the chip label reverts to
+  // plain "VSCode ▾" etc.
+  function attachModeSubscription(profile) {
+    if (modeUnsub) {
+      modeUnsub();
+      modeUnsub = null;
+    }
+    if (!profile.isModal) {
+      currentMode = null;
+      return;
+    }
+    // Prime with the initial mode before the first event fires.
+    currentMode = profile.modes[0];
+    modeUnsub = subscribeVimMode(editor.editor, (mode) => {
+      currentMode = mode;
+      render();
+    });
+  }
+
   // Re-render when the profile changes (chip popover or settings dropdown).
   const unsubscribe = subscribeKeymapChange((profile) => {
-    // Reset mode when leaving a modal profile, otherwise the stale
-    // "INSERT" tag would render alongside the new "VSCode" label.
-    if (!profile.isModal) currentMode = null;
+    attachModeSubscription(profile);
     render();
     closePopover();
   });
@@ -72,6 +165,14 @@ export function mountKeymapChip({ container, editor, onEvaluate }) {
     else openPopover();
   });
 
+  // Handle reload: if the stored profile is already modal (e.g. user had
+  // vim active last session), prime the subscription immediately so the chip
+  // shows "Vim · NORMAL ▾" on first paint instead of just "Vim ▾".
+  const initialProfile = getProfile(getStoredProfileId());
+  if (initialProfile.isModal) {
+    attachModeSubscription(initialProfile);
+  }
+
   render();
   container.appendChild(el);
 
@@ -79,6 +180,10 @@ export function mountKeymapChip({ container, editor, onEvaluate }) {
     el,
     setMode,
     destroy: () => {
+      if (modeUnsub) {
+        modeUnsub();
+        modeUnsub = null;
+      }
       closePopover();
       unsubscribe();
       el.remove();
