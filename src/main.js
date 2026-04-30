@@ -10,6 +10,7 @@ import * as strudelWebaudio from "@strudel/webaudio";
 import * as strudelExt from "./strudel-ext/index.js";
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { toggleComment } from "@codemirror/commands";
 import { MidiBridge } from "./midi-bridge.js";
 import { mountMidiBar } from "./ui/midi-bar.js";
 import { installSoundCompletion } from "./editor/completions/sounds.js";
@@ -553,6 +554,19 @@ document.addEventListener(
   },
   true,
 );
+
+// Strudel's vim/emacs/helix integrations dispatch these custom DOM events
+// instead of running CM commands directly — the host wires them to
+// whatever the app considers "evaluate" / "stop" / "toggle comment".
+// See node_modules/@strudel/codemirror/keybindings.mjs (Vim.defineEx
+// blocks). Harmless when the active profile is Strudel/VSCode (no event
+// ever fires); load-bearing in modal profiles.
+document.addEventListener("repl-evaluate", () => editor.evaluate());
+document.addEventListener("repl-stop", () => editor.stop());
+document.addEventListener("repl-toggle-comment", () => {
+  editor.editor.focus();
+  toggleComment(editor.editor);
+});
 
 // ─── Command palette (Cmd+Shift+P) ──────────────────────────────────────
 const palette = mountCommandPalette({
