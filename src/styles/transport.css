@@ -414,6 +414,17 @@
 .keymap-popover__desc { font-size: 0.75rem; color: var(--text-mut); }
 .keymap-popover__tag { font-size: 0.75rem; color: var(--text-mut); align-self: center; }
 
+.keymap-chip__tooltip {
+  background: var(--surface-3);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 0.375rem 0.625rem;
+  font-size: 0.8125rem;
+  box-shadow: var(--shadow-pop);
+  pointer-events: none; /* tooltip is informational; clicks pass through */
+  z-index: 60;
+}
+
 /* Keyboard shortcut badge inside transport buttons. */
 .transport__kbd {
   font: 500 9px var(--font-mono);

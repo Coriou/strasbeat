@@ -15,9 +15,14 @@
 // attempt returns null and the mode stays at "NORMAL" (first entry in
 // profile.modes). That is the correct safe default.
 
-import { getProfile, getStoredProfileId } from "../editor/keymap-profiles.js";
-import { subscribeKeymapChange, applyKeymapProfile } from "../editor/keymap-apply.js";
-import { KEYMAP_PROFILES } from "../editor/keymap-profiles.js";
+import {
+  KEYMAP_PROFILES,
+  getProfile,
+  getStoredProfileId,
+  hasSeenTooltip,
+  markTooltipSeen,
+} from "../editor/keymap-profiles.js";
+import { applyKeymapProfile, subscribeKeymapChange } from "../editor/keymap-apply.js";
 import { formatChipLabel } from "./keymap-chip-format.js";
 
 export { formatChipLabel };
@@ -96,6 +101,7 @@ export function mountKeymapChip({ container, editor, onEvaluate }) {
   let currentMode = null;
   let popover = null;
   let modeUnsub = null;
+  let tooltip = null;
 
   function render() {
     const profile = getProfile(getStoredProfileId());
@@ -173,13 +179,49 @@ export function mountKeymapChip({ container, editor, onEvaluate }) {
     attachModeSubscription(initialProfile);
   }
 
+  function showInitialTooltipIfNeeded() {
+    if (hasSeenTooltip()) return;
+    tooltip = document.createElement("div");
+    tooltip.className = "keymap-chip__tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.textContent = "Click to change your editor keymap";
+    document.body.appendChild(tooltip);
+
+    // Position above the chip. We can't measure until the chip is in the
+    // DOM, so requestAnimationFrame defers this one frame.
+    requestAnimationFrame(() => {
+      if (!tooltip) return;
+      const rect = el.getBoundingClientRect();
+      const tipRect = tooltip.getBoundingClientRect();
+      tooltip.style.position = "fixed";
+      tooltip.style.left = `${Math.max(8, rect.left)}px`;
+      tooltip.style.top = `${rect.top - tipRect.height - 8}px`;
+    });
+
+    function dismiss() {
+      if (!tooltip) return;
+      markTooltipSeen();
+      tooltip.remove();
+      tooltip = null;
+      document.removeEventListener("mousedown", dismiss, true);
+      document.removeEventListener("keydown", dismiss, true);
+    }
+
+    // Any user interaction dismisses it. Capture-phase listeners so we
+    // see the event before any in-app handler can stopPropagation.
+    document.addEventListener("mousedown", dismiss, true);
+    document.addEventListener("keydown", dismiss, true);
+  }
+
   render();
   container.appendChild(el);
+  showInitialTooltipIfNeeded();
 
   return {
     el,
     setMode,
     destroy: () => {
+      if (tooltip) tooltip.remove();
       if (modeUnsub) {
         modeUnsub();
         modeUnsub = null;
