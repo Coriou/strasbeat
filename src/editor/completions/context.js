@@ -66,3 +66,108 @@ function stripVariantSuffix(tok) {
   const i = tok.indexOf(":");
   return i > 0 ? tok.slice(0, i) : tok;
 }
+
+const RECENCY_KEY = "strasbeat:completions-recency";
+const RECENCY_CAP = 32;
+const RECENCY_DECAY_DAYS = 30;
+const RECENCY_MAX_BOOST = 0.3;
+const RECENCY_DAY_MS = 86400 * 1000;
+const RECENCY_CATEGORIES = ["sound", "bank", "chord", "function", "note", "mode"];
+
+/**
+ * Create a recency table with linear time-decay scoring and localStorage
+ * persistence. Each category caps at 32 entries (LRU eviction).
+ *
+ * @param {{ now?: () => number, debounceMs?: number }} [opts]
+ *   - now: clock injection for tests (default Date.now)
+ *   - debounceMs: write delay for localStorage (default 1000)
+ */
+export function createRecency({ now = Date.now, debounceMs = 1000 } = {}) {
+  const tables = hydrate();
+  let writeTimer = null;
+
+  function bump(category, label) {
+    if (!RECENCY_CATEGORIES.includes(category)) return;
+    if (!label || typeof label !== "string") return;
+    const list = tables[category];
+    const existing = list.findIndex((e) => e.label === label);
+    if (existing >= 0) list.splice(existing, 1);
+    list.unshift({ label, t: now() });
+    if (list.length > RECENCY_CAP) list.length = RECENCY_CAP;
+    scheduleWrite();
+  }
+
+  function score(category, label, { now: nowOpt } = {}) {
+    const list = tables[category];
+    if (!list) return 0;
+    const entry = list.find((e) => e.label === label);
+    if (!entry) return 0;
+    const age = (nowOpt ?? now()) - entry.t;
+    const days = age / RECENCY_DAY_MS;
+    if (days >= RECENCY_DECAY_DAYS) return 0;
+    return Math.max(0, (1 - days / RECENCY_DECAY_DAYS) * RECENCY_MAX_BOOST);
+  }
+
+  function snapshot() {
+    return JSON.parse(JSON.stringify(tables));
+  }
+
+  function flush() {
+    if (writeTimer) {
+      clearTimeout(writeTimer);
+      writeTimer = null;
+    }
+    write();
+  }
+
+  function scheduleWrite() {
+    if (debounceMs <= 0) {
+      write();
+      return;
+    }
+    if (writeTimer) clearTimeout(writeTimer);
+    writeTimer = setTimeout(() => {
+      writeTimer = null;
+      write();
+    }, debounceMs);
+  }
+
+  function write() {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(RECENCY_KEY, JSON.stringify(tables));
+    } catch (err) {
+      console.warn("[strasbeat/completions] recency write failed:", err);
+    }
+  }
+
+  function syncFromStorage() {
+    const fresh = hydrate();
+    for (const cat of RECENCY_CATEGORIES) tables[cat] = fresh[cat];
+  }
+
+  return { bump, score, snapshot, flush, syncFromStorage };
+}
+
+function hydrate() {
+  const empty = Object.fromEntries(RECENCY_CATEGORIES.map((c) => [c, []]));
+  if (typeof localStorage === "undefined") return empty;
+  let raw;
+  try {
+    raw = localStorage.getItem(RECENCY_KEY);
+  } catch {
+    return empty;
+  }
+  if (!raw) return empty;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return empty;
+    for (const cat of RECENCY_CATEGORIES) {
+      if (!Array.isArray(parsed[cat])) parsed[cat] = [];
+    }
+    return parsed;
+  } catch {
+    console.warn("[strasbeat/completions] recency parse failed, resetting");
+    return empty;
+  }
+}
