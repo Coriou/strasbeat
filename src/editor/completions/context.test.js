@@ -2,8 +2,12 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { extractBufferTokens } from "./context.js";
+import { extractBufferTokens, extractFromTree } from "./context.js";
 import { createRecency } from "./context.js";
+// @codemirror/lang-javascript is installed transitively via @strudel/codemirror.
+// The test loader (scripts/test-loader.mjs) aliases it from node_modules/.pnpm
+// so we don't have to lift it into package.json just for one test.
+import { javascriptLanguage } from "@codemirror/lang-javascript";
 
 describe("extractBufferTokens(text)", () => {
   test("returns a Map keyed by category", () => {
@@ -155,5 +159,90 @@ describe("createRecency()", () => {
     globalThis.localStorage = storage;
     const rec = createRecency({ now: () => 1 });
     assert.equal(rec.score("sound", "bd", { now: 1 }), 0);
+  });
+});
+
+describe("extractFromTree(tree, sliceDoc)", () => {
+  function parseAndExtract(src) {
+    const tree = javascriptLanguage.parser.parse(src);
+    return extractFromTree(tree, (from, to) => src.slice(from, to));
+  }
+
+  test("extracts tokens from real CallExpressions", () => {
+    const src = `s("bd sd").bank("RolandTR909")\nchord("Cm7 G7")`;
+    const tokens = parseAndExtract(src);
+    assert.deepEqual([...tokens.get("sound")].sort(), ["bd", "sd"]);
+    assert.deepEqual([...tokens.get("bank")].sort(), ["RolandTR909"]);
+    assert.deepEqual([...tokens.get("chord")].sort(), ["Cm7", "G7"]);
+    assert.ok(tokens.get("function").has("s"));
+    assert.ok(tokens.get("function").has("bank"));
+    assert.ok(tokens.get("function").has("chord"));
+  });
+
+  test("does NOT extract tokens from line comments", () => {
+    const src = `s("realbd")\n// s("commented_bd")\n// bank("commented_bank")`;
+    const tokens = parseAndExtract(src);
+    assert.ok(tokens.get("sound").has("realbd"));
+    assert.ok(
+      !tokens.get("sound").has("commented_bd"),
+      "line-comment sound must not pollute the buffer set",
+    );
+    assert.ok(
+      !tokens.get("bank").has("commented_bank"),
+      "line-comment bank must not pollute the buffer set",
+    );
+  });
+
+  test("does NOT extract tokens from block comments", () => {
+    const src = `/* s("blocked_bd") and bank("blocked_bank") */\ns("realbd")`;
+    const tokens = parseAndExtract(src);
+    assert.ok(tokens.get("sound").has("realbd"));
+    assert.ok(
+      !tokens.get("sound").has("blocked_bd"),
+      "block-comment sound must not pollute the buffer set",
+    );
+    assert.ok(
+      !tokens.get("bank").has("blocked_bank"),
+      "block-comment bank must not pollute the buffer set",
+    );
+  });
+
+  test("does NOT extract from string-literal contents that look like source", () => {
+    // A string value whose CONTENT happens to spell s("interior_bd"):
+    // tree-walking visits the outer String node, not its escaped chars.
+    const src = `const example = "s(\\"interior_bd\\")";\ns("realbd")`;
+    const tokens = parseAndExtract(src);
+    assert.ok(tokens.get("sound").has("realbd"));
+    assert.ok(
+      !tokens.get("sound").has("interior_bd"),
+      "string-literal interior must not pollute the buffer set",
+    );
+  });
+
+  test("handles chained MemberExpression callees (.bank, .chord, etc.)", () => {
+    const src = `s("bd").bank("R909").room(0.4)`;
+    const tokens = parseAndExtract(src);
+    assert.ok(tokens.get("sound").has("bd"));
+    assert.ok(tokens.get("bank").has("R909"));
+    assert.ok(tokens.get("function").has("s"));
+    assert.ok(tokens.get("function").has("bank"));
+    assert.ok(tokens.get("function").has("room"));
+  });
+
+  test("handles template strings the same as quoted strings", () => {
+    const src = "s(`bd sd`).bank(`R909`)";
+    const tokens = parseAndExtract(src);
+    assert.ok(tokens.get("sound").has("bd"));
+    assert.ok(tokens.get("sound").has("sd"));
+    assert.ok(tokens.get("bank").has("R909"));
+  });
+
+  test("strips colon variant suffixes and skips ~ rests, like the regex extractor", () => {
+    const src = `s("bd:2 ~ sd:0")`;
+    const tokens = parseAndExtract(src);
+    const sounds = tokens.get("sound");
+    assert.ok(sounds.has("bd"));
+    assert.ok(sounds.has("sd"));
+    assert.ok(!sounds.has("~"));
   });
 });

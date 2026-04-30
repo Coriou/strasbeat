@@ -1,16 +1,19 @@
 // src/editor/completions/context.js
 //
-// Two responsibilities, one module (they share the doc-walk debounce in
-// production):
+// Three responsibilities, one module:
 //
 //   1. extractBufferTokens — pure regex walker over a buffer string.
 //      Recovers the categories the ranker uses for buffer-presence boost.
-//      The CM6 ViewPlugin (createBufferContextPlugin, below) wraps this
-//      and uses syntaxTree() when available, falling back to the regex
-//      walker if the tree isn't ready (rare — only at first paint).
+//      Used as the fallback when the syntax tree isn't ready.
 //
 //   2. Recency table — LRU per category, persisted to localStorage,
-//      cross-tab sync via the storage event. Implemented in Task 5.
+//      cross-tab sync via the storage event.
+//
+//   3. bufferContextPlugin — CM6 ViewPlugin that maintains a debounced
+//      cache of buffer tokens for the current document. Prefers the
+//      syntax tree (skips comments and string-literal contents
+//      naturally); falls back to the regex walker on first paint or
+//      tree-walk failure. Providers read the cache via getBufferTokens().
 
 const CATEGORIES = ["sound", "bank", "chord", "function"];
 
@@ -23,8 +26,8 @@ const MINI_SEPARATOR_RE = /[\s[\]<>{},|!@?*/~]+/;
 
 /**
  * Extract buffer-presence tokens for each ranker category from a JS source
- * string. Pure — used directly in tests; the production CM6 ViewPlugin
- * (see createBufferContextPlugin) calls this as its fallback.
+ * string. Pure — used directly in tests; the CM6 `bufferContextPlugin`
+ * (below) calls this as its fallback when the syntax tree isn't ready.
  *
  * @param {string} text
  * @returns {Map<"sound" | "bank" | "chord" | "function", Set<string>>}
@@ -170,4 +173,202 @@ function hydrate() {
     console.warn("[strasbeat/completions] recency parse failed, resetting");
     return empty;
   }
+}
+
+// ─── CM6 buffer-context view plugin ──────────────────────────────────────
+//
+// Maintains a debounced cache of buffer tokens for the current document.
+// Providers call getBufferTokens() during completion fire to add a small
+// buffer-presence boost to candidates already used in the user's buffer.
+//
+// Multiple editors aren't supported (strasbeat has one); the cache holds
+// whatever the last update wrote.
+//
+// Implementation: prefer the syntax tree (skips comments and string-literal
+// contents naturally — only descends into real CallExpressions). Falls back
+// to the regex walker on first paint or any tree-walk failure.
+
+import { ViewPlugin } from "@codemirror/view";
+import { syntaxTree } from "@codemirror/language";
+
+const BUFFER_DEBOUNCE_MS = 150;
+
+let activeTokens = emptyTokenMap();
+
+/**
+ * Return the latest cached buffer-token map. Always returns a Map shaped
+ * like `extractBufferTokens(text)` (every category present, value is a Set).
+ *
+ * @returns {Map<"sound" | "bank" | "chord" | "function", Set<string>>}
+ */
+export function getBufferTokens() {
+  return activeTokens;
+}
+
+/**
+ * CM6 ViewPlugin: re-extracts buffer tokens on debounced doc-change and
+ * updates the module-level `activeTokens` cache. Mount this once per
+ * editor; getBufferTokens() reads its output.
+ */
+export const bufferContextPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.timer = null;
+      this.refresh(view);
+    }
+    update(update) {
+      if (!update.docChanged) return;
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = setTimeout(() => {
+        this.timer = null;
+        this.refresh(update.view);
+      }, BUFFER_DEBOUNCE_MS);
+    }
+    destroy() {
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = null;
+    }
+    refresh(view) {
+      activeTokens = extractFromState(view.state);
+    }
+  },
+);
+
+/**
+ * Extract buffer tokens from a CM6 EditorState. Tries the syntax tree first
+ * (correctly skips comments and string-literal contents); falls back to the
+ * regex walker if the tree is incomplete or any parse error escapes.
+ *
+ * Exported for tests (`refresh(view)` shells through this).
+ *
+ * @param {import('@codemirror/state').EditorState} state
+ * @returns {Map<"sound" | "bank" | "chord" | "function", Set<string>>}
+ */
+export function extractFromState(state) {
+  const text = state.doc.toString();
+  try {
+    const tree = syntaxTree(state);
+    // If the parser hasn't produced a real tree yet (first paint, or the
+    // language extension wasn't installed), fall back to the regex walker.
+    if (!tree || tree.length < text.length) {
+      return extractBufferTokens(text);
+    }
+    return extractFromTree(tree, (from, to) => state.sliceDoc(from, to));
+  } catch (err) {
+    console.warn(
+      "[strasbeat/completions] syntax-tree buffer extract failed; using regex fallback:",
+      err,
+    );
+    return extractBufferTokens(text);
+  }
+}
+
+/**
+ * Pure tree-walker: visits every CallExpression, pulls callee name + first
+ * string arg, and bins tokens by category. Comments and unrelated string
+ * literals are skipped automatically because the parser doesn't emit
+ * CallExpression nodes inside them.
+ *
+ * @param {import('@lezer/common').Tree} tree
+ * @param {(from: number, to: number) => string} sliceDoc
+ * @returns {Map<"sound" | "bank" | "chord" | "function", Set<string>>}
+ */
+export function extractFromTree(tree, sliceDoc) {
+  const out = emptyTokenMap();
+  const sounds = out.get("sound");
+  const banks = out.get("bank");
+  const chords = out.get("chord");
+  const fns = out.get("function");
+
+  tree.iterate({
+    enter(node) {
+      // Belt-and-braces: even though comments don't contain CallExpressions,
+      // returning false here means we never descend into their interior.
+      if (node.name === "LineComment" || node.name === "BlockComment") {
+        return false;
+      }
+      if (node.name !== "CallExpression") return;
+
+      const callee = calleeNameOf(node.node, sliceDoc);
+      if (callee) fns.add(callee);
+      if (!callee) return;
+
+      // Find the first String / TemplateString inside the ArgList.
+      const argList = firstChildOfName(node.node, "ArgList") ||
+        firstChildOfName(node.node, "ArgumentList");
+      if (!argList) return;
+      const arg = firstStringChild(argList);
+      if (!arg) return;
+      const content = stripQuotes(sliceDoc(arg.from, arg.to));
+
+      if (callee === "s" || callee === "sound") {
+        addAll(sounds, splitMiniTokens(content));
+      } else if (callee === "bank") {
+        const t = content.trim();
+        if (t) addAll(banks, [t]);
+      } else if (callee === "chord") {
+        addAll(chords, splitMiniTokens(content));
+      }
+    },
+  });
+
+  return out;
+}
+
+function emptyTokenMap() {
+  const out = new Map();
+  for (const cat of CATEGORIES) out.set(cat, new Set());
+  return out;
+}
+
+function addAll(set, tokens) {
+  for (const tok of tokens) {
+    if (!tok || tok === "~") continue;
+    if (/^\d+$/.test(tok)) continue;
+    set.add(stripVariantSuffix(tok));
+  }
+}
+
+function calleeNameOf(callNode, sliceDoc) {
+  const first = callNode.firstChild;
+  if (!first) return null;
+  if (first.name === "VariableName" || first.name === "Identifier") {
+    return sliceDoc(first.from, first.to);
+  }
+  if (first.name === "MemberExpression" || first.name === "MemberAccess") {
+    // Property name is the last child after the dot.
+    let prop = first.lastChild;
+    if (prop && prop.name === ".") prop = prop.nextSibling;
+    if (prop &&
+        (prop.name === "PropertyName" ||
+         prop.name === "PropertyDefinition" ||
+         prop.name === "Identifier")) {
+      return sliceDoc(prop.from, prop.to);
+    }
+  }
+  return null;
+}
+
+function firstChildOfName(node, name) {
+  for (let c = node.firstChild; c; c = c.nextSibling) {
+    if (c.name === name) return c;
+  }
+  return null;
+}
+
+function firstStringChild(argList) {
+  for (let c = argList.firstChild; c; c = c.nextSibling) {
+    if (c.name === "String" || c.name === "TemplateString") return c;
+  }
+  return null;
+}
+
+function stripQuotes(raw) {
+  if (raw.length < 2) return raw;
+  const first = raw[0];
+  const last = raw[raw.length - 1];
+  if ((first === '"' || first === "'" || first === "`") && first === last) {
+    return raw.slice(1, -1);
+  }
+  return raw;
 }
