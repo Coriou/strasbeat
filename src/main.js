@@ -346,6 +346,8 @@ transport = mountTransport({
   getScheduler: () => editor?.repl?.scheduler ?? null,
   getAudioContext,
   rootEl: shellEl,
+  editor,
+  onEvaluate: () => editor.evaluate(),
   onPlaybackStateChange: (s) => {
     bottomModes.setPlaybackState(s);
     beatGrid?.setPlaybackState(s);

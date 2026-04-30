@@ -29,6 +29,8 @@ const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
  * @param {() => void} [opts.onErrorBadgeClick]  opens the current error context
  * @param {HTMLElement} [opts.rootEl]  element that should mirror the playback state as `data-playback` for cross-app CSS targeting (scope tint, roll dim, etc.)
  * @param {(state: "idle" | "queued" | "loading" | "playing") => void} [opts.onPlaybackStateChange]  fires when the visible playback state changes
+ * @param {any} [opts.editor]  the StrudelMirror editor instance, forwarded to the keymap chip popover
+ * @param {() => void} [opts.onEvaluate]  called to re-evaluate the pattern after a profile switch, forwarded to the chip
  * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, setErrorState: (s: {kind?: string, label: string, title?: string} | null) => void, clearErrorState: () => void, dispose: () => void }}
  */
 export function mountTransport({
@@ -37,6 +39,8 @@ export function mountTransport({
   onErrorBadgeClick = () => {},
   rootEl = null,
   onPlaybackStateChange = () => {},
+  editor = null,
+  onEvaluate = null,
 }) {
   const transportEl = mustEl("transport");
   const stopBtn = mustEl("stop");
@@ -49,7 +53,7 @@ export function mountTransport({
   const midiPillEl = mustEl("midi-status");
   const rightGroupEl = midiPillEl.parentElement;
 
-  const keymapChip = mountKeymapChip({ container: rightGroupEl });
+  const keymapChip = mountKeymapChip({ container: rightGroupEl, editor, onEvaluate });
   rightGroupEl.insertBefore(keymapChip.el, midiPillEl);
 
   const errorBadgeEl = document.createElement("button");
