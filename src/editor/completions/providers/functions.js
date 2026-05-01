@@ -4,6 +4,7 @@
 // Strudel exports + docs.json keys, scored against the cursor's word
 // fragment. Snippets for known function templates land in Phase 2.
 
+import { snippet } from "@codemirror/autocomplete";
 import docs from "../../strudel-docs.json";
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
@@ -13,6 +14,18 @@ const CATEGORY_BASE = 0.0;
 const BUFFER_BOOST = 0.4;
 const RECENCY_BOOST_MAX = 0.3;
 const MAX_RESULTS = 60;
+
+const SNIPPET_TEMPLATES = {
+  s: 's("${1}")',
+  sound: 'sound("${1}")',
+  note: 'note("${1}")',
+  n: 'n("${1}")',
+  bank: 'bank("${1}")',
+  chord: 'chord("${1}")',
+  stack: "stack(${1})",
+  setcpm: "setcpm(${1})",
+  cat: "cat(${1})",
+};
 
 let functionList = [];
 
@@ -79,6 +92,8 @@ function completionFor(fn, finalScore) {
     type: "function",
     boost: finalScore,
   };
+  const tpl = SNIPPET_TEMPLATES[fn.label];
+  if (tpl) opt.apply = snippet(tpl);
   if (fn.entry) {
     if (fn.entry.doc) {
       const first = fn.entry.doc.split(/[.!?]\s/)[0];
