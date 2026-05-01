@@ -3,6 +3,10 @@ import {
   EXPORT_MAX_POLYPHONY,
   renderPatternToBuffer,
 } from "./export.js";
+import { score as completionScore } from "./editor/completions/score.js";
+import { getBufferTokens } from "./editor/completions/context.js";
+import { getInstalledRecency } from "./editor/completions/install.js";
+import { rankSounds } from "./editor/completions/providers/sounds.js";
 
 // ─── Console helpers ─────────────────────────────────────────────────────
 // Strudel sound names are not 1:1 with the official GM-128 names. Use
@@ -108,6 +112,36 @@ export function mountDebugHelpers({
         stats,
       );
       return stats;
+    },
+    /**
+     * Live introspection of the intellisense ranking pipeline. Useful for
+     * tuning weights from devtools without rebuilding. See
+     * design/work/23-intellisense-v2.md (Task 12) for the surface contract.
+     */
+    completions: {
+      /** Pure subsequence score: `completions.score("gmpw", "gm_pad_warm")`. */
+      score: (q, c) => completionScore(q, c),
+      /** Snapshot of the recency LRU table (or `null` if not installed yet). */
+      recency: () => getInstalledRecency()?.snapshot?.() ?? null,
+      /** Categorised buffer tokens extracted from the live editor doc. */
+      bufferTokens: () => getBufferTokens(),
+      /**
+       * Re-run the ranker against the live recency + buffer-token state.
+       * Today only the `sound` category is exposed.
+       */
+      rank: (fragment, category) => {
+        if (category !== "sound") {
+          console.warn("[debug] only 'sound' category exposed for now");
+          return [];
+        }
+        const recency = getInstalledRecency();
+        return rankSounds({
+          fragment,
+          buffer: getBufferTokens().get("sound"),
+          recency: recency ?? { score: () => 0, snapshot: () => ({ sound: [] }) },
+          allKeys: Object.keys(soundMap.get()),
+        });
+      },
     },
   };
 }
