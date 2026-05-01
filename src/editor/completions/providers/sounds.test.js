@@ -85,4 +85,42 @@ describe("rankSounds", () => {
     });
     assert.ok(ranked.length <= 80, `ranked ${ranked.length} should be ≤ 80`);
   });
+
+  test("bank-in-scope: bank candidate scored by suffix wins with in-bank boost", () => {
+    const ranked = rankSounds({
+      fragment: "bd",
+      buffer: NO_BUFFER,
+      recency: NO_RECENCY,
+      allKeys: ["RolandTR909_bd", "bd_kick", "808bd_kick"],
+      bankInScope: "RolandTR909",
+    });
+    assert.equal(ranked[0].label, "bd", "label should be short suffix");
+    assert.equal(ranked[0].detail, "RolandTR909_bd", "detail should be resolved name");
+    assert.equal(ranked[0].apply, "bd", "apply should be short suffix");
+  });
+
+  test("bank-in-scope: out-of-bank candidates still appear, just below in-bank ones", () => {
+    const ranked = rankSounds({
+      fragment: "bd",
+      buffer: NO_BUFFER,
+      recency: NO_RECENCY,
+      allKeys: ["RolandTR909_bd", "bd_kick"],
+      bankInScope: "RolandTR909",
+    });
+    const labels = ranked.map((r) => r.label);
+    assert.ok(labels.includes("bd_kick"), "out-of-bank still listed");
+    assert.equal(labels[0], "bd", "in-bank wins top slot");
+  });
+
+  test("bank-in-scope: typo'd bank produces no in-bank boost (graceful fallback)", () => {
+    const ranked = rankSounds({
+      fragment: "bd",
+      buffer: NO_BUFFER,
+      recency: NO_RECENCY,
+      allKeys: ["bd_kick", "808bd_kick"],
+      bankInScope: "Typo909",
+    });
+    assert.ok(ranked.length > 0, "still returns matches");
+    assert.equal(ranked[0].label, "bd_kick", "ranking unchanged from no-bank case");
+  });
 });

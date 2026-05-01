@@ -85,31 +85,38 @@ export function renderCompletionInfo(label, entry) {
  * The button uses `mousedown` + `e.preventDefault()` to avoid blurring
  * the autocomplete popup (which would close it on click). The audition
  * callback is invoked with `(label, opts)` — Phase 3 (Task 18) extends
- * the opts to pass `n`/`bank` for sample variants.
+ * the opts to pass `n`/`bank` for sample variants and Task 19 passes
+ * `bank` for bank-aware sound completions.
+ *
+ * `opts` is forwarded into the audition callback verbatim. When
+ * `opts.bank` is set, the displayed meta line shows `bank_label` so the
+ * preview affordance and the resolved sound name stay legible.
  *
  * @param {string} label
  * @param {(name: string, opts?: object) => void} audition
+ * @param {object} [opts]
  * @returns {HTMLElement}
  */
-export function buildAuditionInfo(label, audition) {
+export function buildAuditionInfo(label, audition, opts = undefined) {
   const wrap = document.createElement("div");
   wrap.className = "completion-info-audition";
 
+  const resolved = opts && opts.bank ? `${opts.bank}_${label}` : label;
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "completion-info-audition__btn";
-  btn.setAttribute("aria-label", `Preview ${label}`);
+  btn.setAttribute("aria-label", `Preview ${resolved}`);
   btn.title = "Preview sound";
   btn.textContent = "▶";
   btn.addEventListener("mousedown", (e) => {
     e.preventDefault(); // don't blur the autocomplete popup
-    audition(label, {});
+    audition(label, opts || {});
   });
   wrap.appendChild(btn);
 
   const meta = document.createElement("div");
   meta.className = "completion-info-audition__meta";
-  meta.textContent = label;
+  meta.textContent = resolved;
   wrap.appendChild(meta);
 
   return wrap;

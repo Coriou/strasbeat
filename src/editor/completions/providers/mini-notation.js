@@ -57,14 +57,15 @@ export function miniNotationProvider({ recency, audition }) {
     const to = tok ? ctx.contentFrom + tok.to : context.pos;
 
     // Variant fragment (after a colon) — emit numeric variants of the
-    // prior sound. Bank-context resolution lands in Task 19; until then
-    // we use the bare token name as the lookup key.
+    // prior sound. The bank-in-scope lookup uses the syntax tree to find
+    // any chained `bank("X")` so the prior token resolves to `X_<token>`.
     if (kind === "sound" && tok && tok.prevSeparator === ":") {
+      const bankInScope = findBankInScopeForCursor(context.state, context.pos);
       const variants = computeVariants({
         content: ctx.content,
         tokFrom: tok.from,
         fragment: tok.token,
-        bankInScope: null, // wired in Task 19
+        bankInScope,
         audition,
       });
       // null  → unknown sound, fall through to other providers (sound shelf)
@@ -79,22 +80,27 @@ export function miniNotationProvider({ recency, audition }) {
     }
 
     if (kind === "sound") {
+      const bankInScope = findBankInScopeForCursor(context.state, context.pos);
       const buffer = getBufferTokens().get("sound");
       const ranked = rankSounds({
         fragment,
         buffer,
         recency,
         allKeys: getSoundKeys(),
+        bankInScope,
       });
       if (ranked.length === 0) return null;
       return {
         from, to, filter: false,
         options: ranked.map((r) => ({
           label: r.label,
+          detail: r.detail,
+          apply: r.apply,
           type: "sound",
-          detail: r.bank,
           boost: r.finalScore,
-          info: audition ? () => buildAuditionInfo(r.label, audition) : undefined,
+          info: audition
+            ? () => buildAuditionInfo(r.apply ?? r.label, audition, r.inBank ? { bank: bankInScope } : undefined)
+            : undefined,
         })),
       };
     }
@@ -205,6 +211,112 @@ function buildVariantInfo(bareName, resolvedName, n, audition, bank) {
   });
   wrap.appendChild(btn);
   return wrap;
+}
+
+/**
+ * Resolve the `bank("X")` in scope at the cursor: find the enclosing
+ * String node, then walk its containing CallExpression chain (down the
+ * callee, up the parent) for any `bank()` calls. Returns the rightmost
+ * (last-in-source-order) bank name or null.
+ *
+ * Per spec §3.B detection algorithm.
+ */
+function findBankInScopeForCursor(state, pos) {
+  const tree = syntaxTree(state);
+  const node = tree.resolveInner(pos, -1);
+  for (let cur = node; cur; cur = cur.parent) {
+    if (cur.name === "String" || cur.name === "TemplateString") {
+      return findBankInScope(state, cur);
+    }
+  }
+  return null;
+}
+
+/**
+ * Walk the chain containing the given String node to find the most recent
+ * (rightmost) bank("X") call. Returns the bank name or null.
+ *
+ * Per spec §3.B detection algorithm: walk both directions of the
+ * MemberExpression chain and inspect each CallExpression's callee.
+ */
+function findBankInScope(state, stringNode) {
+  // Find the CallExpression that contains this String.
+  let call = stringNode.parent;
+  while (call && call.name !== "CallExpression") call = call.parent;
+  if (!call) return null;
+
+  const banks = [];
+
+  // Walk DOWN the callee chain.
+  let cur = call;
+  while (cur && cur.name === "CallExpression") {
+    const callee = cur.firstChild;
+    if (!callee) break;
+    if (callee.name === "VariableName" || callee.name === "Identifier") {
+      const name = state.sliceDoc(callee.from, callee.to);
+      if (name === "bank") {
+        const arg = readFirstStringArg(state, cur);
+        if (arg) banks.push({ name: arg, pos: cur.from });
+      }
+      break;
+    }
+    if (callee.name === "MemberExpression" || callee.name === "MemberAccess") {
+      const prop = callee.lastChild;
+      if (prop) {
+        const propName = state.sliceDoc(prop.from, prop.to).replace(/^\./, "");
+        if (propName === "bank") {
+          const arg = readFirstStringArg(state, cur);
+          if (arg) banks.push({ name: arg, pos: cur.from });
+        }
+      }
+      cur = callee.firstChild;
+    } else {
+      break;
+    }
+  }
+
+  // Walk UP from the s() call.
+  let parent = call.parent;
+  while (parent) {
+    if (parent.name === "MemberExpression" || parent.name === "MemberAccess") {
+      const prop = parent.lastChild;
+      const propName = prop ? state.sliceDoc(prop.from, prop.to).replace(/^\./, "") : "";
+      const callParent = parent.parent;
+      if (callParent && callParent.name === "CallExpression" && propName === "bank") {
+        const arg = readFirstStringArg(state, callParent);
+        if (arg) banks.push({ name: arg, pos: callParent.from });
+      }
+      parent = callParent ? callParent.parent : null;
+      continue;
+    }
+    break;
+  }
+
+  if (banks.length === 0) return null;
+  banks.sort((a, b) => b.pos - a.pos);
+  return banks[0].name;
+}
+
+/**
+ * Read the first string argument of a CallExpression. Returns the unquoted
+ * inner string, or null if the first arg isn't a String/TemplateString
+ * literal.
+ */
+function readFirstStringArg(state, callNode) {
+  for (let c = callNode.firstChild; c; c = c.nextSibling) {
+    if (c.name === "ArgList" || c.name === "ArgumentList") {
+      const first = c.firstChild?.nextSibling; // skip "("
+      if (!first) return null;
+      if (first.name === "String" || first.name === "TemplateString") {
+        const raw = state.sliceDoc(first.from, first.to);
+        if ((raw.startsWith('"') || raw.startsWith("'") || raw.startsWith("`")) && raw.length >= 2) {
+          return raw.slice(1, -1);
+        }
+      }
+      return null;
+    }
+  }
+  return null;
 }
 
 /**

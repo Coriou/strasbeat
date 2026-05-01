@@ -8,6 +8,7 @@ import { buildAuditionInfo } from "../info.js";
 const CATEGORY_BASE = 1.0;
 const BUFFER_BOOST = 0.5;
 const RECENCY_BOOST_MAX = 0.3;
+const IN_BANK_BOOST = 0.2;
 const MAX_RESULTS = 80;
 
 const STARTER_SHELF = [
@@ -66,22 +67,63 @@ export function soundsProvider({ recency, audition }) {
 /**
  * Pure ranking — exported for tests and for the mini-notation provider
  * to reuse on the inside-string path.
+ *
+ * Result shape: `{ label, detail, apply, finalScore, bank, inBank }`.
+ *
+ * - `label` — what the popup shows as the title. For an in-bank candidate
+ *   under a `bank("X")` chain, this is the short suffix (`bd`); otherwise
+ *   it's the full name.
+ * - `detail` — secondary text. The full resolved name for in-bank, or the
+ *   bank prefix (or "") for out-of-bank.
+ * - `apply` — what gets inserted on accept. Same semantics as `label`:
+ *   short suffix in-bank, full name otherwise.
+ * - `bank` — the bank prefix of the underlying sound name (used by the
+ *   sounds-provider info panel and by external callers).
+ * - `inBank` — true iff this candidate is a member of the in-scope bank.
+ *   The mini-notation provider uses this to decide whether to forward
+ *   `{ bank: bankInScope }` to the audition callback (only in-bank
+ *   candidates get the bank rewrite — passing it for out-of-bank would
+ *   double-prefix the resolved name).
  */
-export function rankSounds({ fragment, buffer, recency, allKeys }) {
+export function rankSounds({ fragment, buffer, recency, allKeys, bankInScope = null }) {
   if (!fragment) {
     return rankStarterShelf({ buffer, recency, allKeys });
   }
   const out = [];
+  const bankPrefix_ = bankInScope ? `${bankInScope}_`.toLowerCase() : null;
+
   for (const name of allKeys) {
-    const m = score(fragment, name);
+    let scoreTarget = name;
+    let inBank = false;
+    let displayLabel = name;
+    let displayDetail = bankPrefix(name);
+    let applyText = name;
+
+    if (bankPrefix_ && name.toLowerCase().startsWith(bankPrefix_)) {
+      const suffix = name.slice(bankInScope.length + 1);
+      scoreTarget = suffix;
+      inBank = true;
+      displayLabel = suffix;
+      displayDetail = name;
+      applyText = suffix;
+    }
+
+    const m = score(fragment, scoreTarget);
     if (!m) continue;
     const finalScore =
       m.score +
       (buffer.has(name) ? BUFFER_BOOST : 0) +
       recency.score("sound", name) +
+      (inBank ? IN_BANK_BOOST : 0) +
       CATEGORY_BASE;
-    const bank = bankPrefix(name);
-    out.push({ label: name, finalScore, bank });
+    out.push({
+      label: displayLabel,
+      detail: displayDetail,
+      apply: applyText,
+      finalScore,
+      bank: bankPrefix(name),
+      inBank,
+    });
   }
   out.sort((a, b) => b.finalScore - a.finalScore);
   return out.slice(0, MAX_RESULTS);
@@ -104,7 +146,8 @@ function rankStarterShelf({ buffer, recency, allKeys }) {
       (buffer.has(name) ? BUFFER_BOOST : 0) +
       recency.score("sound", name) +
       CATEGORY_BASE;
-    out.push({ label: name, finalScore, bank: bankPrefix(name) });
+    const bank = bankPrefix(name);
+    out.push({ label: name, detail: bank, apply: name, finalScore, bank, inBank: false });
   }
   return out.slice(0, 20);
 }
@@ -126,9 +169,10 @@ function rank({ fragment, from, to, explicit, recency, audition }) {
     options: ranked.map((r) => ({
       label: r.label,
       type: "sound",
-      detail: r.bank,
+      detail: r.detail,
+      apply: r.apply,
       boost: r.finalScore,
-      info: audition ? () => buildAuditionInfo(r.label, audition) : undefined,
+      info: audition ? () => buildAuditionInfo(r.apply ?? r.label, audition) : undefined,
     })),
   };
 }
