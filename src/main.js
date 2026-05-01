@@ -2,7 +2,7 @@ import { StrudelMirror } from "@strudel/codemirror";
 import { transpiler } from "./transpiler-patch.js";
 // Strudel packages — imported as namespaces to avoid the static+dynamic
 // chunking warning. Boot-only packages (strudelDraw, soundfonts) live in
-// boot.js; the rest are still needed here for installSoundCompletion.
+// boot.js; the rest are still needed here for installCompletions.
 import * as strudelCore from "@strudel/core";
 import * as strudelMini from "@strudel/mini";
 import * as strudelTonal from "@strudel/tonal";
@@ -13,7 +13,7 @@ import { EditorView } from "@codemirror/view";
 import { toggleComment } from "@codemirror/commands";
 import { MidiBridge } from "./midi-bridge.js";
 import { mountMidiBar } from "./ui/midi-bar.js";
-import { installSoundCompletion } from "./editor/completions/sounds.js";
+import { installCompletions } from "./editor/completions/install.js";
 import {
   clearError,
   extractErrorLine,
@@ -268,7 +268,7 @@ dispatchEditorExtensions(editor, {
 });
 
 // Sound name completion — must run after applyInitialSettings.
-installSoundCompletion(editor.editor, [
+installCompletions(editor.editor, [
   ...new Set([
     ...Object.keys(strudelCore),
     ...Object.keys(strudelMini),
