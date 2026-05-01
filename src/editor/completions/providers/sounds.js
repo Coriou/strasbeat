@@ -173,6 +173,10 @@ function rank({ fragment, from, to, explicit, recency, audition }) {
       apply: r.apply,
       boost: r.finalScore,
       info: audition ? () => buildAuditionInfo(r.apply ?? r.label, audition) : undefined,
+      // Stash the audition payload so Alt+Arrow keyboard preview can
+      // fire the right name. This is the regex-fallback path — no bank
+      // context is detected here by design, so no `bank` is forwarded.
+      _audition: { name: r.apply ?? r.label },
     })),
   };
 }

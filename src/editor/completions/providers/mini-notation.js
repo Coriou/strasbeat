@@ -101,6 +101,16 @@ export function miniNotationProvider({ recency, audition }) {
           info: audition
             ? () => buildAuditionInfo(r.apply ?? r.label, audition, r.inBank ? { bank: bankInScope } : undefined)
             : undefined,
+          // Stash the audition payload so Alt+Arrow keyboard preview can
+          // fire the right name+bank pair. For an in-bank candidate the
+          // visible label is the short suffix (`bd`) while the resolved
+          // name lives in `r.apply` and the bank prefix in
+          // `bankInScope` — pass both so superdough rewrites correctly.
+          // Out-of-bank candidates have a fully-qualified `r.apply`, no
+          // bank rewrite needed.
+          _audition: r.inBank
+            ? { name: r.apply, bank: bankInScope }
+            : { name: r.apply ?? r.label },
         })),
       };
     }
@@ -171,6 +181,11 @@ function computeVariants({ content, tokFrom, fragment, bankInScope, audition }) 
       info: audition
         ? () => buildVariantInfo(priorToken, resolvedName, n, audition, bankInScope)
         : undefined,
+      // Stash the audition payload so Alt+Arrow keyboard preview can
+      // fire the variant. `priorToken` is the bare name (e.g. "bd");
+      // superdough's previewSoundName does the bank prefixing, so we
+      // pass the bank separately rather than the resolved name.
+      _audition: { name: priorToken, bank: bankInScope, n },
     });
   }
   return out;

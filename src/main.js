@@ -267,29 +267,42 @@ dispatchEditorExtensions(editor, {
     rightRail.activate("reference");
     referencePanel.scrollTo(name);
   },
-  // Alt+ArrowDown / Alt+ArrowUp on a sound completion fires a one-shot
-  // audition through the live audio context. Mirrors the sound-browser's
-  // preview shape (see editor-actions.js#previewSoundName). Non-sound
-  // completion types (function, chord, mode, etc.) are ignored — we only
-  // know how to render audio for sounds.
+  // Alt+ArrowDown / Alt+ArrowUp on a sound or sample-variant completion
+  // fires a one-shot audition through the live audio context. Mirrors
+  // the sound-browser's preview shape (see editor-actions.js#previewSoundName).
+  // Non-audible completion types (function, chord, mode, etc.) are
+  // ignored — we only know how to render audio for sounds.
   // `transport` is defined later in this file; the closure reads the
   // outer binding lazily so the late-binding works without reordering.
   onAuditionSelected: (view) => {
     const sel = readSelectedCompletion(view.state);
     if (!sel) return;
-    if (sel.type !== "sound") return;
-    // Variant completions (Task 18) are type:"constant" and need an `n`
-    // value the current readSelectedCompletion doesn't surface. The ▶
-    // icon in the variant info panel handles audition correctly because
-    // it captures resolvedName + n at completion-build time. Keyboard
-    // audition for variants would need a richer readSelectedCompletion
-    // API; defer.
-    previewSoundName(sel.label, {
-      getAudioContext,
-      getSound,
-      superdough,
-      setStatus: (s) => transport?.setStatus(s),
-    });
+    // Sound and variant completions both stash an `_audition` payload
+    // on the option (see providers/mini-notation.js + providers/sounds.js).
+    // The payload carries the resolved name + bank + variant `n` so the
+    // bank-aware and variant-aware audition fires the right sample.
+    if (sel.audition) {
+      previewSoundName(sel.audition.name, {
+        getAudioContext,
+        getSound,
+        superdough,
+        setStatus: (s) => transport?.setStatus(s),
+      }, {
+        bank: sel.audition.bank ?? undefined,
+        n: sel.audition.n ?? undefined,
+      });
+      return;
+    }
+    // Fallback for legacy sound completions that don't carry a stashed
+    // audition payload (defensive — every provider currently stashes one).
+    if (sel.type === "sound") {
+      previewSoundName(sel.label, {
+        getAudioContext,
+        getSound,
+        superdough,
+        setStatus: (s) => transport?.setStatus(s),
+      });
+    }
   },
 });
 

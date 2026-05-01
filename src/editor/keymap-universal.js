@@ -63,11 +63,23 @@ export function createUniversalKeymap({ onEvaluate, onAuditionSelected }) {
 }
 
 /**
- * Read the currently-selected completion's label + type. Returns null if
- * the popup is closed or nothing is selected. Used by audition handlers.
+ * Read the currently-selected completion's label + type plus an optional
+ * `audition` payload that providers stash on the option as `_audition`.
+ * Returns null if the popup is closed or nothing is selected. Used by
+ * audition handlers.
+ *
+ * The `audition` field carries everything the audition path needs to
+ * fire the right preview: the bare/resolved sound name, the bank prefix
+ * (so superdough rewrites `${bank}_${name}` correctly), and a sample
+ * variant index `n`. CM6 preserves arbitrary extra fields on Completion
+ * options, so we just read it back here.
  *
  * @param {import("@codemirror/state").EditorState} state
- * @returns {{ label: string, type: string | undefined } | null}
+ * @returns {{
+ *   label: string,
+ *   type: string | undefined,
+ *   audition: { name: string, bank?: string, n?: number } | null,
+ * } | null}
  */
 export function readSelectedCompletion(state) {
   if (completionStatus(state) !== "active") return null;
@@ -76,5 +88,9 @@ export function readSelectedCompletion(state) {
   const all = currentCompletions(state);
   const c = all[idx];
   if (!c) return null;
-  return { label: c.label, type: c.type };
+  return {
+    label: c.label,
+    type: c.type,
+    audition: c._audition ?? null,
+  };
 }
