@@ -52,6 +52,8 @@ import {
   applyInitialSettings,
   dispatchEditorExtensions,
 } from "./editor-setup.js";
+import { readSelectedCompletion } from "./editor/keymap-universal.js";
+import { previewSoundName } from "./editor-actions.js";
 import { installDefaultStrudelLogger } from "./strudel-logger.js";
 import { installEvalFeedback } from "./eval-feedback.js";
 import { createBoot } from "./boot.js";
@@ -264,6 +266,24 @@ dispatchEditorExtensions(editor, {
     if (!referencePanel) return;
     rightRail.activate("reference");
     referencePanel.scrollTo(name);
+  },
+  // Alt+ArrowDown / Alt+ArrowUp on a sound completion fires a one-shot
+  // audition through the live audio context. Mirrors the sound-browser's
+  // preview shape (see editor-actions.js#previewSoundName). Non-sound
+  // completion types (function, chord, mode, etc.) are ignored — we only
+  // know how to render audio for sounds.
+  // `transport` is defined later in this file; the closure reads the
+  // outer binding lazily so the late-binding works without reordering.
+  onAuditionSelected: (view) => {
+    const sel = readSelectedCompletion(view.state);
+    if (!sel) return;
+    if (sel.type !== "sound") return;
+    previewSoundName(sel.label, {
+      getAudioContext,
+      getSound,
+      superdough,
+      setStatus: (s) => transport?.setStatus(s),
+    });
   },
 });
 

@@ -117,7 +117,10 @@ export function applyInitialSettings(editor, storedSettings) {
 // evaluate regardless of profile. The strasbeat overlay (createVscodeKeymap)
 // is wrapped in a Compartment so it can be swapped in/out at runtime when
 // the user changes profiles, without remounting the editor.
-export function dispatchEditorExtensions(editor, { onOpenReference }) {
+export function dispatchEditorExtensions(
+  editor,
+  { onOpenReference, onAuditionSelected },
+) {
   const profile = getProfile(getStoredProfileId());
   const onEvaluate = () => editor.evaluate();
 
@@ -125,7 +128,7 @@ export function dispatchEditorExtensions(editor, { onOpenReference }) {
     effects: StateEffect.appendConfig.of([
       errorMarksExtension,
       Prec.highest(formatExtension),
-      Prec.highest(createUniversalKeymap({ onEvaluate })),
+      Prec.highest(createUniversalKeymap({ onEvaluate, onAuditionSelected })),
       strasbeatOverlayCompartment.of(
         profile.applyStrasbeatOverlay
           ? Prec.highest(createVscodeKeymap({ onEvaluate }))
