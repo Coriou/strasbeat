@@ -318,6 +318,16 @@ dispatchEditorExtensions(editor, {
     rightRail.activate("sounds");
     soundBrowser.focusSound(name);
   },
+  // Cmd+J focus-browser. The keymap extracted the raw word under cursor;
+  // we open the sound browser and pre-fill the search input so the user
+  // can explore alternatives. Empty string clears the filter and shows
+  // everything. `soundBrowser` and `rightRail` are late-bound (same as
+  // onRevealSound above).
+  onFocusBrowser: (word) => {
+    if (!soundBrowser) return;
+    rightRail.activate("sounds");
+    soundBrowser.focusSearch(word);
+  },
 });
 
 // Sound name completion — must run after applyInitialSettings.

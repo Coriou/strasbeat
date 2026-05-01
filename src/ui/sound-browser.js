@@ -110,6 +110,7 @@ export function createSoundBrowserPanel({
     refresh,
     setBufferText,
     focusSound,
+    focusSearch,
   };
 
   // ─── Lifecycle ────────────────────────────────────────────────────────
@@ -511,6 +512,21 @@ export function createSoundBrowserPanel({
   function focusItem(name) {
     activeIndex = flatVisible.findIndex((s) => s.name === name);
     paintActive();
+  }
+
+  // Public — called from main.js when Cmd+J fires. Fills the search input
+  // with the cursor's word and triggers a filter so the user can explore
+  // alternatives. The panel must already be visible (caller activates it
+  // first).
+  function focusSearch(prefilledQuery = "") {
+    if (!mounted) return;
+    if (searchInput) {
+      searchInput.value = prefilledQuery;
+      searchInput.focus();
+      searchInput.select();
+      if (prefilledQuery)
+        searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   }
 
   // Public — called from main.js when Cmd+Shift+B resolves a sound under

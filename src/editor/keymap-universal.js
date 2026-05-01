@@ -22,7 +22,7 @@ import { soundMap } from "@strudel/webaudio";
 import { tokenAtOffset } from "./mini-notation-tokens.js";
 import { findBankInScope } from "./completions/bank-detect.js";
 
-export function createUniversalKeymap({ onEvaluate, onAuditionSelected, onRevealSound }) {
+export function createUniversalKeymap({ onEvaluate, onAuditionSelected, onRevealSound, onFocusBrowser }) {
   return keymap.of([
     // Mod-Enter on macOS evaluates (parity with Strudel's Ctrl-Enter at
     // Prec.highest, which on mac is literally Control+Enter, not
@@ -82,6 +82,23 @@ export function createUniversalKeymap({ onEvaluate, onAuditionSelected, onReveal
         return true;
       },
     },
+    // Cmd+J — focus the sound browser search bar pre-filled with the word
+    // under the cursor. Sibling to Cmd+Shift+B (exact reveal): where that
+    // binding resolves a full bank-qualified name, this one dumps the raw
+    // cursor word into the search field so the user can explore
+    // alternatives. Works in every profile (Layer 2). Does not conflict
+    // with any stock browser or OS binding on macOS/Windows.
+    // See spec design/work/22-intellisense-v2.md §4.C.
+    {
+      key: "Mod-j",
+      preventDefault: true,
+      run: (view) => {
+        if (!onFocusBrowser) return false;
+        const word = readWordUnderCursor(view.state);
+        onFocusBrowser(word ?? "");
+        return true;
+      },
+    },
   ]);
 }
 
@@ -127,6 +144,30 @@ function resolveSoundUnderCursor(state) {
     if (soundMap.get()[text.toLowerCase()]) return text;
   }
   return null;
+}
+
+/**
+ * Read the word under the cursor on the current line. Used by the Cmd+J
+ * focus-browser binding to pre-fill the search input. Scans left and right
+ * from the cursor head for `[a-zA-Z0-9_]` characters — the same set that
+ * makes up Strudel sound names and function identifiers. Returns null when
+ * the cursor is not over any word character (punctuation, whitespace, etc.).
+ *
+ * @param {import("@codemirror/state").EditorState} state
+ * @returns {string | null}
+ */
+function readWordUnderCursor(state) {
+  const pos = state.selection.main.head;
+  const doc = state.doc;
+  const line = doc.lineAt(pos);
+  const text = line.text;
+  const local = pos - line.from;
+  const isWord = (c) => /[a-zA-Z0-9_]/.test(c);
+  let from = local;
+  while (from > 0 && isWord(text[from - 1])) from--;
+  let to = local;
+  while (to < text.length && isWord(text[to])) to++;
+  return text.slice(from, to) || null;
 }
 
 /**
