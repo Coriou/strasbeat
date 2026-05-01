@@ -56,6 +56,25 @@ export function miniNotationProvider({ recency, audition }) {
     const from = tok ? ctx.contentFrom + tok.from : context.pos;
     const to = tok ? ctx.contentFrom + tok.to : context.pos;
 
+    // Variant fragment (after a colon) — emit numeric variants of the
+    // prior sound. Bank-context resolution lands in Task 19; until then
+    // we use the bare token name as the lookup key.
+    if (kind === "sound" && tok && tok.prevSeparator === ":") {
+      const variants = computeVariants({
+        content: ctx.content,
+        tokFrom: tok.from,
+        fragment: tok.token,
+        bankInScope: null, // wired in Task 19
+        audition,
+      });
+      if (variants) return {
+        from: ctx.contentFrom + tok.from,
+        to: ctx.contentFrom + tok.to,
+        filter: false,
+        options: variants,
+      };
+    }
+
     if (kind === "sound") {
       const buffer = getBufferTokens().get("sound");
       const ranked = rankSounds({
@@ -98,6 +117,84 @@ export function miniNotationProvider({ recency, audition }) {
       })),
     };
   };
+}
+
+/**
+ * Variant fragment after a colon in mini-notation: walk back to find the
+ * prior token (the sound name), look up its registered samples, and emit
+ * one completion per array index.
+ *
+ * Skips object-form sample maps (chromatic soundfonts) — there the colon
+ * isn't directly indexable.
+ *
+ * `bankInScope` is the resolved bank prefix (Task 19); the sound is looked
+ * up under `${bank}_${name}` when present.
+ */
+function computeVariants({ content, tokFrom, fragment, bankInScope, audition }) {
+  // Walk back from the colon to find the prior token (the sound name).
+  let i = tokFrom - 1;
+  if (i < 0 || content[i] !== ":") return null;
+  i--;
+  const SEP = /[\s[\]<>{},|!@?*/:~]/;
+  const priorEnd = i + 1;
+  while (i >= 0 && !SEP.test(content[i])) i--;
+  const priorStart = i + 1;
+  const priorToken = content.slice(priorStart, priorEnd);
+  if (!priorToken) return null;
+
+  const resolvedName = bankInScope ? `${bankInScope}_${priorToken}` : priorToken;
+  const entry = soundMap.get()[resolvedName.toLowerCase()];
+  if (!entry || !entry.data) return null;
+  const samples = entry.data.samples;
+  if (!Array.isArray(samples)) return null; // skip object form (chromatic)
+
+  const lowFrag = fragment.toLowerCase();
+  const out = [];
+  for (let n = 0; n < samples.length; n++) {
+    const label = String(n);
+    if (lowFrag && !label.startsWith(lowFrag)) continue;
+    const fileName = describeSample(samples[n]);
+    out.push({
+      label,
+      type: "constant",
+      detail: fileName,
+      apply: label,
+      info: audition
+        ? () => buildVariantInfo(resolvedName, n, audition, bankInScope)
+        : undefined,
+    });
+  }
+  return out.length > 0 ? out : null;
+}
+
+function describeSample(sample) {
+  if (typeof sample === "string") {
+    const slash = sample.lastIndexOf("/");
+    return slash >= 0 ? sample.slice(slash + 1) : sample;
+  }
+  return "";
+}
+
+/**
+ * Build a small DOM node with a ▶ button that auditions the given variant
+ * via the provided callback. Same shape as info.js#buildAuditionInfo, but
+ * carries the resolved sound name + n + bank captured at completion-build
+ * time so the audition fires the right variant.
+ */
+function buildVariantInfo(resolvedName, n, audition, bank) {
+  const wrap = document.createElement("div");
+  wrap.className = "completion-info-audition";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "completion-info-audition__btn";
+  btn.textContent = "▶";
+  btn.title = `Preview ${resolvedName}:${n}`;
+  btn.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    audition(resolvedName, { n, bank });
+  });
+  wrap.appendChild(btn);
+  return wrap;
 }
 
 /**

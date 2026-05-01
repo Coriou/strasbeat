@@ -278,6 +278,12 @@ dispatchEditorExtensions(editor, {
     const sel = readSelectedCompletion(view.state);
     if (!sel) return;
     if (sel.type !== "sound") return;
+    // Variant completions (Task 18) are type:"constant" and need an `n`
+    // value the current readSelectedCompletion doesn't surface. The ▶
+    // icon in the variant info panel handles audition correctly because
+    // it captures resolvedName + n at completion-build time. Keyboard
+    // audition for variants would need a richer readSelectedCompletion
+    // API; defer.
     previewSoundName(sel.label, {
       getAudioContext,
       getSound,

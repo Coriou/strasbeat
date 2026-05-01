@@ -11,7 +11,7 @@
  * (event bubbling goes inner → outer), so on the first interaction the
  * context is still suspended when we get here.
  */
-export async function previewSoundName(name, ctx) {
+export async function previewSoundName(name, ctx, opts = {}) {
   const { getAudioContext, getSound, superdough, setStatus } = ctx;
   const audioCtx = getAudioContext();
   if (!audioCtx) {
@@ -43,6 +43,11 @@ export async function previewSoundName(name, ctx) {
     sustain: 0,
     release: 0.3,
   };
+  // Phase 3: variant + bank context for sample-variant auditions.
+  // `n` selects the sample index inside a kit-style sound; `bank` rewrites
+  // the sound name as `${bank}_${name}` upstream of superdough.
+  if (opts.n != null) value.n = opts.n;
+  if (opts.bank) value.bank = opts.bank;
   // 10ms latency cushion — superdough warns and skips events scheduled in
   // the past, same as the MIDI bridge.
   Promise.resolve(
