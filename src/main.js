@@ -53,7 +53,7 @@ import {
   dispatchEditorExtensions,
 } from "./editor-setup.js";
 import { readSelectedCompletion } from "./editor/keymap-universal.js";
-import { previewSoundName } from "./editor-actions.js";
+import { previewSoundName, insertSoundName } from "./editor-actions.js";
 import { installDefaultStrudelLogger } from "./strudel-logger.js";
 import { installEvalFeedback } from "./eval-feedback.js";
 import { createBoot } from "./boot.js";
@@ -516,6 +516,24 @@ editorRoot.addEventListener("drop", (e) => {
     openMidiImportDialog(file);
   }
   // Non-MIDI files fall through to the browser/editor's normal behavior.
+});
+
+// ─── Sound-browser drag-and-drop on the editor surface ───────────────────
+// Handles drags initiated from the sound browser panel. The MIDI listeners
+// above handle "Files" types; these handle the custom MIME type set by the
+// sound browser's dragstart handler. A single drag event carries only one.
+editorRoot.addEventListener("dragover", (e) => {
+  if (e.dataTransfer?.types?.includes("text/x-strasbeat-sound")) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+});
+editorRoot.addEventListener("drop", (e) => {
+  const name = e.dataTransfer?.getData("text/x-strasbeat-sound");
+  if (!name) return;
+  e.preventDefault();
+  e.stopPropagation();
+  insertSoundName(name, editor.editor);
 });
 
 // ─── Top bar wiring ──────────────────────────────────────────────────────

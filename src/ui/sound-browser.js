@@ -424,6 +424,15 @@ export function createSoundBrowserPanel({
       item.appendChild(meta);
     }
 
+    // Drag to editor — lets the user drag a sound row directly onto the
+    // editor canvas. The editor's drop listener reads the custom MIME type
+    // and calls insertSoundName with the editor view.
+    item.draggable = true;
+    item.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/x-strasbeat-sound", sound.name);
+      e.dataTransfer.effectAllowed = "copyLink";
+    });
+
     // Mousedown previews. We use mousedown (not click) so the audition
     // fires the instant the user touches the row — feels more like an
     // instrument and avoids the click-vs-double-click delay. Insert is on
