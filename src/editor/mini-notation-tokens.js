@@ -8,7 +8,7 @@
  */
 
 /**
- * @typedef {{ token: string, from: number, to: number }} MiniToken
+ * @typedef {{ token: string, from: number, to: number, prevSeparator: ":" | null }} MiniToken
  */
 
 /**
@@ -19,32 +19,39 @@
  *
  * Returns null if the cursor is at a separator or the string is empty.
  *
+ * Special case: when the cursor sits immediately after a `:` with no
+ * following token character yet (e.g. cursor right after the colon in
+ * `"bd:"`), returns an empty-fragment marker
+ * `{ token: "", from, to, prevSeparator: ":" }` so the provider can
+ * offer numeric variant completions.
+ *
  * @param {string} text - The mini-notation string content (inside quotes).
  * @param {number} offset - Cursor position within `text` (0-based).
  * @returns {MiniToken | null}
  */
 export function tokenAtOffset(text, offset) {
-  if (!text || offset < 0 || offset > text.length) return null;
-
-  // Separators: whitespace + mini-notation structural chars
+  if (text == null || offset < 0 || offset > text.length) return null;
   const SEP = /[\s[\]<>{},|!@?*/:~]/;
 
-  // Walk backwards from offset to find token start
+  // Special: empty fragment after a colon — surface for variant completion.
+  // (cursor sits immediately after a `:` with no following token char yet.)
+  if (offset > 0 && text[offset - 1] === ":") {
+    const charAt = text[offset];
+    if (charAt === undefined || SEP.test(charAt)) {
+      return { token: "", from: offset, to: offset, prevSeparator: ":" };
+    }
+  }
+
   let from = offset;
   while (from > 0 && !SEP.test(text[from - 1])) from--;
 
-  // Walk forward from offset to find token end
   let to = offset;
   while (to < text.length && !SEP.test(text[to])) to++;
 
-  // If from === to, cursor is at a separator — no token
   if (from === to) return null;
 
-  return {
-    token: text.slice(from, to),
-    from,
-    to,
-  };
+  const prevSeparator = from > 0 && text[from - 1] === ":" ? ":" : null;
+  return { token: text.slice(from, to), from, to, prevSeparator };
 }
 
 /**
