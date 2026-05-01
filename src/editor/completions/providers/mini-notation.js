@@ -73,14 +73,13 @@ export function miniNotationProvider({ recency }) {
     }
 
     // note context
-    const buffer = getBufferTokens().get("function");
     const ranked = NOTE_COMPLETIONS
       .map((n) => {
         const m = fragment ? score(fragment, n.label) : { score: 0.3, matched: [] };
         if (!m) return null;
         return {
           label: n.label,
-          finalScore: m.score + (buffer.has(n.label) ? 0.3 : 0) + 0.6,
+          finalScore: m.score + 0.6,
         };
       })
       .filter(Boolean)
