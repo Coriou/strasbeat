@@ -38,6 +38,10 @@ let installedRecency = null;
  * @returns {{ recency: ReturnType<typeof createRecency> }}
  */
 export function installCompletions(view, liveExports) {
+  if (installedRecency) {
+    console.warn("[strasbeat/completions] installCompletions called twice; ignoring");
+    return { recency: installedRecency };
+  }
   buildFunctionList(liveExports);
   const recency = createRecency();
   installedRecency = recency;
@@ -54,6 +58,8 @@ export function installCompletions(view, liveExports) {
   const combined = (context) => {
     for (const p of providers) {
       const result = p(context);
+      // Truthy result halts the chain (even if options is empty —
+      // providers reserve a context that way, e.g. inside chord("…)).
       if (result) return result;
     }
     return null;
