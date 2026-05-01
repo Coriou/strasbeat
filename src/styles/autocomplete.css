@@ -404,3 +404,53 @@
   white-space: pre;
   margin-top: var(--space-1);
 }
+
+/* ─── Sound audition info (Phase 2 Task 16) ───────────────────────────── */
+/* Replaces the rich docs panel for sound-typed completions: a small ▶
+   button next to the sound name, click to preview through superdough.
+   `mousedown` + preventDefault on the button keeps the popup open. */
+
+.completion-info-audition {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.completion-info-audition__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--accent);
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover);
+}
+
+.completion-info-audition__btn:hover {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent-hi);
+}
+
+.completion-info-audition__btn:active {
+  background: var(--surface-2);
+}
+
+.completion-info-audition__meta {
+  font-family: var(--font-mono);
+  font-size: var(--code-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

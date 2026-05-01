@@ -35,9 +35,14 @@ let installedRecency = null;
 /**
  * @param {import("@codemirror/view").EditorView} view
  * @param {string[]} liveExports
+ * @param {{ audition?: (name: string, opts?: object) => void }} [opts]
+ *   `audition` is wired into the sound-typed providers so each completion
+ *   row can render a ▶ preview button in its info panel (see
+ *   `buildAuditionInfo` in info.js). When omitted, sound completions get
+ *   no info renderer (no preview button — the row still works fine).
  * @returns {{ recency: ReturnType<typeof createRecency> }}
  */
-export function installCompletions(view, liveExports) {
+export function installCompletions(view, liveExports, { audition } = {}) {
   if (installedRecency) {
     console.warn("[strasbeat/completions] installCompletions called twice; ignoring");
     return { recency: installedRecency };
@@ -47,8 +52,8 @@ export function installCompletions(view, liveExports) {
   installedRecency = recency;
 
   const providers = [
-    miniNotationProvider({ recency }),
-    soundsProvider({ recency }),
+    miniNotationProvider({ recency, audition }),
+    soundsProvider({ recency, audition }),
     bankProvider({ recency }),
     chordProvider({ recency }),
     modeProvider({ recency }),

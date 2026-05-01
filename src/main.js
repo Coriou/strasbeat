@@ -288,6 +288,11 @@ dispatchEditorExtensions(editor, {
 });
 
 // Sound name completion — must run after applyInitialSettings.
+// `audition` is wired in so each sound completion row's info panel
+// renders a ▶ preview button (see buildAuditionInfo in
+// src/editor/completions/info.js). Same shape as the Alt+Arrow audition
+// path above — the third arg is unused by previewSoundName today and
+// reserved for Phase 3 (Task 18) sample-variant opts.
 installCompletions(editor.editor, [
   ...new Set([
     ...Object.keys(strudelCore),
@@ -296,7 +301,14 @@ installCompletions(editor.editor, [
     ...Object.keys(strudelWebaudio),
     ...Object.keys(strudelExt),
   ]),
-]);
+], {
+  audition: (name, opts) => previewSoundName(name, {
+    getAudioContext,
+    getSound,
+    superdough,
+    setStatus: (s) => transport?.setStatus(s),
+  }, opts),
+});
 
 // ─── Left rail (patterns library) ────────────────────────────────────────
 const leftRail = mountLeftRail({

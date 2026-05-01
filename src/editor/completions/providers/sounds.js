@@ -3,6 +3,7 @@
 import { soundMap } from "@strudel/webaudio";
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
+import { buildAuditionInfo } from "../info.js";
 
 const CATEGORY_BASE = 1.0;
 const BUFFER_BOOST = 0.5;
@@ -31,7 +32,7 @@ function getSoundKeys() {
   return cachedSoundKeys;
 }
 
-export function soundsProvider({ recency }) {
+export function soundsProvider({ recency, audition }) {
   return function provider(context) {
     const noQuotes = context.matchBefore(SOUND_NO_QUOTES);
     if (noQuotes) {
@@ -57,6 +58,7 @@ export function soundsProvider({ recency }) {
       to: ctx.to,
       explicit: context.explicit,
       recency,
+      audition,
     });
   };
 }
@@ -107,7 +109,7 @@ function rankStarterShelf({ buffer, recency, allKeys }) {
   return out.slice(0, 20);
 }
 
-function rank({ fragment, from, to, explicit, recency }) {
+function rank({ fragment, from, to, explicit, recency, audition }) {
   const buffer = getBufferTokens().get("sound");
   const allKeys = getSoundKeys();
   if (!fragment && !explicit) {
@@ -126,6 +128,7 @@ function rank({ fragment, from, to, explicit, recency }) {
       type: "sound",
       detail: r.bank,
       boost: r.finalScore,
+      info: audition ? () => buildAuditionInfo(r.label, audition) : undefined,
     })),
   };
 }

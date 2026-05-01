@@ -5,6 +5,7 @@ import { soundMap } from "@strudel/webaudio";
 import { tokenAtOffset, miniContext } from "../../mini-notation-tokens.js";
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
+import { buildAuditionInfo } from "../info.js";
 import { rankSounds } from "./sounds.js";
 
 const NOTE_NAMES = ["c", "d", "e", "f", "g", "a", "b"];
@@ -36,9 +37,12 @@ function getSoundKeys() {
 }
 
 /**
- * @param {{ recency: ReturnType<typeof import("../context.js").createRecency> }} deps
+ * @param {{
+ *   recency: ReturnType<typeof import("../context.js").createRecency>,
+ *   audition?: (name: string, opts?: object) => void
+ * }} deps
  */
-export function miniNotationProvider({ recency }) {
+export function miniNotationProvider({ recency, audition }) {
   return function provider(context) {
     const ctx = findMiniContext(context.state, context.pos);
     if (!ctx) return null;
@@ -68,6 +72,7 @@ export function miniNotationProvider({ recency }) {
           type: "sound",
           detail: r.bank,
           boost: r.finalScore,
+          info: audition ? () => buildAuditionInfo(r.label, audition) : undefined,
         })),
       };
     }

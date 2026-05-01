@@ -75,3 +75,42 @@ export function renderCompletionInfo(label, entry) {
 
   return container;
 }
+
+/**
+ * Build a small DOM node with a ▶ button that auditions the given sound
+ * via the provided callback. Used as a Completion.info renderer for
+ * sound-typed completions, so the docs panel doubles as a one-click
+ * preview affordance.
+ *
+ * The button uses `mousedown` + `e.preventDefault()` to avoid blurring
+ * the autocomplete popup (which would close it on click). The audition
+ * callback is invoked with `(label, opts)` — Phase 3 (Task 18) extends
+ * the opts to pass `n`/`bank` for sample variants.
+ *
+ * @param {string} label
+ * @param {(name: string, opts?: object) => void} audition
+ * @returns {HTMLElement}
+ */
+export function buildAuditionInfo(label, audition) {
+  const wrap = document.createElement("div");
+  wrap.className = "completion-info-audition";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "completion-info-audition__btn";
+  btn.setAttribute("aria-label", `Preview ${label}`);
+  btn.title = "Preview sound";
+  btn.textContent = "▶";
+  btn.addEventListener("mousedown", (e) => {
+    e.preventDefault(); // don't blur the autocomplete popup
+    audition(label, {});
+  });
+  wrap.appendChild(btn);
+
+  const meta = document.createElement("div");
+  meta.className = "completion-info-audition__meta";
+  meta.textContent = label;
+  wrap.appendChild(meta);
+
+  return wrap;
+}
