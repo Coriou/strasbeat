@@ -1,10 +1,8 @@
 // src/editor/completions/providers/mode.js
 
 import { score } from "../score.js";
-import { getBufferTokens } from "../context.js";
 
 const CATEGORY_BASE = 0.5;
-const BUFFER_BOOST = 0.2;
 
 const MODES = [
   { label: "below", detail: "voice below anchor" },
@@ -14,8 +12,9 @@ const MODES = [
 ];
 
 const PITCH_NAMES = [
-  "C", "C#", "Db", "D", "D#", "Eb", "E", "F",
-  "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B",
+  "C", "C#", "Db", "D", "D#", "Eb", "E", "E#", "Fb",
+  "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb",
+  "B", "B#", "Cb",
 ];
 
 const MODE_NO_QUOTES = /\bmode\(\s*$/;
@@ -55,7 +54,6 @@ export function modeProvider({ recency }) {
     if (quoteIdx === -1) return null;
     const fragment = text.slice(quoteIdx + 1);
 
-    const buffer = getBufferTokens().get("function"); // mode words bleed into fn ns
     const ranked = MODES
       .map((mode) => {
         const m = fragment ? score(fragment, mode.label) : { score: 0.3, matched: [] };
@@ -64,7 +62,6 @@ export function modeProvider({ recency }) {
           ...mode,
           finalScore:
             m.score +
-            (buffer.has(mode.label) ? BUFFER_BOOST : 0) +
             recency.score("mode", mode.label) +
             CATEGORY_BASE,
         };
