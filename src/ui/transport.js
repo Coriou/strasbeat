@@ -31,7 +31,8 @@ const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
  * @param {(state: "idle" | "queued" | "loading" | "playing") => void} [opts.onPlaybackStateChange]  fires when the visible playback state changes
  * @param {any} [opts.editor]  the StrudelMirror editor instance, forwarded to the keymap chip popover
  * @param {() => void} [opts.onEvaluate]  called to re-evaluate the pattern after a profile switch, forwarded to the chip
- * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, setErrorState: (s: {kind?: string, label: string, title?: string} | null) => void, clearErrorState: () => void, dispose: () => void }}
+ * @param {(bank: string) => void} [opts.onBankChipClick]  called when the bank chip is clicked; receives the bank name
+ * @returns {{ kick: () => void, setStatus: (s: string) => void, setMidiStatus: (s: {ok: boolean | null, msg: string, title?: string}) => void, setPlaybackState: (state: "idle" | "queued" | "loading" | "playing") => void, setErrorState: (s: {kind?: string, label: string, title?: string} | null) => void, clearErrorState: () => void, setBank: (name: string | null) => void, dispose: () => void }}
  */
 export function mountTransport({
   getScheduler,
@@ -41,6 +42,7 @@ export function mountTransport({
   onPlaybackStateChange = () => {},
   editor = null,
   onEvaluate = null,
+  onBankChipClick = null,
 }) {
   const transportEl = mustEl("transport");
   const stopBtn = mustEl("stop");
@@ -62,6 +64,13 @@ export function mountTransport({
   errorBadgeEl.hidden = true;
   errorBadgeEl.addEventListener("click", () => onErrorBadgeClick());
   rightGroupEl.insertBefore(errorBadgeEl, midiPillEl);
+
+  const bankChipEl = document.createElement("button");
+  bankChipEl.type = "button";
+  bankChipEl.className = "transport__bank-chip";
+  bankChipEl.hidden = true;
+  bankChipEl.addEventListener("click", () => onBankChipClick?.(bankChipEl.dataset.bank));
+  rightGroupEl.insertBefore(bankChipEl, midiPillEl);
 
   // Last-rendered values, to skip unnecessary DOM writes.
   let lastBpm = NaN;
@@ -257,6 +266,18 @@ export function mountTransport({
     }
   }
 
+  function setBank(name) {
+    if (!name) {
+      bankChipEl.hidden = true;
+      bankChipEl.removeAttribute("data-bank");
+      return;
+    }
+    bankChipEl.hidden = false;
+    bankChipEl.dataset.bank = name;
+    bankChipEl.textContent = name;
+    bankChipEl.title = `Active bank: ${name} — click to filter Sound browser`;
+  }
+
   function dispose() {
     if (raf != null) cancelAnimationFrame(raf);
     raf = null;
@@ -272,6 +293,7 @@ export function mountTransport({
     setErrorState,
     clearErrorState,
     keymapChip,
+    setBank,
     dispose,
   };
 }

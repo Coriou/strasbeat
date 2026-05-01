@@ -685,3 +685,46 @@
     inset: -8px -4px;
   }
 }
+
+/* Bank chip — shows the active bank() name; click opens Sound browser
+   filtered to that bank. Styled to match .transport__pill baseline but
+   with a monospace label and a subtle hover affordance. */
+.transport__bank-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 var(--space-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-mut);
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.transport__bank-chip[hidden] {
+  display: none;
+}
+
+.transport__bank-chip:hover {
+  background: var(--surface-3);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.transport__bank-chip:active {
+  background: var(--surface-2);
+}
+
+.transport__bank-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-wash);
+}

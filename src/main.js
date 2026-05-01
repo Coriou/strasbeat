@@ -430,6 +430,14 @@ transport = mountTransport({
     }
     rightRail.activate("console");
   },
+  onBankChipClick: (name) => {
+    rightRail.activate("sounds");
+    const searchInput = document.querySelector(".sound-browser__search-input");
+    if (searchInput) {
+      searchInput.value = name;
+      searchInput.dispatchEvent(new Event("input"));
+    }
+  },
 });
 
 // Keeps the top-bar wordmark, left rail highlight, and `currentName` in sync.
@@ -462,6 +470,30 @@ editor.editor.dispatch({
   effects: StateEffect.appendConfig.of([
     EditorView.updateListener.of((update) => {
       if (update.docChanged) scheduleAutosave();
+    }),
+  ]),
+});
+
+// Bank chip — detect `.bank("name")` calls in the buffer and display the
+// last one found in the transport chip. Uses a simple regex on doc-change
+// rather than the buffer-context plugin to avoid coupling to its debounce.
+// "Last in source order" is close enough to "most recently edited" for the
+// common single-bank pattern; tracking per-bank edit recency isn't worth it.
+const BANK_DETECT_RE = /\bbank\(\s*['"]([^'"]+)['"]/g;
+let bankUpdateTimer = null;
+editor.editor.dispatch({
+  effects: StateEffect.appendConfig.of([
+    EditorView.updateListener.of((update) => {
+      if (!update.docChanged) return;
+      if (bankUpdateTimer) clearTimeout(bankUpdateTimer);
+      bankUpdateTimer = setTimeout(() => {
+        bankUpdateTimer = null;
+        const text = update.view.state.doc.toString();
+        BANK_DETECT_RE.lastIndex = 0;
+        let m, last = null;
+        while ((m = BANK_DETECT_RE.exec(text)) !== null) last = m[1];
+        transport?.setBank(last ?? null);
+      }, 200);
     }),
   ]),
 });
