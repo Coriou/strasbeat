@@ -1,5 +1,14 @@
 # 04 — Intellisense (smart autocomplete + hover docs)
 
+> **Status: superseded.** Phase 1 of this spec shipped; Phase 2
+> (signature hints, hover docs) shipped and survives unchanged. The
+> autocomplete ranking and surface design described below was replaced
+> in 2026-05 by `22-intellisense-v2.md`. References to
+> `src/editor/completions/sounds.js` and
+> `src/editor/completions/mini-notation.js` in this document point to
+> deleted modules — see `src/editor/completions/providers/` for the
+> current code.
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. This task is editor-side: it builds richer autocomplete and
 > hover docs on top of CodeMirror 6's autocomplete API, which Strudel

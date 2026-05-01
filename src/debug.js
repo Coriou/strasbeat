@@ -116,7 +116,7 @@ export function mountDebugHelpers({
     /**
      * Live introspection of the intellisense ranking pipeline. Useful for
      * tuning weights from devtools without rebuilding. See
-     * design/work/23-intellisense-v2.md (Task 12) for the surface contract.
+     * design/work/22-intellisense-v2.md (Task 12) for the surface contract.
      */
     completions: {
       /** Pure subsequence score: `completions.score("gmpw", "gm_pad_warm")`. */
