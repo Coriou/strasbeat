@@ -143,9 +143,17 @@ export default defineConfig({
   // The effective browser floor is already Safari 16.4+ / Chrome 80+
   // because of CompressionStream, so this does not regress support.
   build: { target: "es2022" },
-  // Don't let Vite's dep scanner wander into strudel-source/.
+  // Don't let Vite's dep scanner wander into strudel-source/, and skip
+  // *.test.js — those run under `node --test` (see scripts/test-loader.mjs)
+  // and may import devDeps installed only transitively (e.g.
+  // @codemirror/lang-javascript via @strudel/codemirror).
   optimizeDeps: {
-    entries: ["index.html", "src/**/*.{js,mjs,ts}", "patterns/*.js"],
+    entries: [
+      "index.html",
+      "src/**/*.{js,mjs,ts}",
+      "!src/**/*.test.{js,mjs,ts}",
+      "patterns/*.js",
+    ],
   },
   server: {
     port: 5173,
