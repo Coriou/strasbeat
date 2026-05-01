@@ -310,6 +310,10 @@ dispatchEditorExtensions(editor, {
   // `soundBrowser` and `rightRail` are declared further down in this
   // file but the closure runs lazily, so the order works.
   onRevealSound: (name) => {
+    if (!name) {
+      transport?.setStatus("no sound under cursor");
+      return;
+    }
     if (!soundBrowser) return;
     rightRail.activate("sounds");
     soundBrowser.focusSound(name);

@@ -78,7 +78,7 @@ export function createUniversalKeymap({ onEvaluate, onAuditionSelected, onReveal
       run: (view) => {
         if (!onRevealSound) return false;
         const name = resolveSoundUnderCursor(view.state);
-        if (name) onRevealSound(name);
+        onRevealSound(name); // pass null when not resolvable — caller decides UX
         return true;
       },
     },

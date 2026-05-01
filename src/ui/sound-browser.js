@@ -514,8 +514,9 @@ export function createSoundBrowserPanel({
       console.warn(`[sound-browser] focusSound: "${name}" not in allSounds`);
       return;
     }
-    if (sound.kit && collapsedGroups.has(sound.kit)) {
-      collapsedGroups.delete(sound.kit);
+    const groupKey = sound.kit ?? bucketLabel(sound);
+    if (collapsedGroups.has(groupKey)) {
+      collapsedGroups.delete(groupKey);
       render();
     }
     activeIndex = flatVisible.findIndex((s) => s.name === name);
