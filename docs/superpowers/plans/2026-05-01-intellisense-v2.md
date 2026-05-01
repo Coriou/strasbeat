@@ -2504,8 +2504,10 @@ describe("tokenAtOffset", () => {
     assert.deepEqual(r, { token: "bd", from: 0, to: 2, prevSeparator: null });
   });
 
-  test("returns null at separator", () => {
-    assert.equal(tokenAtOffset("bd sd", 2), null);
+  test("returns null when cursor is between separators", () => {
+    // Offset 3 inside "bd  sd" (two spaces): cursor is between the two
+    // spaces, not adjacent to any token character. Returns null.
+    assert.equal(tokenAtOffset("bd  sd", 3), null);
   });
 
   test("prevSeparator is ':' when cursor is in token after a colon", () => {
