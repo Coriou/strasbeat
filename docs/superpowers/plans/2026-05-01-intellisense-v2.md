@@ -1268,8 +1268,13 @@ describe("rankSounds", () => {
   });
 
   test("recency boost overrides cold ordering", () => {
+    // The mock returns 0.5 (above the 0.3 production cap) so the recency
+    // delta is large enough to cross the 0.4 prefix advantage `bd_kick`
+    // has over `808bd_kick`. The test's intent is to prove the ranker
+    // adds the recency value into finalScore — not to assert anything
+    // about the cap itself.
     const recency = {
-      score: (cat, label) => (label === "808bd_kick" ? 0.3 : 0),
+      score: (cat, label) => (label === "808bd_kick" ? 0.5 : 0),
       snapshot: () => ({ sound: [], bank: [], chord: [], function: [], note: [], mode: [] }),
     };
     const ranked = rankSounds({
