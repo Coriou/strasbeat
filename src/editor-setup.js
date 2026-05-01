@@ -119,7 +119,7 @@ export function applyInitialSettings(editor, storedSettings) {
 // the user changes profiles, without remounting the editor.
 export function dispatchEditorExtensions(
   editor,
-  { onOpenReference, onAuditionSelected },
+  { onOpenReference, onAuditionSelected, onRevealSound },
 ) {
   const profile = getProfile(getStoredProfileId());
   const onEvaluate = () => editor.evaluate();
@@ -128,7 +128,7 @@ export function dispatchEditorExtensions(
     effects: StateEffect.appendConfig.of([
       errorMarksExtension,
       Prec.highest(formatExtension),
-      Prec.highest(createUniversalKeymap({ onEvaluate, onAuditionSelected })),
+      Prec.highest(createUniversalKeymap({ onEvaluate, onAuditionSelected, onRevealSound })),
       strasbeatOverlayCompartment.of(
         profile.applyStrasbeatOverlay
           ? Prec.highest(createVscodeKeymap({ onEvaluate }))

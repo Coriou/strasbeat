@@ -109,6 +109,7 @@ export function createSoundBrowserPanel({
     deactivate,
     refresh,
     setBufferText,
+    focusSound,
   };
 
   // ─── Lifecycle ────────────────────────────────────────────────────────
@@ -499,6 +500,24 @@ export function createSoundBrowserPanel({
   }
 
   function focusItem(name) {
+    activeIndex = flatVisible.findIndex((s) => s.name === name);
+    paintActive();
+  }
+
+  // Public — called from main.js when Cmd+Shift+B resolves a sound under
+  // the cursor and we want to highlight it in the browser. Expands the
+  // containing kit group if collapsed so the row is actually visible.
+  function focusSound(name) {
+    if (!mounted) return;
+    const sound = allSounds.find((s) => s.name === name);
+    if (!sound) {
+      console.warn(`[sound-browser] focusSound: "${name}" not in allSounds`);
+      return;
+    }
+    if (sound.kit && collapsedGroups.has(sound.kit)) {
+      collapsedGroups.delete(sound.kit);
+      render();
+    }
     activeIndex = flatVisible.findIndex((s) => s.name === name);
     paintActive();
   }

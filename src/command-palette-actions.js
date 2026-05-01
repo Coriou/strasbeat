@@ -93,5 +93,11 @@ export function buildPaletteCommands({
     onFocusPatterns: () => leftRail.focusSearch(),
     onSwitchToRoll: () => bottomModes.setMode("roll"),
     onSwitchToScope: () => bottomModes.setMode("scope"),
+    // Cmd+Shift+B from the palette can't read the editor's cursor (the
+    // palette steals focus when it opens), so the palette path
+    // intentionally degrades to "just open the browser". The user can
+    // then search/scroll. The cursor-aware reveal lives in
+    // keymap-universal.js's Mod-Shift-b binding.
+    onRevealSound: () => rightRail.activate("sounds"),
   });
 }

@@ -327,6 +327,7 @@ export function buildCommands({
   onFocusPatterns,
   onSwitchToRoll,
   onSwitchToScope,
+  onRevealSound,
 }) {
   return [
     // ─── Transport ────────────────
@@ -429,6 +430,16 @@ export function buildCommands({
       label: "Open Sound Browser",
       shortcut: null,
       run: onOpenSounds,
+    },
+    {
+      id: "revealSound",
+      label: "Reveal sound in browser",
+      // Same shortcut as the Layer-2 keymap binding so the chip in the
+      // palette matches the muscle memory. The palette path can't read
+      // the editor's cursor (that lives inside CM6), so it just falls
+      // through to opening the panel — the user keeps their search.
+      shortcut: `${MOD}${SHIFT}B`,
+      run: onRevealSound,
     },
     {
       id: "reference",

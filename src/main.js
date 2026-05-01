@@ -304,6 +304,16 @@ dispatchEditorExtensions(editor, {
       });
     }
   },
+  // Cmd+Shift+B reveal-in-browser. The keymap resolved the sound under
+  // cursor; we open the right-rail browser and ask it to highlight that
+  // exact name (expanding the kit group if it was collapsed).
+  // `soundBrowser` and `rightRail` are declared further down in this
+  // file but the closure runs lazily, so the order works.
+  onRevealSound: (name) => {
+    if (!soundBrowser) return;
+    rightRail.activate("sounds");
+    soundBrowser.focusSound(name);
+  },
 });
 
 // Sound name completion — must run after applyInitialSettings.

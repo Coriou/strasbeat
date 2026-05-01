@@ -4,6 +4,7 @@ import { soundMap } from "@strudel/webaudio";
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
 import { buildAuditionInfo } from "../info.js";
+import { findBankInScopeForCursor } from "../bank-detect.js";
 
 const CATEGORY_BASE = 1.0;
 const BUFFER_BOOST = 0.5;
@@ -53,6 +54,13 @@ export function soundsProvider({ recency, audition }) {
     const fragMatch = inside.match(SOUND_FRAGMENT);
     const fragment = fragMatch ? fragMatch[1] ?? fragMatch[2] ?? "" : "";
 
+    // Bank-aware even on this regex-fallback path. The mini-notation
+    // provider always handles the inside-string case ahead of us, but
+    // some pattern shapes (template literals, oddly-formed chains) can
+    // bypass the syntax-tree path; this keeps results consistent
+    // regardless of which provider lands the request.
+    const bankInScope = findBankInScopeForCursor(context.state, context.pos);
+
     return rank({
       fragment,
       from: ctx.to - fragment.length,
@@ -60,6 +68,7 @@ export function soundsProvider({ recency, audition }) {
       explicit: context.explicit,
       recency,
       audition,
+      bankInScope,
     });
   };
 }
@@ -152,7 +161,7 @@ function rankStarterShelf({ buffer, recency, allKeys }) {
   return out.slice(0, 20);
 }
 
-function rank({ fragment, from, to, explicit, recency, audition }) {
+function rank({ fragment, from, to, explicit, recency, audition, bankInScope = null }) {
   const buffer = getBufferTokens().get("sound");
   const allKeys = getSoundKeys();
   if (!fragment && !explicit) {
@@ -161,7 +170,7 @@ function rank({ fragment, from, to, explicit, recency, audition }) {
     // space-inside-string as a separate auto-trigger.
     return null;
   }
-  const ranked = rankSounds({ fragment, buffer, recency, allKeys });
+  const ranked = rankSounds({ fragment, buffer, recency, allKeys, bankInScope });
   return {
     from,
     to,
@@ -172,11 +181,16 @@ function rank({ fragment, from, to, explicit, recency, audition }) {
       detail: r.detail,
       apply: r.apply,
       boost: r.finalScore,
-      info: audition ? () => buildAuditionInfo(r.apply ?? r.label, audition) : undefined,
+      info: audition
+        ? () => buildAuditionInfo(r.apply ?? r.label, audition, r.inBank ? { bank: bankInScope } : undefined)
+        : undefined,
       // Stash the audition payload so Alt+Arrow keyboard preview can
-      // fire the right name. This is the regex-fallback path — no bank
-      // context is detected here by design, so no `bank` is forwarded.
-      _audition: { name: r.apply ?? r.label },
+      // fire the right name+bank pair. Same shape as the mini-notation
+      // provider so the keymap-universal Alt+Arrow handler doesn't have
+      // to special-case which provider built the option.
+      _audition: r.inBank
+        ? { name: r.apply, bank: bankInScope }
+        : { name: r.apply ?? r.label },
     })),
   };
 }
