@@ -67,7 +67,10 @@ export function miniNotationProvider({ recency, audition }) {
         bankInScope: null, // wired in Task 19
         audition,
       });
-      if (variants) return {
+      // null  → unknown sound, fall through to other providers (sound shelf)
+      // []    → known sound but object-form / no matches; halt the chain
+      // [...] → emit variants
+      if (variants !== null) return {
         from: ctx.contentFrom + tok.from,
         to: ctx.contentFrom + tok.to,
         filter: false,
@@ -144,9 +147,9 @@ function computeVariants({ content, tokFrom, fragment, bankInScope, audition }) 
 
   const resolvedName = bankInScope ? `${bankInScope}_${priorToken}` : priorToken;
   const entry = soundMap.get()[resolvedName.toLowerCase()];
-  if (!entry || !entry.data) return null;
+  if (!entry || !entry.data) return null; // unknown — let other providers try
   const samples = entry.data.samples;
-  if (!Array.isArray(samples)) return null; // skip object form (chromatic)
+  if (!Array.isArray(samples)) return []; // known but object-form — halt with empty
 
   const lowFrag = fragment.toLowerCase();
   const out = [];
@@ -160,11 +163,11 @@ function computeVariants({ content, tokFrom, fragment, bankInScope, audition }) 
       detail: fileName,
       apply: label,
       info: audition
-        ? () => buildVariantInfo(resolvedName, n, audition, bankInScope)
+        ? () => buildVariantInfo(priorToken, resolvedName, n, audition, bankInScope)
         : undefined,
     });
   }
-  return out.length > 0 ? out : null;
+  return out;
 }
 
 function describeSample(sample) {
@@ -178,10 +181,16 @@ function describeSample(sample) {
 /**
  * Build a small DOM node with a ▶ button that auditions the given variant
  * via the provided callback. Same shape as info.js#buildAuditionInfo, but
- * carries the resolved sound name + n + bank captured at completion-build
+ * carries the bare sound name + n + bank captured at completion-build
  * time so the audition fires the right variant.
+ *
+ * `bareName` is the unprefixed sound token (e.g. "bd"); `resolvedName` is
+ * the bank-prefixed lookup key (e.g. "RolandTR909_bd") used only for the
+ * tooltip / a11y label. The audition callback receives the bare name with
+ * `bank` in opts so superdough's `previewSoundName` does the prefixing —
+ * passing the resolved name with bank too would double-prefix.
  */
-function buildVariantInfo(resolvedName, n, audition, bank) {
+function buildVariantInfo(bareName, resolvedName, n, audition, bank) {
   const wrap = document.createElement("div");
   wrap.className = "completion-info-audition";
   const btn = document.createElement("button");
@@ -189,9 +198,10 @@ function buildVariantInfo(resolvedName, n, audition, bank) {
   btn.className = "completion-info-audition__btn";
   btn.textContent = "▶";
   btn.title = `Preview ${resolvedName}:${n}`;
+  btn.setAttribute("aria-label", `Preview ${resolvedName}:${n}`);
   btn.addEventListener("mousedown", (e) => {
     e.preventDefault();
-    audition(resolvedName, { n, bank });
+    audition(bareName, { n, bank });
   });
   wrap.appendChild(btn);
   return wrap;
