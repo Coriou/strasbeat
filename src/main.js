@@ -32,7 +32,7 @@ import { createBottomPanelModes } from "./ui/bottom-panel-modes.js";
 import { mountBeatGrid } from "./ui/beat-grid.js";
 import { mountTrackBar } from "./ui/track-bar.js";
 import { mountArrangeBar } from "./ui/arrange-bar.js";
-import { prompt, confirm } from "./ui/modal.js";
+import { prompt, confirm, formModal, choiceModal } from "./ui/modal.js";
 import { applyStoredAccent } from "./ui/settings-drawer.js";
 import { createLocalStore } from "./store.js";
 import { readSharedFromHash, shareCurrent } from "./share.js";
@@ -42,9 +42,12 @@ import { mountDebugHelpers } from "./debug.js";
 import {
   discoverPatterns,
   computeDirtySet,
-  getUserPatternNames,
+  groupUserPatternsByFolder,
+  validateFolderName,
   createAutosave,
   handleNewPatternClick,
+  handleDuplicateClick,
+  handleBulkDuplicateClick,
 } from "./patterns.js";
 import { showMidiImportDialog, getMidiFile } from "./ui/midi-import-dialog.js";
 import {
@@ -354,10 +357,331 @@ installCompletions(editor.editor, [
 });
 
 // ─── Left rail (patterns library) ────────────────────────────────────────
+const indexAtBoot = store.getIndex();
+const collapsedFoldersAtBoot = indexAtBoot.uiState?.collapsedFolders ?? [];
+const groupedAtBoot = groupUserPatternsByFolder(store);
+
+// Re-pull grouped patterns + folders + collapsed state + dirty set and push
+// them into the rail in one shot. Called from every state mutation below so
+// the rail stays in sync without piecemeal add/remove calls.
+function refreshRail() {
+  const idx = store.getIndex();
+  leftRail.setData({
+    groupedUserPatterns: groupUserPatternsByFolder(store),
+    folders: idx.folders ?? [],
+    collapsedFolders: idx.uiState?.collapsedFolders ?? [],
+    dirtySet: computeDirtySet(patternNames, patterns, store),
+  });
+}
+
+function persistCollapse(folderKey, isCollapsed) {
+  const idx = store.getIndex();
+  const set = new Set(idx.uiState?.collapsedFolders ?? []);
+  if (isCollapsed) set.add(folderKey);
+  else set.delete(folderKey);
+  idx.uiState = {
+    ...(idx.uiState ?? {}),
+    collapsedFolders: Array.from(set),
+  };
+  store.setIndex(idx);
+}
+
+async function promptCreateFolder() {
+  const idx = store.getIndex();
+  const existing = idx.folders ?? [];
+  const v = await formModal({
+    title: "New folder",
+    fields: [
+      {
+        key: "name",
+        label: "Folder name",
+        type: "text",
+        placeholder: "e.g. Jazz Sessions",
+      },
+    ],
+    confirmLabel: "Create",
+    validate: (vals) => {
+      const err = validateFolderName(vals.name, existing);
+      return err ? { name: err } : null;
+    },
+  });
+  if (!v) return null;
+  const name = v.name.trim();
+  store.setIndex({ ...idx, folders: [...existing, name] });
+  refreshRail();
+  return name;
+}
+
+function renameFolderHandler(oldName, newName) {
+  if (oldName === newName) return;
+  // Folder rename is two-step: rewrite N pattern records, then rewrite the
+  // index. A QuotaExceededError mid-loop would leave records half-renamed.
+  // Catch it at the boundary, refresh the rail to reflect whatever did land,
+  // and surface the truncated state in the status bar.
+  let rewrittenRecords = 0;
+  try {
+    rewrittenRecords = store.renameFolderInRecords(oldName, newName);
+    const idx = store.getIndex();
+    idx.folders = (idx.folders ?? []).map((f) => (f === oldName ? newName : f));
+    if (idx.uiState?.collapsedFolders?.includes(oldName)) {
+      idx.uiState = {
+        ...idx.uiState,
+        collapsedFolders: idx.uiState.collapsedFolders.map((f) =>
+          f === oldName ? newName : f,
+        ),
+      };
+    }
+    if (idx.uiState?.lastNewPatternFolder === oldName) {
+      idx.uiState = { ...idx.uiState, lastNewPatternFolder: newName };
+    }
+    store.setIndex(idx);
+  } catch (err) {
+    refreshRail();
+    if (err?.name === "QuotaExceededError") {
+      transport.setStatus(
+        `⚠ storage full — folder rename stopped after ${rewrittenRecords} record(s)`,
+      );
+    } else {
+      transport.setStatus(`rename failed: ${err?.message ?? err}`);
+    }
+    return;
+  }
+  refreshRail();
+  transport.setStatus(`renamed folder "${oldName}" → "${newName}"`);
+}
+
+function removeFolderEntry(folderName) {
+  const idx = store.getIndex();
+  idx.folders = (idx.folders ?? []).filter((f) => f !== folderName);
+  if (idx.uiState?.collapsedFolders) {
+    idx.uiState = {
+      ...idx.uiState,
+      collapsedFolders: idx.uiState.collapsedFolders.filter(
+        (f) => f !== folderName,
+      ),
+    };
+  }
+  if (idx.uiState?.lastNewPatternFolder === folderName) {
+    idx.uiState = { ...idx.uiState, lastNewPatternFolder: null };
+  }
+  store.setIndex(idx);
+}
+
+async function deleteFolderHandler(folderName) {
+  const grouped = groupUserPatternsByFolder(store);
+  const inFolder = grouped.folders[folderName] ?? [];
+  if (inFolder.length === 0) {
+    const ok = await confirm({
+      title: "Delete folder?",
+      message: `Delete folder "${folderName}"?`,
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    removeFolderEntry(folderName);
+    refreshRail();
+    transport.setStatus(`deleted folder "${folderName}"`);
+    return;
+  }
+  const choice = await choiceModal({
+    title: `Delete folder "${folderName}"?`,
+    message: `This folder contains ${inFolder.length} patterns.`,
+    choices: [
+      {
+        value: "unfile",
+        label: `Move ${inFolder.length} patterns to Unfiled`,
+      },
+      {
+        value: "delete",
+        label: `Delete folder and all ${inFolder.length} patterns`,
+        danger: true,
+      },
+    ],
+  });
+  if (!choice) return;
+  if (choice === "unfile") {
+    for (const name of inFolder) {
+      const rec = store.get(name);
+      if (rec) {
+        const next = { ...rec };
+        delete next.folder;
+        store.set(name, next);
+      }
+    }
+  } else {
+    for (const name of inFolder) {
+      store.delete(name);
+    }
+    const idx = store.getIndex();
+    idx.userPatterns = (idx.userPatterns ?? []).filter(
+      (n) => !inFolder.includes(n),
+    );
+    if (inFolder.includes(currentName)) {
+      const fallback = patternNames[0];
+      setCurrentName(fallback);
+      editor.setCode(patterns[fallback]);
+      idx.lastOpen = fallback;
+    }
+    store.setIndex(idx);
+  }
+  removeFolderEntry(folderName);
+  refreshRail();
+  transport.setStatus(
+    choice === "unfile"
+      ? `moved ${inFolder.length} patterns to Unfiled, deleted folder "${folderName}"`
+      : `deleted folder "${folderName}" and ${inFolder.length} patterns`,
+  );
+}
+
+async function moveMany(names, target /* string | null | "__new__" */) {
+  if (target === "__new__") {
+    const created = await promptCreateFolder();
+    if (created) await moveMany(names, created);
+    return;
+  }
+  flushToStore();
+  let movedUser = 0;
+  let skippedDemos = 0;
+  let quotaErrored = false;
+  for (const name of names) {
+    const rec = store.get(name);
+    if (!rec || !rec.isUserPattern) {
+      skippedDemos++;
+      continue;
+    }
+    const next = { ...rec };
+    if (target == null) delete next.folder;
+    else next.folder = target;
+    try {
+      store.set(name, next);
+      movedUser++;
+    } catch (err) {
+      if (err?.name === "QuotaExceededError") {
+        quotaErrored = true;
+        break;
+      }
+      console.warn(`[main] couldn't move "${name}":`, err);
+    }
+  }
+  // If we moved something into a folder that's currently collapsed, expand
+  // it so the user sees the result — otherwise the drop reads as "nothing
+  // happened." Drag with hover-to-expand handles the same case during the
+  // drag, but a quick drop (<500ms) bypasses the spring-load.
+  if (target && movedUser > 0) {
+    const idx = store.getIndex();
+    const collapsed = idx.uiState?.collapsedFolders ?? [];
+    if (collapsed.includes(target)) {
+      idx.uiState = {
+        ...(idx.uiState ?? {}),
+        collapsedFolders: collapsed.filter((f) => f !== target),
+      };
+      try {
+        store.setIndex(idx);
+      } catch {
+        /* index write failure is non-fatal here; folder just stays collapsed */
+      }
+    }
+  }
+  refreshRail();
+  if (quotaErrored) {
+    transport.setStatus(
+      `⚠ storage full — stopped after moving ${movedUser} pattern${movedUser === 1 ? "" : "s"}`,
+    );
+  } else if (skippedDemos > 0 && movedUser === 0) {
+    transport.setStatus(
+      `Skipped ${skippedDemos} Demo${skippedDemos > 1 ? "s" : ""} — duplicate to customize`,
+    );
+  } else if (movedUser > 0) {
+    const folderLabel = target ?? "Unfiled";
+    const suffix = skippedDemos > 0
+      ? ` (skipped ${skippedDemos} Demo${skippedDemos > 1 ? "s" : ""})`
+      : "";
+    transport.setStatus(
+      `Moved ${movedUser} pattern${movedUser > 1 ? "s" : ""} to ${folderLabel}${suffix}`,
+    );
+  }
+}
+
+async function deleteMany(names) {
+  const userNames = names.filter((n) => store.get(n)?.isUserPattern);
+  if (userNames.length === 0) {
+    transport.setStatus("Nothing to delete — Demos can't be removed");
+    return;
+  }
+  const ok = await confirm({
+    title: `Delete ${userNames.length} patterns?`,
+    message: "This can’t be undone.",
+    confirmLabel: "Delete",
+    destructive: true,
+  });
+  if (!ok) return;
+  // store.delete swallows errors internally, so we don't need a try/catch
+  // around the loop. The index write below is the only failable step.
+  for (const name of userNames) {
+    store.delete(name);
+  }
+  try {
+    const idx = store.getIndex();
+    idx.userPatterns = (idx.userPatterns ?? []).filter(
+      (n) => !userNames.includes(n),
+    );
+    if (userNames.includes(currentName)) {
+      const fallback = patternNames[0];
+      setCurrentName(fallback);
+      editor.setCode(patterns[fallback]);
+      idx.lastOpen = fallback;
+    }
+    store.setIndex(idx);
+  } catch (err) {
+    refreshRail();
+    if (err?.name === "QuotaExceededError") {
+      transport.setStatus(
+        "⚠ storage full — records deleted but index may be stale; reload to recover",
+      );
+    } else {
+      transport.setStatus(`delete failed: ${err?.message ?? err}`);
+    }
+    return;
+  }
+  refreshRail();
+  transport.setStatus(
+    `Deleted ${userNames.length} pattern${userNames.length > 1 ? "s" : ""}`,
+  );
+}
+
+function renamePatternHandler(oldName, newName) {
+  if (oldName === newName) return;
+  flushToStore();
+  try {
+    store.renamePatternKey(oldName, newName);
+    const idx = store.getIndex();
+    idx.userPatterns = (idx.userPatterns ?? []).map((n) =>
+      n === oldName ? newName : n,
+    );
+    if (idx.lastOpen === oldName) idx.lastOpen = newName;
+    store.setIndex(idx);
+  } catch (err) {
+    refreshRail();
+    if (err?.name === "QuotaExceededError") {
+      transport.setStatus(
+        "⚠ storage full — couldn't rename, original record preserved",
+      );
+    } else {
+      transport.setStatus(`rename failed: ${err?.message ?? err}`);
+    }
+    return;
+  }
+  if (currentName === oldName) setCurrentName(newName);
+  refreshRail();
+  transport.setStatus(`renamed "${oldName}" → "${newName}"`);
+}
+
 const leftRail = mountLeftRail({
   container: leftRailContainer,
   patterns,
-  userPatterns: getUserPatternNames(store),
+  folders: indexAtBoot.folders ?? [],
+  groupedUserPatterns: groupedAtBoot,
+  collapsedFolders: collapsedFoldersAtBoot,
   dirtySet: computeDirtySet(patternNames, patterns, store),
   currentName: currentName,
   onSelect(name) {
@@ -382,8 +706,50 @@ const leftRail = mountLeftRail({
       transport,
       setCurrentName,
       flushToStore,
-      prompt,
-      isDev: import.meta.env.DEV,
+      formModal,
+      folders: store.getIndex().folders ?? [],
+      lastNewPatternFolder:
+        store.getIndex().uiState?.lastNewPatternFolder ?? null,
+      onLastNewPatternFolderChange(folder) {
+        const idx = store.getIndex();
+        idx.uiState = {
+          ...(idx.uiState ?? {}),
+          lastNewPatternFolder: folder,
+        };
+        store.setIndex(idx);
+      },
+    });
+  },
+  onCreateFolder() {
+    promptCreateFolder();
+  },
+  onDuplicate(sourceName, preselectedFolder) {
+    handleDuplicateClick({
+      sourceName,
+      preselectedFolder,
+      store,
+      patterns,
+      editor,
+      leftRail,
+      transport,
+      setCurrentName,
+      flushToStore,
+      formModal,
+      folders: store.getIndex().folders ?? [],
+    });
+  },
+  onBulkDuplicate(names) {
+    handleBulkDuplicateClick({
+      sourceNames: names,
+      store,
+      patterns,
+      editor,
+      leftRail,
+      transport,
+      setCurrentName,
+      flushToStore,
+      formModal,
+      folders: store.getIndex().folders ?? [],
     });
   },
   onImportMidi() {
@@ -397,14 +763,13 @@ const leftRail = mountLeftRail({
       evalFeedback?.resetRuntimeErrors();
       editor.setCode(patterns[name]);
     }
-    leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
+    refreshRail();
     transport.setStatus(`reverted "${name}" to original`);
   },
   onDelete(name) {
     store.delete(name);
     const idx = store.getIndex();
     idx.userPatterns = idx.userPatterns.filter((n) => n !== name);
-    leftRail.removeUserPattern(name);
     if (currentName === name) {
       const fallback = patternNames[0];
       setCurrentName(fallback);
@@ -412,7 +777,29 @@ const leftRail = mountLeftRail({
       idx.lastOpen = fallback;
     }
     store.setIndex(idx);
+    refreshRail();
     transport.setStatus(`deleted "${name}"`);
+  },
+  onCollapseChange(folderKey, isCol) {
+    persistCollapse(folderKey, isCol);
+  },
+  onRenameFolder(oldName, newName) {
+    renameFolderHandler(oldName, newName);
+  },
+  onDeleteFolder(name) {
+    deleteFolderHandler(name);
+  },
+  onMoveTo(names, target) {
+    moveMany(names, target);
+  },
+  onBulkMove(names, target) {
+    moveMany(names, target);
+  },
+  onBulkDelete(names) {
+    deleteMany(names);
+  },
+  onRenamePattern(oldName, newName) {
+    renamePatternHandler(oldName, newName);
   },
 });
 
@@ -617,6 +1004,7 @@ const {
   flushToStore,
   handleNewPatternClick,
   focusEditorLocation,
+  refreshRail,
   getEvalFeedback: () => evalFeedback,
   strudelDocs,
   soundMap,
@@ -831,8 +1219,17 @@ if (import.meta.env.DEV) {
     }
     const { path } = await res.json();
     setCurrentName(name);
-    // Disk is now canonical — clear the working copy from store.
+    // Disk is now canonical — promote to Demo: drop the store record, and
+    // drop the user-pattern tracking too (otherwise the rail keeps a ghost
+    // entry in idx.userPatterns after HMR reloads). The pattern will
+    // re-appear as a Demo via import.meta.glob.
     store.delete(name);
+    const idx = store.getIndex();
+    if (idx.userPatterns?.includes(name)) {
+      idx.userPatterns = idx.userPatterns.filter((n) => n !== name);
+      store.setIndex(idx);
+    }
+    leftRail.removeUserPattern(name);
     leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
     status.textContent = `saved → ${path}`;
     // Vite HMR will pick up the new file and re-fire the glob below.
@@ -949,14 +1346,25 @@ bootPromise.then(() => {
   history.replaceState(null, "", clean.pathname + clean.search + clean.hash);
   if (action === "new") {
     handleNewPatternClick({
-      getEditorCode: () => editor.code ?? "",
-      getCurrentName: () => currentName,
-      setCurrentName,
-      patterns,
-      patternNames,
-      leftRail,
       store,
+      patterns,
       editor,
+      leftRail,
+      transport,
+      setCurrentName,
+      flushToStore,
+      formModal,
+      folders: store.getIndex().folders ?? [],
+      lastNewPatternFolder:
+        store.getIndex().uiState?.lastNewPatternFolder ?? null,
+      onLastNewPatternFolderChange(folder) {
+        const idx = store.getIndex();
+        idx.uiState = {
+          ...(idx.uiState ?? {}),
+          lastNewPatternFolder: folder,
+        };
+        store.setIndex(idx);
+      },
     });
   } else if (action === "export") {
     exportBtn?.click();

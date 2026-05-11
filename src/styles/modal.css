@@ -88,6 +88,65 @@
   border-color: var(--accent);
 }
 
+/* Validation-failed state for formModal() inputs and selects. Mirrors the
+   .modal__error red so the eye lands on the bad field, not the message. */
+.modal__input--error,
+.modal__input--error:focus {
+  border-color: var(--rec);
+}
+
+/* Multi-field form variant — wider so labels + values breathe a bit more
+   than the single-input prompt(). */
+.modal--form {
+  min-width: 400px;
+}
+
+/* Each field row: label sits above its input + error message. Tight gap
+   so the visual unit stays compact; the parent .modal flex-gap separates
+   adjacent fields. */
+.modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.modal__label {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-mut);
+  font-weight: 500;
+}
+
+/* Match .modal__input's surface, border, and radius so text inputs and
+   selects feel like one control family. Keep the system font for selects
+   (native dropdowns look odd in mono) and reserve space on the right for
+   the disclosure caret. */
+.modal__select {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding-right: var(--space-5);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-mut) 50%),
+    linear-gradient(135deg, var(--text-mut) 50%, transparent 50%);
+  background-position:
+    right var(--space-3) center,
+    right calc(var(--space-3) - 4px) center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+/* Divider option preceding a "__new__" entry in a select. Native <option>
+   styling is heavily restricted by the platform, so we lean on the
+   em-dash text content; this rule just removes the focus background and
+   greys it out to read as a separator rather than a choice. */
+.modal__select-divider {
+  color: var(--text-dim);
+  background: var(--surface-2);
+  text-align: center;
+}
+
 .modal__error {
   min-height: var(--lh-xs);
   font-size: var(--text-xs);
@@ -107,6 +166,20 @@
   margin-top: var(--space-1);
 }
 
+/* Stacked variant — used by choiceModal() where each option is a
+   first-class action ("pick one of N") rather than a yes/no terminator.
+   Vertical layout makes the choices scannable; full-width buttons keep
+   the click target generous. */
+.modal__actions--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.modal__choice {
+  text-align: center;
+}
+
 .modal__confirm {
   --btn-bg: var(--accent);
   --btn-fg: var(--text);
@@ -122,14 +195,17 @@
 }
 
 /* Destructive variant of the confirm button (used by confirm() when the
-   action is irreversible — e.g. replacing the editor buffer). Tints the
-   button with the rec/error color so the eye registers the consequence
-   before clicking. */
-.modal__confirm.btn--destructive {
+   action is irreversible — e.g. replacing the editor buffer) and of
+   choice buttons (used by choiceModal() when a choice is destructive).
+   Tints the button with the rec/error color so the eye registers the
+   consequence before clicking. */
+.modal__confirm.btn--destructive,
+.modal__choice.btn--destructive {
   --btn-bg: var(--rec);
   --btn-bd: var(--rec);
 }
-.modal__confirm.btn--destructive:hover {
+.modal__confirm.btn--destructive:hover,
+.modal__choice.btn--destructive:hover {
   --btn-bg: oklch(0.7 0.22 25);
   --btn-bd: oklch(0.7 0.22 25);
 }

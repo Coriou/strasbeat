@@ -37,6 +37,8 @@ import {
   Waves,
   Check,
   FileMusic,
+  Folder,
+  FolderPlus,
   Headphones,
   Repeat,
 } from "lucide";
@@ -68,6 +70,8 @@ const ICONS = {
   x: X,
   check: Check,
   "file-music": FileMusic,
+  folder: Folder,
+  "folder-plus": FolderPlus,
   headphones: Headphones,
   repeat: Repeat,
 };

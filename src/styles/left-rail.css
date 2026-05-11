@@ -55,6 +55,29 @@
   height: 14px;
 }
 
+.left-rail__folder-plus {
+  width: 24px;
+  height: 24px;
+  color: var(--text-mut);
+  border-radius: var(--radius-sm);
+}
+.left-rail__folder-plus:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.left-rail__folder-plus:active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.left-rail__folder-plus:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.left-rail__folder-plus svg {
+  width: 14px;
+  height: 14px;
+}
+
 .left-rail__import {
   width: 24px;
   height: 24px;
@@ -180,6 +203,19 @@
   box-shadow: var(--shadow-low);
   font-weight: 600;
 }
+.left-rail__item.is-selected {
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 22%, transparent);
+  color: var(--text);
+}
+.left-rail__item.is-selected:hover {
+  background: color-mix(in oklch, var(--accent) 18%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+}
+.left-rail__item.is-selected.is-active {
+  background: color-mix(in oklch, var(--accent) 22%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
 .left-rail__item-accent {
   width: 1px;
   height: 14px;
@@ -209,6 +245,30 @@
 .left-rail__item-match {
   color: var(--accent-hi);
   font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--accent) 50%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+/* Search-mode folder context, appended to the name span as "· Folder". */
+.left-rail__item-folder-suffix {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: var(--text-xs);
+  margin-left: var(--space-1);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* "+N more — refine your search…" footer beneath the result list. */
+.left-rail__more-row {
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-mut);
+  font-size: var(--text-xs);
+  font-style: italic;
+  pointer-events: none;
+  user-select: none;
 }
 
 .left-rail__empty {
@@ -300,6 +360,7 @@
 /* ─── Collapsed state ──────────────────────────────────────────────────── */
 .left-rail[data-collapsed="true"] .left-rail__title,
 .left-rail[data-collapsed="true"] .left-rail__plus,
+.left-rail[data-collapsed="true"] .left-rail__folder-plus,
 .left-rail[data-collapsed="true"] .left-rail__import {
   display: none;
 }
@@ -320,12 +381,19 @@
   pointer-events: none;
 }
 
-/* ─── User patterns divider ───────────────────────────────────────────── */
-.left-rail__divider {
+/* ─── Folder sections ─────────────────────────────────────────────────── */
+.left-rail__folder-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.left-rail__folder-header {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-4) var(--space-2) var(--space-2);
+  padding: var(--space-2) var(--space-2);
+  margin: 0 var(--space-1);
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
@@ -333,19 +401,176 @@
   text-transform: uppercase;
   color: var(--text-dim);
   user-select: none;
+  cursor: pointer;
+  position: relative;
+  border-radius: var(--radius-sm);
+  transition:
+    color var(--t-hover),
+    background var(--t-hover);
 }
-.left-rail__divider::after {
-  content: "";
-  flex: 1 1 auto;
-  height: 1px;
-  background: var(--border-soft);
+.left-rail__folder-header:hover {
+  color: var(--text-mut);
+  background: color-mix(in oklch, var(--surface-2) 60%, transparent);
+}
+.left-rail__folder-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Subtle vertical rhythm between folder sections — not a hard divider,
+   just a breath. */
+.left-rail__folder-section + .left-rail__folder-section {
+  margin-top: var(--space-2);
+}
+
+.left-rail__folder-chevron {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-mut);
+  transition: transform var(--t-hover);
+}
+.left-rail__folder-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+.left-rail__folder-header[data-collapsed="true"] .left-rail__folder-chevron {
+  transform: rotate(-90deg);
+}
+
+.left-rail__folder-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.left-rail__folder-count {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.left-rail__folder-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--t-hover),
+    color var(--t-hover),
+    background var(--t-hover);
+}
+.left-rail__folder-header:hover .left-rail__folder-more,
+.left-rail__folder-header:focus-within .left-rail__folder-more {
+  opacity: 1;
+  pointer-events: auto;
+}
+.left-rail__folder-more:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.left-rail__folder-more:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.left-rail__folder-more svg {
+  width: 12px;
+  height: 12px;
+}
+
+.left-rail__folder-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.left-rail__empty-folder-hint {
+  margin: 0 var(--space-1) var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-6);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-dim);
+  pointer-events: none;
+  border: 1px dashed var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  letter-spacing: 0.01em;
+}
+
+/* ─── Inline rename ───────────────────────────────────────────────────── */
+/* Replaces the .left-rail__item-name or .left-rail__folder-name span while
+   editing. Lives inside the same grid/flex parent so the input stretches
+   to fill the available width. */
+.left-rail__inline-edit {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-weight: 500;
+  background: color-mix(in oklch, var(--surface-3) 80%, var(--accent));
+  color: var(--text);
+  border: 1px solid color-mix(in oklch, var(--accent) 70%, var(--border));
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  outline: none;
+  caret-color: var(--accent-hi);
+  transition:
+    border-color var(--t-hover),
+    box-shadow var(--t-hover),
+    background var(--t-hover);
+}
+.left-rail__inline-edit:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 25%, transparent);
+}
+.left-rail__inline-edit--error {
+  border-color: var(--rec);
+}
+.left-rail__inline-edit--error:focus {
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--rec) 25%, transparent);
+}
+
+.left-rail__inline-error {
+  color: var(--rec);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  padding: 2px var(--space-3);
+  /* When the input lives inside a grid row (.left-rail__item is a 3-col
+     grid), span the error across the whole row so it sits beneath the
+     input instead of pushing other cells around. */
+  grid-column: 1 / -1;
+  /* In flex contexts (.left-rail__folder-header), wrap to a new line so
+     the error doesn't sit next to the input. */
+  flex-basis: 100%;
+}
+
+/* Allow the error sibling to wrap below the input during inline-edit. */
+.left-rail__folder-header:has(.left-rail__inline-edit) {
+  flex-wrap: wrap;
 }
 
 /* ─── Context menu ────────────────────────────────────────────────────── */
 .left-rail__context-menu {
   position: fixed;
   z-index: 1000;
-  min-width: 160px;
+  min-width: 180px;
   padding: var(--space-1);
   background: var(--surface-2);
   border: 1px solid var(--border-soft);
@@ -354,7 +579,9 @@
 }
 
 .left-rail__context-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   width: 100%;
   padding: var(--space-1) var(--space-2);
   background: none;
@@ -375,6 +602,72 @@
 }
 .left-rail__context-item--danger:hover {
   background: color-mix(in oklch, var(--rec) 15%, transparent);
+}
+
+/* Label sits flush-left; kbd pushes to the right edge. */
+.left-rail__context-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.left-rail__context-kbd {
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.left-rail__context-item:hover .left-rail__context-kbd {
+  color: var(--text-mut);
+}
+.left-rail__context-item--danger .left-rail__context-kbd {
+  color: color-mix(in oklch, var(--rec) 55%, var(--text-dim));
+}
+
+.left-rail__context-item.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Items that own a submenu — render the ▸ marker and host the flyout. */
+.left-rail__context-item--has-submenu {
+  position: relative;
+}
+.left-rail__context-item--has-submenu::after {
+  content: "▸";
+  margin-left: auto;
+  padding-left: var(--space-2);
+  color: var(--text-mut);
+  font-size: var(--text-xs);
+}
+
+.left-rail__context-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: calc(var(--space-1) * -1);
+  min-width: 160px;
+  padding: var(--space-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  z-index: 1001;
+}
+.left-rail__context-item--has-submenu:hover .left-rail__context-submenu,
+.left-rail__context-item--has-submenu:focus-within .left-rail__context-submenu {
+  display: block;
+}
+
+/* Thin divider between groups of items. */
+.left-rail__context-separator {
+  height: 1px;
+  background: var(--border-soft);
+  margin: var(--space-1) 0;
 }
 
 /* ─── Search clear button ─────────────────────────────────────────────── */
@@ -411,6 +704,72 @@
   height: 12px;
 }
 
+/* ─── Drag-and-drop ──────────────────────────────────────────────────── */
+/* Spec: design/work/24-pattern-folders.md §"Drag-and-drop (primary)".
+   Accept and reject states share geometry so the eye only registers the
+   semantic colour change, not a layout shift. Solid border + tinted fill,
+   not a dashed outline — quieter, more deliberate. */
+
+.left-rail__folder-section.is-drop-target,
+.left-rail__folder-section.is-drop-rejected {
+  border-radius: var(--radius-md);
+  transition:
+    background var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+.left-rail__folder-section.is-drop-target {
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 55%, transparent);
+}
+
+.left-rail__folder-section.is-drop-target .left-rail__folder-header {
+  color: var(--text);
+}
+
+.left-rail__folder-section.is-drop-rejected {
+  background: color-mix(in oklch, var(--rec) 8%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--rec) 50%, transparent);
+}
+
+/* The drag ghost is the element snapshotted by setDragImage. It must be
+   in the DOM during dragstart but invisible to the user; we park it
+   off-screen with position:absolute and never bring it back into view. */
+.left-rail__drag-ghost {
+  position: absolute;
+  top: -1000px;
+  left: -1000px;
+  padding: var(--space-1) var(--space-3);
+  background: color-mix(in oklch, var(--surface-2) 92%, var(--accent));
+  border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--border));
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: 500;
+  color: var(--text);
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+  box-shadow: var(--shadow-pop);
+  letter-spacing: 0.01em;
+}
+
+/* Body cursor while a rail-originated drag is in flight. The data attribute
+   is set on dragstart and removed on dragend. */
+body[data-rail-dragging="true"] {
+  cursor: grabbing;
+}
+
+/* Draggable row affordance — grab while idle, grabbing while pressed. */
+.left-rail__item[draggable="true"] {
+  cursor: grab;
+}
+.left-rail__item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
 /* ─── Reduced motion ──────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .left-rail__item,
@@ -419,12 +778,18 @@
   .left-rail__context-item,
   .left-rail__search-clear,
   .left-rail__plus,
+  .left-rail__folder-plus,
   .left-rail__import,
   .left-rail__more-btn,
   .left-rail__collapse-btn,
   .left-rail__dirty-dot,
   .left-rail__search,
-  .left-rail__list {
+  .left-rail__list,
+  .left-rail__folder-header,
+  .left-rail__folder-chevron,
+  .left-rail__folder-more,
+  .left-rail__folder-section,
+  .left-rail__inline-edit {
     transition: none;
   }
 }

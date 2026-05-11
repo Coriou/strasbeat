@@ -13,12 +13,19 @@ function readIndex() {
     const raw = localStorage.getItem(INDEX_KEY);
     if (!raw) return { lastOpen: null, userPatterns: [] };
     const parsed = JSON.parse(raw);
-    return {
+    const index = {
       lastOpen: parsed.lastOpen ?? null,
       userPatterns: Array.isArray(parsed.userPatterns)
         ? parsed.userPatterns
         : [],
     };
+    if (Array.isArray(parsed.folders)) {
+      index.folders = parsed.folders;
+    }
+    if (parsed.uiState && typeof parsed.uiState === "object") {
+      index.uiState = parsed.uiState;
+    }
+    return index;
   } catch {
     return { lastOpen: null, userPatterns: [] };
   }
@@ -40,12 +47,14 @@ function writeIndex(index) {
  * Create a localStorage-backed PatternStore.
  *
  * Interface:
- *   get(name)          → PatternRecord | null
- *   set(name, record)  → void
- *   delete(name)       → void
- *   keys()             → string[]
- *   getIndex()         → StoreIndex
- *   setIndex(index)    → void
+ *   get(name)                          → PatternRecord | null
+ *   set(name, record)                  → void
+ *   delete(name)                       → void
+ *   keys()                             → string[]
+ *   getIndex()                         → StoreIndex
+ *   setIndex(index)                    → void
+ *   renamePatternKey(oldName, newName) → void
+ *   renameFolderInRecords(oldName, newName) → number (count of records rewritten)
  */
 export function createLocalStore() {
   return {
@@ -101,6 +110,41 @@ export function createLocalStore() {
 
     setIndex(index) {
       writeIndex(index);
+    },
+
+    // Move a pattern record from one localStorage key to another. No-op when
+    // the source has no record. Overwrites the destination if one exists
+    // (callers are responsible for uniqueness checks). Raw-string copy
+    // preserves the record byte-for-byte without a JSON round-trip.
+    renamePatternKey(oldName, newName) {
+      const raw = localStorage.getItem(PREFIX + oldName);
+      if (raw == null) return;
+      try {
+        localStorage.setItem(PREFIX + newName, raw);
+        localStorage.removeItem(PREFIX + oldName);
+      } catch (err) {
+        if (err?.name === "QuotaExceededError") {
+          console.warn("[strasbeat/store] quota exceeded on rename");
+          throw err;
+        }
+        console.warn("[strasbeat/store] renamePatternKey failed:", err);
+      }
+    },
+
+    // Rewrite every user-pattern record whose folder field matches oldName,
+    // setting it to newName. Returns the count of records rewritten. Demo
+    // working copies (isUserPattern === false) and records with no folder
+    // field are ignored.
+    renameFolderInRecords(oldName, newName) {
+      let n = 0;
+      for (const name of this.keys()) {
+        const rec = this.get(name);
+        if (rec && rec.isUserPattern && rec.folder === oldName) {
+          this.set(name, { ...rec, folder: newName });
+          n++;
+        }
+      }
+      return n;
     },
   };
 }

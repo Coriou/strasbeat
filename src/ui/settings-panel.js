@@ -14,6 +14,7 @@
 //   SAMPLES     — import sample banks via URL; manage / delete banks.
 //   SCRIPT      — setup script textarea; optional OSC output config when
 //                 @strudel/osc is enabled.
+//   LIBRARY     — export/import the user's pattern library as JSON.
 //   ABOUT       — strasbeat + Strudel version, sound count, links.
 //
 // Public surface:
@@ -32,6 +33,8 @@
 //     strudelVersion,    // string
 //     onReloadRequired,  // () => void — host shows "reload to apply" status
 //     confirm,           // (msg: string) => Promise<boolean> | boolean
+//     onExportLibrary,   // () => void — download library as JSON
+//     onImportLibrary,   // (file: File) => void — import library from JSON
 //   });
 //   rightRail.registerPanel(panel);
 
@@ -140,6 +143,8 @@ export function createSettingsPanel({
   onReloadRequired = () => {},
   confirm: confirmFn = window.confirm,
   onKeymapChange = () => {},
+  onExportLibrary = () => {},
+  onImportLibrary = () => {},
 }) {
   // ─── State ────────────────────────────────────────────────────────────
   let settings = { ...getSettings() };
@@ -197,6 +202,7 @@ export function createSettingsPanel({
     root.appendChild(buildPackagesSection());
     root.appendChild(buildSamplesSection());
     root.appendChild(buildScriptSection());
+    root.appendChild(buildLibrarySection());
     root.appendChild(buildAboutSection());
 
     mounted = true;
@@ -727,6 +733,54 @@ export function createSettingsPanel({
     wrap.appendChild(testBtn);
 
     return wrap;
+  }
+
+  // ─── Library section ──────────────────────────────────────────────────
+
+  function buildLibrarySection() {
+    const section = buildSection("Library");
+    section.body.appendChild(
+      el(
+        "div",
+        "settings-panel__section-desc",
+        "Download all your patterns (and modified Demos) as a JSON file. " +
+          "Re-import it to restore on another browser.",
+      ),
+    );
+
+    const actions = el("div", "settings-panel__btn-row");
+
+    const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "settings-panel__btn";
+    exportBtn.textContent = "Export library";
+    exportBtn.addEventListener("click", () => onExportLibrary());
+
+    const importBtn = document.createElement("button");
+    importBtn.type = "button";
+    importBtn.className = "settings-panel__btn";
+    importBtn.textContent = "Import library…";
+
+    // Hidden file input — clicked programmatically from "Import library…".
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".json,application/json";
+    fileInput.style.display = "none";
+
+    importBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => {
+      const f = e.target.files?.[0];
+      if (f) onImportLibrary(f);
+      // Reset so the same filename can be picked again next time.
+      fileInput.value = "";
+    });
+
+    actions.appendChild(exportBtn);
+    actions.appendChild(importBtn);
+    actions.appendChild(fileInput);
+    section.body.appendChild(actions);
+
+    return section.root;
   }
 
   // ─── About section ────────────────────────────────────────────────────
