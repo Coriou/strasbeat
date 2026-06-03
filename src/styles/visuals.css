@@ -1,0 +1,63 @@
+/* Visuals mode — Hydra's #hydra-canvas is full-viewport, fixed, and
+ * pointer-events:none (created by getDrawContext, see
+ * strudel-source/packages/draw/draw.mjs). It cannot render into the
+ * height-constrained #roll canvas, so in Visuals mode we clip the
+ * full-viewport canvas down to the .roll-pane rect (Option A). main.js sets
+ * the inset via the --hydra-clip custom properties on the canvas element. */
+
+#hydra-canvas {
+  /* Hidden by default: only painted-through when Visuals mode is active or
+   * full-window mode (Phase 1.5) is on. Prevents painting over the editor. */
+  display: none;
+}
+
+#hydra-canvas.is-visuals-clipped {
+  display: block;
+  clip-path: inset(
+    var(--hydra-clip-top, 0px)
+    var(--hydra-clip-right, 0px)
+    var(--hydra-clip-bottom, 0px)
+    var(--hydra-clip-left, 0px)
+  );
+}
+
+/* Full-window mode (Phase 1.5): un-clipped, full-viewport behind the editor. */
+#hydra-canvas.is-visuals-fullwindow {
+  display: block;
+  clip-path: none;
+}
+
+/* Editor transparency in full-window mode. StrudelMirror sets
+ * editorRoot.style.backgroundColor = 'var(--background)' inline in its
+ * constructor (bgFill:true default). main.js overrides that inline style
+ * directly when toggling full-window on/off — no !important needed. The
+ * .cm-editor background is already 'transparent' (StrudelMirror always does
+ * that). The only CSS-side surface that still needs overriding is .cm-gutters
+ * (editor.css sets background:var(--surface-0) there). We target it via a
+ * class on #editor (the root element) so the rule is scoped, reverts cleanly
+ * when the class is removed, and needs no !important. */
+#editor.is-visuals-fullwindow .cm-gutters {
+  background: transparent;
+}
+
+/* Legibility mechanism — per-line translucent plates so editor text sits on
+ * its own translucent strip over the visuals. NOT a global scrim. The
+ * canvas is already pointer-events:none (from getDrawContext), so it never
+ * steals clicks or selection. Final alpha/color/token tuning is deferred to
+ * a /polish pass (SYSTEM.md §5). In the Phase 1 default the visuals are
+ * confined to the bottom panel, so the plates barely matter yet; they become
+ * load-bearing in the full-window increment (Phase 1.5). Introducing the
+ * mechanism now makes 1.5 a CSS flip, not a new feature.
+ *
+ * Token layering: --lineBackground is derived from --surface-0 (the page /
+ * editor background per SYSTEM.md §5) via color-mix, an idiom already used
+ * across the repo (e.g. arrange-bar.css) — so it tracks --surface-0 if that
+ * token ever shifts rather than duplicating its literal value. */
+:root {
+  /* The 60% is the working-default alpha — tune in /polish. */
+  --lineBackground: color-mix(in oklch, var(--surface-0) 60%, transparent);
+}
+
+.cm-line > * {
+  background: var(--lineBackground);
+}

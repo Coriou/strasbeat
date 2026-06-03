@@ -7602,6 +7602,18 @@
     "params": [],
     "examples": []
   },
+  "markEvalAppliedFor": {
+    "signature": "markEvalAppliedFor()",
+    "doc": "Called by eval-feedback once the evaluate resolves successfully. Snapshots the buffer text that produced the current registry so the UI can detect post-eval edits and downgrade to a parser preview.",
+    "params": [],
+    "examples": []
+  },
+  "endEvaluate": {
+    "signature": "endEvaluate()",
+    "doc": "Called by eval-feedback after _editorEvaluate resolves (or throws). This is the only safe point to reconcile solo state against the fresh registry — during eval, the registry can briefly be empty or mid-build and would misleadingly fail the validity check.",
+    "params": [],
+    "examples": []
+  },
   "setSolo": {
     "signature": "setSolo()",
     "doc": "Toggle the solo for a given arrange/section coordinate. If the same coordinate is already soloed, clears the solo. Any other coordinate replaces the current solo.  Callers are expected to trigger a re-evaluate after this (so the wrapper fires again and substitutes the soloed pattern into the scheduler). The UI does `setSolo(...); editor.evaluate();`.",
@@ -7610,9 +7622,43 @@
   },
   "validateSolo": {
     "signature": "validateSolo()",
-    "doc": "Check whether the current solo coordinate still points at a valid section in the latest registry. If the user edited the arrange out of existence (or removed the section), the solo is silently cleared and the UI goes back to normal. Called by the arrange-bar after each registry rebuild.",
+    "doc": "Check whether the current solo coordinate still points at a valid section in the latest registry. If the user edited the arrange out of existence (or removed the section), the solo is silently cleared and the UI goes back to normal.  Only runs when NOT mid-eval — during an evaluate the registry can be transiently empty (reset at start, populates as wrappers fire), and a naive check would clear solo mid-flight. eval-feedback calls this via endEvaluate() at the right moment.",
     "params": [],
     "examples": []
+  },
+  "initHydra": {
+    "signature": "initHydra(options: object)",
+    "doc": "Initialize Hydra visuals into the full-viewport `#hydra-canvas`. Runs fully offline (bundled hydra-synth — never the unpkg CDN). Returns the hydra instance (preserves the upstream/#1784 contract). Re-init with changed options removes the old `#hydra-canvas` first (upstream behavior).  Hydra source chains use Hydra's own functions (osc, noise, …), NOT Strudel mini-notation. Any string passed to a strasbeat helper must be single-quoted (becomes load-bearing for shader('…') in Phase 2). See CLAUDE.md.",
+    "params": [
+      {
+        "name": "options",
+        "type": "object",
+        "doc": "detectAudio (default false — passed to the Hydra constructor to enable mic-reactive sources), contextType (default 'webgl'), pixelRatio (default 1), pixelated (default true), feedStrudel (deferred — only coherent with the full-window increment)."
+      }
+    ],
+    "examples": [
+      "await initHydra()\nosc(10, 0.1, 1.2).color(0.9, 0.3, 0.6).out()"
+    ]
+  },
+  "clearHydra": {
+    "signature": "clearHydra()",
+    "doc": "Stop Hydra, remove its canvas, and flip the Visuals mode unavailable. Called from patterns AND from the stop path / HMR dispose (Task 3).",
+    "params": [],
+    "examples": []
+  },
+  "H": {
+    "signature": "H(p: Pattern)",
+    "doc": "Guarded value-sampler for driving a Hydra param from a pattern signal. Returns a function that queries the pattern at the current time and yields its active value. Upstream's H() indexes `[0].value` on an empty array and throws the instant the pattern has no active hap — which is most of the time for a sparse pattern, and a throw here crashes the whole render loop. This guard returns the last non-empty value seen (or 0 if none yet). Empty haps are normal, NOT an error, so this does not warn — it just never throws.  Use single quotes when calling H() from a pattern file — Strudel's transpiler rewrites double-quoted strings to mini-notation. See CLAUDE.md.",
+    "params": [
+      {
+        "name": "p",
+        "type": "Pattern",
+        "doc": "any Strudel pattern/signal"
+      }
+    ],
+    "examples": [
+      "osc(10).rotate(H(\"0 0.5 1\"))"
+    ]
   },
   "progression": {
     "signature": "progression(chords: string, options: object)",
@@ -7634,6 +7680,20 @@
       "progression('ii V I', { key: 'C' })",
       "progression('C G Am F', { style: 'folk-strum', bass: true })",
       "progression('Am F C G@2')"
+    ]
+  },
+  "shader": {
+    "signature": "shader(src: string)",
+    "doc": "Compile and render a drop-in fragment shader, with named uniforms driven by the playing pattern's events. Built-in uTime / uResolution are always provided. Auto-uniforms derive from the pattern automatically — type these verbatim into your GLSL:   - drum lanes bd / sd / hh → uKick / uSnare / uHat   - every active sound `name` → u_<name>, with each non-alphanumeric char     replaced by _ and a leading _ so digit-leading names stay legal GLSL     (gm_pad_warm → u_gm_pad_warm, 909-clap → u_909_clap)   - any note/n hap → uKeyVelocity Override/extend any of these with .uniform({ dest, gain }).  SINGLE-QUOTE RULE: the shader source MUST be single-quoted. Strudel's transpiler rewrites every DOUBLE-quoted string literal into a mini(...) call, which would turn your GLSL into a Pattern and break the node. Drum/ note patterns in the same file still use double quotes (correct for s(\"…\")). See CLAUDE.md \"the single-quote rule\".",
+    "params": [
+      {
+        "name": "src",
+        "type": "string",
+        "doc": "single-quoted GLSL fragment shader source"
+      }
+    ],
+    "examples": [
+      "await shader('precision mediump float; uniform float uKick; void main(){ gl_FragColor = vec4(uKick,0.,0.,1.); }')"
     ]
   }
 }

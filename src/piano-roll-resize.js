@@ -11,7 +11,11 @@ export function mountPianoRollResize({
   rollToggleBtn,
   rollDivider,
   resizeCanvas,
+  onGeometryChange,
 }) {
+  const notifyGeometry = () => {
+    if (typeof onGeometryChange === "function") onGeometryChange();
+  };
   let rollCollapsed = localStorage.getItem(STORAGE_KEY) === "true";
   let rollExpandedPx = Number(localStorage.getItem(HEIGHT_KEY)) || 180;
   let lastToggleTime = 0;
@@ -39,6 +43,7 @@ export function mountPianoRollResize({
     }
     // Keep the canvas backing-store sized to its new visible area.
     requestAnimationFrame(resizeCanvas);
+    notifyGeometry();
   }
 
   // Drag the divider to resize the roll. Click on a collapsed divider
@@ -70,6 +75,7 @@ export function mountPianoRollResize({
     );
     rollExpandedPx = h;
     shellEl.style.setProperty("--roll-h", `${h}px`);
+    notifyGeometry();
   });
   function endRollDrag(e) {
     if (dragStartY == null) return;
@@ -82,6 +88,7 @@ export function mountPianoRollResize({
     document.removeEventListener("pointercancel", endRollDrag);
     localStorage.setItem(HEIGHT_KEY, String(rollExpandedPx));
     requestAnimationFrame(resizeCanvas);
+    notifyGeometry();
   }
   rollDivider.addEventListener("pointerup", endRollDrag);
   rollDivider.addEventListener("pointercancel", endRollDrag);

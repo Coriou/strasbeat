@@ -21,6 +21,7 @@ const MODES = [
   { id: "roll", label: "Roll" },
   { id: "scope", label: "Scope" },
   { id: "beats", label: "Beat grid" },
+  { id: "visuals", label: "Visuals" },
   { id: "custom", label: "Custom" },
 ];
 
@@ -104,6 +105,20 @@ export function createBottomPanelModes() {
     updateToggle();
   }
 
+  // Visuals availability is gated by the hydra wrapper: available iff
+  // initHydra() has succeeded, unavailable on clearHydra / teardown. Like
+  // beats, we do not auto-switch when it appears — the user opts in. We do
+  // switch back to roll if it disappears while it's the active view.
+  function setVisualsAvailable(available) {
+    if (available) {
+      modesAvailable.add("visuals");
+    } else {
+      modesAvailable.delete("visuals");
+      if (currentMode === "visuals") setMode("roll");
+    }
+    updateToggle();
+  }
+
   function mountToggle(container) {
     const bar = document.createElement("div");
     bar.className = "bottom-panel__bar";
@@ -177,6 +192,7 @@ export function createBottomPanelModes() {
     setCustomDraw,
     getCustomDraw,
     setBeatsAvailable,
+    setVisualsAvailable,
     mountToggle,
     getBarEl,
     setOnChange,

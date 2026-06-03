@@ -109,12 +109,6 @@ export const OPT_IN_PACKAGES = [
     load: () => import("@strudel/serial"),
   },
   {
-    id: "hydra",
-    label: "@strudel/hydra",
-    description: "Hydra shader visuals",
-    load: () => import("@strudel/hydra"),
-  },
-  {
     id: "vcsl",
     label: "VCSL",
     description: "Orchestral samples (CC0, ~60MB download)",

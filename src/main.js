@@ -8,6 +8,12 @@ import * as strudelMini from "@strudel/mini";
 import * as strudelTonal from "@strudel/tonal";
 import * as strudelWebaudio from "@strudel/webaudio";
 import * as strudelExt from "./strudel-ext/index.js";
+import {
+  clearShader,
+  setShaderErrorSink,
+  _getShaderNode,
+  _getDeriver,
+} from "./strudel-ext/shader.js";
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { toggleComment } from "@codemirror/commands";
@@ -144,6 +150,9 @@ resizeCanvas();
 new ResizeObserver(() => resizeCanvas()).observe(canvas);
 const drawCtx = canvas.getContext("2d");
 const drawTime = [-2, 2]; // seconds before / after now to render
+// Phase 2 shader uniforms: previous onDraw timestamp, used to derive the
+// per-frame dt the decay envelope needs. null until the first frame.
+let lastDrawTime = null;
 
 // Bottom panel mode switcher (Roll / Scope / Custom) — the toggle is a
 // floating pill in the top-right of the roll pane; scope taps superdough's
@@ -155,6 +164,53 @@ mountScopeControls({
   container: bottomModes.getBarEl(),
   scope,
   modes: bottomModes,
+});
+
+// ─── Visuals (Hydra) clip sync ────────────────────────────────────────────
+// The #hydra-canvas is full-viewport and fixed (created by getDrawContext in
+// the hydra-synth bundle). In Visuals mode we clip it to the .roll-pane
+// rect so it only paints through the bottom panel, not over the editor.
+// The clip is kept in sync via: availability callback (initHydra/clearHydra),
+// mode-change subscription, geometry-change callback from mountPianoRollResize,
+// and a debounced window-resize listener.
+const rollPaneEl = document.getElementById("roll-pane");
+function syncVisualsClip() {
+  const cv = document.getElementById("hydra-canvas");
+  if (!cv) return;
+  const active = bottomModes.getMode() === "visuals";
+  if (!active) {
+    cv.classList.remove("is-visuals-clipped");
+    return;
+  }
+  const rect = rollPaneEl?.getBoundingClientRect();
+  if (!rect || rect.height <= 1 || rect.width <= 1) {
+    cv.classList.remove("is-visuals-clipped"); // collapsed → hide
+    return;
+  }
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  cv.style.setProperty("--hydra-clip-top", `${rect.top}px`);
+  cv.style.setProperty("--hydra-clip-right", `${vw - rect.right}px`);
+  cv.style.setProperty("--hydra-clip-bottom", `${vh - rect.bottom}px`);
+  cv.style.setProperty("--hydra-clip-left", `${rect.left}px`);
+  cv.classList.add("is-visuals-clipped");
+}
+
+// Hydra → bottom-panel Visuals mode gating. The wrapper calls this on
+// init (true) / clearHydra (false).
+strudelExt.setVisualsAvailabilityCallback((available) => {
+  bottomModes.setVisualsAvailable(available);
+  syncVisualsClip();
+});
+
+// Re-sync clip when the user switches bottom-panel modes.
+bottomModes.setOnChange(() => syncVisualsClip());
+
+// Debounced window-resize re-sync (matches existing canvas-resize cadence).
+let visualsResizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(visualsResizeTimer);
+  visualsResizeTimer = setTimeout(syncVisualsClip, 200);
 });
 
 // ─── Editor ──────────────────────────────────────────────────────────────
@@ -216,9 +272,20 @@ const editor = new StrudelMirror({
   onEvalError: (err) => evalFeedback?.handleEvalError(err),
   onDraw: (haps, time) => {
     const mode = bottomModes.getMode();
+    // Phase 2: drive the shader node's uniforms from the active haps. dt comes
+    // from successive draw times. This runs every frame regardless of the
+    // bottom-panel mode — the shader paints its own full-window canvas, so the
+    // feed must precede the beats/visuals early-return below. Purely additive.
+    const shaderNode = _getShaderNode?.();
+    if (shaderNode?.hasProgram?.()) {
+      const _deriver = _getDeriver?.();
+      const dt = lastDrawTime == null ? 0.016 : Math.max(0, time - lastDrawTime);
+      lastDrawTime = time;
+      if (_deriver) shaderNode.setUniformMap(_deriver.frame(haps, time, dt));
+    }
     // Beat grid renders DOM over the canvas — no canvas paint to do, and
     // keeping the renderer running underneath would just waste cycles.
-    if (mode === "beats") return;
+    if (mode === "beats" || mode === "visuals") return;
     if (mode === "scope") {
       const dpr = window.devicePixelRatio || 1;
       scope.render(drawCtx, canvas.width / dpr, canvas.height / dpr);
@@ -237,6 +304,60 @@ const editor = new StrudelMirror({
   },
   prebake,
 });
+
+// ─── Phase 1.5 — full-window visuals behind the editor ───────────────────
+// A toggle (NOT in the share codec — spec §"Phase 1.5") that un-clips
+// #hydra-canvas to full-viewport and makes the editor transparent so visuals
+// show through. The per-line .cm-line>* plates (Task 3) keep code legible.
+// Persisted to localStorage only.
+//
+// Transparency mechanism (CSS + inline-style override):
+//   StrudelMirror constructor sets editorRoot.style.backgroundColor =
+//   'var(--background)' (bgFill:true). We override that same inline style
+//   directly to 'transparent' when full-window is ON, and restore it to
+//   'var(--background)' when OFF. No !important, no updateSettings (bgFill is
+//   constructor-only and not in the extensions map). The .cm-editor background
+//   is already 'transparent' (StrudelMirror always does that). The .cm-gutters
+//   background (editor.css: background:var(--surface-0)) is overridden by a
+//   scoped CSS rule in visuals.css targeting #editor.is-visuals-fullwindow
+//   .cm-gutters — class toggled on editorRoot here. Removing the class
+//   cleanly restores the opaque gutter.
+//
+// If no hydra canvas exists yet (e.g. full-window persisted ON before any
+// initHydra() call this session), the editor-transparency + shell class still
+// apply; the canvas class is applied lazily by syncVisualsClip once init
+// creates the canvas. That is acceptable per the task spec.
+const FULLWINDOW_KEY = "strasbeat:visuals-fullwindow";
+let visualsFullWindow = localStorage.getItem(FULLWINDOW_KEY) === "true";
+
+function applyVisualsFullWindow() {
+  const cv = document.getElementById("hydra-canvas");
+  // Editor transparency: override the inline style StrudelMirror set in its
+  // constructor. OFF restores the exact same value StrudelMirror used.
+  // Override StrudelMirror's constructor-set inline style directly (bgFill is
+  // constructor-only; a CSS class can't win here without !important).
+  editorRoot.style.backgroundColor = visualsFullWindow
+    ? "transparent"
+    : "var(--background)";
+  editorRoot.classList.toggle("is-visuals-fullwindow", visualsFullWindow);
+  if (cv) {
+    cv.classList.toggle("is-visuals-fullwindow", visualsFullWindow);
+    if (visualsFullWindow) cv.classList.remove("is-visuals-clipped"); // full-window wins
+  }
+  // Reserved /polish hook — no CSS targets it yet; will cover transport/rail dimming in full-window.
+  shellEl.classList.toggle("shell--visuals-fullwindow", visualsFullWindow);
+  if (!visualsFullWindow) syncVisualsClip(); // back to panel-clipped
+}
+
+function toggleVisualsFullWindow() {
+  visualsFullWindow = !visualsFullWindow;
+  localStorage.setItem(FULLWINDOW_KEY, String(visualsFullWindow));
+  applyVisualsFullWindow();
+}
+
+// Apply persisted state once now that editorRoot, shellEl, and the
+// hydra-canvas (if already present) all exist.
+applyVisualsFullWindow();
 
 function focusEditorLocation({ line, column } = {}) {
   const view = editor.editor;
@@ -1192,6 +1313,11 @@ const {
 consolePanel = cp;
 referencePanel = rp;
 
+// Route raw-WebGL shader compile/link + context-loss errors into the in-app
+// console panel (they also always go to console.error). Surface-failures-
+// loudly: a broken shader is visible without opening devtools.
+setShaderErrorSink((msg) => consolePanel?.error?.(msg));
+
 // ─── Eval feedback (error infra + sound validation + patched evaluate) ───
 evalFeedback = installEvalFeedback({
   editor,
@@ -1260,7 +1386,11 @@ document.addEventListener(
 // blocks). Harmless when the active profile is Strudel/VSCode (no event
 // ever fires); load-bearing in modal profiles.
 document.addEventListener("repl-evaluate", () => editor.evaluate());
-document.addEventListener("repl-stop", () => editor.stop());
+document.addEventListener("repl-stop", () => {
+  editor.stop();
+  strudelExt.clearHydra();
+  clearShader();
+});
 document.addEventListener("repl-toggle-comment", () => {
   editor.editor.focus();
   toggleComment(editor.editor);
@@ -1294,6 +1424,7 @@ const palette = mountCommandPalette({
       const a = tabs.getActiveItem();
       if (a) tabs.close(a);
     },
+    onToggleVisualsFullWindow: toggleVisualsFullWindow,
   }),
 });
 
@@ -1313,7 +1444,7 @@ document.addEventListener(
   true,
 );
 
-mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
+mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas, onGeometryChange: syncVisualsClip });
 mountTrackBar({
   container: document.getElementById("track-bar"),
   view: editor.editor,
@@ -1400,6 +1531,8 @@ playBtn.addEventListener("click", async () => {
   }
   if ((transportEl.dataset.transportState ?? "idle") !== "idle") {
     editor.stop();
+    strudelExt.clearHydra();
+    clearShader();
     return;
   }
   await editor.evaluate();

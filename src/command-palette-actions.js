@@ -27,6 +27,7 @@ export function buildPaletteCommands({
   onNextTab,
   onPrevTab,
   onCloseActiveTab,
+  onToggleVisualsFullWindow,
 }) {
   return buildCommands({
     onEvaluate: () => editor.evaluate(),
@@ -105,5 +106,6 @@ export function buildPaletteCommands({
     onNextTab,
     onPrevTab,
     onCloseActiveTab,
+    onToggleVisualsFullWindow,
   });
 }

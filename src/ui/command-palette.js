@@ -331,6 +331,7 @@ export function buildCommands({
   onNextTab,
   onPrevTab,
   onCloseActiveTab,
+  onToggleVisualsFullWindow,
 }) {
   return [
     // ─── Transport ────────────────
@@ -509,6 +510,12 @@ export function buildCommands({
       label: "Switch to Scope",
       shortcut: null,
       run: onSwitchToScope,
+    },
+    {
+      id: "toggleVisualsFullWindow",
+      label: "Visuals: toggle full-window",
+      shortcut: null,
+      run: onToggleVisualsFullWindow,
     },
   ];
 }
