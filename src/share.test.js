@@ -38,14 +38,34 @@ describe('share encoding', () => {
   });
 
   test('compresses a real ~10KB pattern under the encoded cap', async () => {
-    const raw = fs.readFileSync(
-      path.join(__dirname, '..', 'patterns', 'mario-flowhacker.js'),
-      'utf8',
+    // Build a realistically-large, realistically-varied buffer from REAL
+    // committed pattern source (not a synthetic/trivially-compressible string),
+    // so this exercises genuine gzip behaviour on the kind of input a user
+    // would actually share. We read whatever patterns/*.js files exist —
+    // sorted for determinism — and concatenate until we clear ~10KB. Reading
+    // the directory (rather than one named file) keeps the test self-sustaining
+    // if a pattern is renamed or removed.
+    const patternsDir = path.join(__dirname, '..', 'patterns');
+    const files = fs
+      .readdirSync(patternsDir)
+      .filter((f) => f.endsWith('.js'))
+      .sort();
+    let raw = '';
+    for (const file of files) {
+      if (raw.length >= 10000) break;
+      raw += fs.readFileSync(path.join(patternsDir, file), 'utf8') + '\n';
+    }
+    // Guard against the input silently degrading to something trivial (e.g. if
+    // the library shrinks): the whole point is testing a large, varied buffer.
+    assert.ok(
+      raw.length >= 8000,
+      `expected a large concatenated buffer, got ${raw.length} chars`,
     );
+
     const encoded = await encodeShareCode(raw);
     assert.ok(
       encoded.length < SHARE_MAX_ENCODED,
-      `expected encoded mario to fit in ${SHARE_MAX_ENCODED}, got ${encoded.length}`,
+      `expected encoded buffer to fit in ${SHARE_MAX_ENCODED}, got ${encoded.length}`,
     );
     assert.equal(await decodeShareCode(encoded), raw);
   });
