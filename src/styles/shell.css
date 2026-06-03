@@ -27,7 +27,12 @@
 
 .shell {
   display: grid;
-  grid-template-columns: var(--left-rail-w) 1fr var(--right-rail-w);
+  /* The editor track is minmax(0, 1fr), not 1fr. A bare `1fr` is
+     `minmax(auto, 1fr)`, whose auto floor is the track's min-content width
+     — which the tab strip's nowrap tabs blow past once enough are open,
+     widening the whole grid (top bar included) beyond 100vw. Clamping the
+     floor to 0 lets the strip stay inside the column and scroll instead. */
+  grid-template-columns: var(--left-rail-w) minmax(0, 1fr) var(--right-rail-w);
   grid-template-rows:
     var(--top-bar-h) 1fr var(--transport-h) auto auto auto var(--roll-h);
   grid-template-areas:
@@ -166,6 +171,8 @@
 }
 
 .editor-pane {
+  display: flex;
+  flex-direction: column;
   background: var(--surface-0);
   min-width: 0;
   min-height: 0;
@@ -173,6 +180,15 @@
   /* Subtle depth cue — silent "you are here" on the canvas left edge
      where it meets the left rail. */
   box-shadow: inset 4px 0 8px oklch(0 0 0 / 0.15);
+}
+
+/* The editor fills the pane below the tab strip; the strip takes its own
+   intrinsic height (auto). min-height:0 lets CodeMirror's internal scroller
+   shrink rather than forcing the pane taller than its grid cell. The
+   strip↔editor seam is the strip's own bottom border (tab-strip.css). */
+.editor-pane > .editor {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* ─── Buttons (shared vocabulary across the shell) ─── */

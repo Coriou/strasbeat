@@ -23,6 +23,7 @@
 @import "./styles/shell.css";
 @import "./styles/top-bar.css";
 @import "./styles/left-rail.css";
+@import "./styles/tab-strip.css";
 @import "./styles/right-rail.css";
 @import "./styles/sound-browser.css";
 @import "./styles/reference.css";

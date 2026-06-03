@@ -13,7 +13,9 @@ import { signatureHint } from "./editor/signature-hint.js";
 // (createVscodeKeymap). Wrapped so we can swap it in/out when the user
 // changes profiles, without remounting the editor. See
 // design/work/21-keybindings.md §"CM compartment for the strasbeat overlay".
-const strasbeatOverlayCompartment = new Compartment();
+// Exported so the per-tab EditorState factory (build-editor-state.js) and the
+// switch path can read its live value when reasoning about a state swap.
+export const strasbeatOverlayCompartment = new Compartment();
 
 export function readStoredCmSettingsFromLocalStorage() {
   try {

@@ -74,6 +74,7 @@ export function mountTransport({
   editor = null,
   onEvaluate = null,
   onBankChipClick = null,
+  onNowPlayingClick = null,
 }) {
   const transportEl = mustEl("transport");
   const playBtn = mustEl("play");
@@ -103,6 +104,26 @@ export function mountTransport({
   bankChipEl.hidden = true;
   bankChipEl.addEventListener("click", () => onBankChipClick?.(bankChipEl.dataset.bank));
   rightGroupEl.insertBefore(bankChipEl, midiPillEl);
+
+  // Now-playing chip — sibling to the bank chip. Names the tab that currently
+  // owns scheduler audio when it differs from the focused tab (one-click jump),
+  // or shows a "(closed)" orphan marker. Hidden when the playing tab is focused
+  // or nothing plays. Visual treatment deferred to craft.
+  const nowPlayingChipEl = document.createElement("button");
+  nowPlayingChipEl.type = "button";
+  nowPlayingChipEl.className = "transport__now-playing-chip";
+  nowPlayingChipEl.hidden = true;
+  // The name lives in its own span so it can ellipsize independently of the
+  // CSS-drawn leading play glyph (a bare text node won't truncate in a flex
+  // row). The "(closed)" orphan marker gets its own muted span.
+  const nowPlayingLabelEl = document.createElement("span");
+  nowPlayingLabelEl.className = "transport__now-playing-name";
+  const nowPlayingOrphanEl = document.createElement("span");
+  nowPlayingOrphanEl.className = "transport__now-playing-closed";
+  nowPlayingOrphanEl.textContent = "closed";
+  nowPlayingChipEl.append(nowPlayingLabelEl, nowPlayingOrphanEl);
+  nowPlayingChipEl.addEventListener("click", () => onNowPlayingClick?.());
+  rightGroupEl.insertBefore(nowPlayingChipEl, midiPillEl);
 
   // Last-rendered values, to skip unnecessary DOM writes.
   let lastBpm = NaN;
@@ -303,6 +324,21 @@ export function mountTransport({
     bankChipEl.title = `Active bank: ${name} — click to filter Sound browser`;
   }
 
+  function setNowPlaying(info) {
+    // info: null | { name: string, isFocused: boolean, isOrphan: boolean }
+    if (!info || info.isFocused) {
+      nowPlayingChipEl.hidden = true;
+      nowPlayingChipEl.removeAttribute("data-orphan");
+      return;
+    }
+    nowPlayingChipEl.hidden = false;
+    nowPlayingChipEl.dataset.orphan = info.isOrphan ? "true" : "false";
+    nowPlayingLabelEl.textContent = info.name;
+    nowPlayingChipEl.title = info.isOrphan
+      ? `Still playing "${info.name}" (closed) — click to reopen`
+      : `Playing "${info.name}" — click to jump`;
+  }
+
   function dispose() {
     if (raf != null) cancelAnimationFrame(raf);
     raf = null;
@@ -319,6 +355,7 @@ export function mountTransport({
     clearErrorState,
     keymapChip,
     setBank,
+    setNowPlaying,
     dispose,
   };
 }

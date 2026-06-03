@@ -130,6 +130,7 @@ export async function handleCaptureClick({
   leftRail,
   prompt,
   setCurrentName,
+  openPattern,
 }) {
   if (!midi.isCaptureEnabled()) {
     midi.setCaptureEnabled(true);
@@ -220,8 +221,11 @@ export async function handleCaptureClick({
       return;
     }
     leftRail.addUserPattern(captureName);
-    editor.setCode(code);
-    setCurrentName(captureName);
+    if (openPattern) openPattern(captureName);
+    else {
+      editor.setCode(code);
+      setCurrentName(captureName);
+    }
     transport.setStatus(`captured phrase → "${captureName}"`);
     return;
   }

@@ -54,7 +54,10 @@ import {
   readStoredCmSettingsFromLocalStorage,
   applyInitialSettings,
   dispatchEditorExtensions,
+  strasbeatOverlayCompartment,
 } from "./editor-setup.js";
+import { createTabController } from "./tabs.js";
+import { freshTabState, liveCompartmentValues } from "./editor/build-editor-state.js";
 import { readSelectedCompletion } from "./editor/keymap-universal.js";
 import { previewSoundName, insertSoundName } from "./editor-actions.js";
 import { installDefaultStrudelLogger } from "./strudel-logger.js";
@@ -62,6 +65,7 @@ import { installEvalFeedback } from "./eval-feedback.js";
 import { createBoot } from "./boot.js";
 import { handleCaptureClick } from "./capture.js";
 import { mountCommandPalette } from "./ui/command-palette.js";
+import { mountTabStrip } from "./ui/tab-strip.js";
 import { buildPaletteCommands } from "./command-palette-actions.js";
 
 const { getAudioContext, webaudioOutput, initAudio, setLogger, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
@@ -83,6 +87,7 @@ const store = createLocalStore();
 
 // ─── DOM refs ────────────────────────────────────────────────────────────
 const editorRoot = document.getElementById("editor");
+const editorPane = document.querySelector(".editor-pane"); // hosts the empty-state overlay
 const canvas = document.getElementById("roll");
 const status = document.getElementById("status");
 const playBtn = document.getElementById("play");
@@ -195,6 +200,8 @@ let evalFeedback = null;
 // Forward decl — mounted after the transport so its init playback-state
 // callback (which fires synchronously with `idle`) can safely reference it.
 let beatGrid = null;
+let tabStrip = null;
+let tabs = null;
 
 const editor = new StrudelMirror({
   defaultOutput: webaudioOutput,
@@ -370,6 +377,7 @@ function refreshRail() {
     collapsedFolders: idx.uiState?.collapsedFolders ?? [],
     dirtySet: computeDirtySet(patternNames, patterns, store),
   });
+  tabStrip?.render();
 }
 
 function persistCollapse(folderKey, isCollapsed) {
@@ -514,13 +522,10 @@ async function deleteFolderHandler(folderName) {
     idx.userPatterns = (idx.userPatterns ?? []).filter(
       (n) => !inFolder.includes(n),
     );
-    if (inFolder.includes(currentName)) {
-      const fallback = patternNames[0];
-      setCurrentName(fallback);
-      editor.setCode(patterns[fallback]);
-      idx.lastOpen = fallback;
-    }
     store.setIndex(idx);
+    for (const name of inFolder) {
+      if (tabs.getOpenItems().includes(name)) tabs.close(name);
+    }
   }
   removeFolderEntry(folderName);
   refreshRail();
@@ -623,12 +628,6 @@ async function deleteMany(names) {
     idx.userPatterns = (idx.userPatterns ?? []).filter(
       (n) => !userNames.includes(n),
     );
-    if (userNames.includes(currentName)) {
-      const fallback = patternNames[0];
-      setCurrentName(fallback);
-      editor.setCode(patterns[fallback]);
-      idx.lastOpen = fallback;
-    }
     store.setIndex(idx);
   } catch (err) {
     refreshRail();
@@ -640,6 +639,9 @@ async function deleteMany(names) {
       transport.setStatus(`delete failed: ${err?.message ?? err}`);
     }
     return;
+  }
+  for (const n of userNames) {
+    if (tabs.getOpenItems().includes(n)) tabs.close(n);
   }
   refreshRail();
   transport.setStatus(
@@ -669,6 +671,7 @@ function renamePatternHandler(oldName, newName) {
     }
     return;
   }
+  tabs.reKey(oldName, newName);
   if (currentName === oldName) setCurrentName(newName);
   refreshRail();
   transport.setStatus(`renamed "${oldName}" → "${newName}"`);
@@ -683,17 +686,12 @@ const leftRail = mountLeftRail({
   dirtySet: computeDirtySet(patternNames, patterns, store),
   currentName: currentName,
   onSelect(name) {
-    flushToStore();
-    clearError(editor.editor);
-    evalFeedback?.resetRuntimeErrors();
-    setCurrentName(name);
-    const record = store.get(name);
-    if (record) editor.setCode(record.code);
-    else if (name in patterns) editor.setCode(patterns[name]);
-    const idx = store.getIndex();
-    idx.lastOpen = name;
-    store.setIndex(idx);
-    transport.setStatus(`Loaded "${name}"`);
+    // Open-or-focus through the tab controller: lossless per-tab EditorState
+    // swap. flush + error-clear + setCurrentName + lastOpen persistence all
+    // happen inside the controller's focus()/installState path now. (`tabs` is
+    // defined later in this file; this closure only runs on user interaction,
+    // after boot, so it resolves fine.)
+    tabs.openOrFocus(name);
   },
   onCreate() {
     handleNewPatternClick({
@@ -716,6 +714,7 @@ const leftRail = mountLeftRail({
         };
         store.setIndex(idx);
       },
+      openPattern: (name) => tabs.openOrFocus(name),
     });
   },
   onCreateFolder() {
@@ -734,6 +733,7 @@ const leftRail = mountLeftRail({
       flushToStore,
       formModal,
       folders: store.getIndex().folders ?? [],
+      openPattern: (name) => tabs.openOrFocus(name),
     });
   },
   onBulkDuplicate(names) {
@@ -748,15 +748,24 @@ const leftRail = mountLeftRail({
       flushToStore,
       formModal,
       folders: store.getIndex().folders ?? [],
+      openPattern: (name) => tabs.openOrFocus(name),
     });
   },
   onImportMidi() {
     openMidiImportDialog();
   },
   onRevert(name) {
-    store.delete(name);
+    store.delete(name); // working copy gone → codeFor(name) now returns the original
     lastDirtyState.delete(name);
-    if (currentName === name) {
+    if (tabs.getOpenItems().includes(name)) {
+      if (tabs.getActiveItem() === name) {
+        clearError(editor.editor);
+        evalFeedback?.resetRuntimeErrors();
+        tabs.refresh(name); // fresh EditorState from the reverted (original) code, empty undo
+      } else {
+        tabs.evictState(name); // rebuilt fresh on next focus
+      }
+    } else if (currentName === name) {
       clearError(editor.editor);
       evalFeedback?.resetRuntimeErrors();
       editor.setCode(patterns[name]);
@@ -768,13 +777,11 @@ const leftRail = mountLeftRail({
     store.delete(name);
     const idx = store.getIndex();
     idx.userPatterns = idx.userPatterns.filter((n) => n !== name);
-    if (currentName === name) {
-      const fallback = patternNames[0];
-      setCurrentName(fallback);
-      editor.setCode(patterns[fallback]);
-      idx.lastOpen = fallback;
-    }
     store.setIndex(idx);
+    // Reconcile the open set: closing focuses a neighbor (or the empty state)
+    // and persists activeTab/lastOpen. If it was the playing tab, audio
+    // continues (orphaned) per spec — Stop clears it.
+    if (tabs.getOpenItems().includes(name)) tabs.close(name);
     refreshRail();
     transport.setStatus(`deleted "${name}"`);
   },
@@ -811,6 +818,18 @@ transport = mountTransport({
   onPlaybackStateChange: (s) => {
     bottomModes.setPlaybackState(s);
     beatGrid?.setPlaybackState(s);
+    // Stop (or scheduler idle) releases playing-ownership. Audio that's merely
+    // orphaned (playing tab closed, still sounding) keeps the scheduler NON-idle,
+    // so this won't fire and the orphan persists until Stop — exactly the spec.
+    if (s === "idle") {
+      tabs?.clearPlaying();
+      refreshNowPlaying();
+    }
+  },
+  onNowPlayingClick: () => {
+    const target = tabs.getOrphanedPlaying() ?? tabs.getPlayingItem();
+    if (target) tabs.openOrFocus(target); // reopens an orphan, or focuses the playing tab
+    refreshNowPlaying();
   },
   onErrorBadgeClick: () => {
     const ate = evalFeedback?.getActiveTransportError();
@@ -859,6 +878,7 @@ const { flushToStore, scheduleAutosave, lastDirtyState } = createAutosave({
   getCurrentName: () => currentName,
   leftRail,
   transport,
+  onDirtyChange: () => tabStrip?.render(),
 });
 
 editor.editor.dispatch({
@@ -893,11 +913,126 @@ editor.editor.dispatch({
   ]),
 });
 
-{
-  const idx = store.getIndex();
-  idx.lastOpen = currentName;
-  store.setIndex(idx);
+// ─── Pattern tabs: playing-ownership helpers ─────────────────────────────
+// refreshNowPlaying is a hoisted function so it can be called from
+// onPlaybackStateChange (which fires synchronously at transport mount, before
+// the controller is assigned). The `if (!tabs)` guard makes those early calls
+// safe no-ops.
+function refreshNowPlaying() {
+  if (!tabs) return;
+  const playing = tabs.getPlayingItem();
+  const orphan = tabs.getOrphanedPlaying();
+  const active = tabs.getActiveItem();
+  if (orphan) {
+    transport.setNowPlaying({ name: orphan, isFocused: false, isOrphan: true });
+  } else if (playing) {
+    transport.setNowPlaying({ name: playing, isFocused: playing === active, isOrphan: false });
+  } else {
+    transport.setNowPlaying(null);
+  }
+  tabStrip?.render(); // playing marker on the owning tab
 }
+
+// Toggle the editor empty state. The open-set controller allows an empty set
+// (closing the last tab); when that happens it relabels the wordmark and
+// repaints the strip but deliberately leaves the live CodeMirror buffer alone
+// (src/tabs.js close→empty path). Without this the editor would keep showing
+// the just-closed pattern's code while the strip says nothing's open. We don't
+// clear the buffer — instead .editor-pane.is-empty reveals an overlay over
+// #editor, sidestepping any autosave-to-a-null-name concern. Hides again the
+// moment any pattern is opened (the open-or-focus swap installs its content).
+function updateEmptyState() {
+  if (!tabs) return;
+  editorPane?.classList.toggle("is-empty", tabs.getActiveItem() == null);
+}
+
+// ─── Pattern tabs: open-set controller + per-tab EditorState swap ──────────
+// Tabs are a view over the store (spec 26). Switching swaps a cached EditorState
+// on the single view, preserving each tab's cursor/selection/scroll/undo.
+
+// A tab "snapshot" is { state, scrollTop, scrollLeft } — EditorState carries
+// doc/selection/undo, but NOT scroll (that lives on the view's scrollDOM), so
+// we capture/restore scroll alongside the state.
+// Captured ONCE here, at the controller block — after the editor is fully
+// configured (dispatchEditorExtensions + installCompletions + the appended
+// updateListeners) and before any user edit, so it has the full config with an
+// EMPTY undo history. EditorStates are immutable, so this stays a clean base
+// for every fresh tab; freshTabState reconfigures it to the current live
+// compartment values at build time.
+const cleanBaseState = editor.editor.state;
+function buildTabState({ code }) {
+  return {
+    state: freshTabState(
+      cleanBaseState,
+      code,
+      liveCompartmentValues(editor.editor.state, strasbeatOverlayCompartment),
+    ),
+    scrollTop: 0,
+    scrollLeft: 0,
+  };
+}
+function captureTabState() {
+  const scroller = editor.editor.scrollDOM;
+  return {
+    state: editor.editor.state, // owns this tab's history/cursor/selection
+    scrollTop: scroller?.scrollTop ?? 0,
+    scrollLeft: scroller?.scrollLeft ?? 0,
+  };
+}
+function installTabState(snap) {
+  editor.editor.setState(snap.state);
+  // CRITICAL: setState does NOT fire updateListeners, so StrudelMirror's
+  // onChange (which sets editor.code + repl.setCode) won't run. Sync explicitly
+  // or evaluate() would play the previous tab's buffer.
+  editor.code = editor.editor.state.doc.toString();
+  editor.repl.setCode?.(editor.code);
+  // Restore scroll after the new state lays out (setState resets it).
+  const scroller = editor.editor.scrollDOM;
+  if (scroller) {
+    requestAnimationFrame(() => {
+      scroller.scrollTop = snap.scrollTop ?? 0;
+      scroller.scrollLeft = snap.scrollLeft ?? 0;
+    });
+  }
+}
+
+tabs = createTabController({
+  store,
+  patterns,
+  buildState: buildTabState,
+  installState: (snap) => {
+    installTabState(snap);
+    // Error/console state is global + keyed to the live buffer (spec: per-tab
+    // errors are out of scope). Clear on every swap, matching the old onSelect.
+    clearError(editor.editor);
+    evalFeedback?.resetRuntimeErrors();
+  },
+  captureState: captureTabState,
+  flushToStore,
+  setCurrentName,
+  onAfterSwitch: () => {
+    refreshNowPlaying();
+    updateEmptyState();
+  },
+});
+tabs.hydrate();
+// The editor was constructed showing `initialName`'s code; make it the focused
+// tab (no swap). adoptInitial handles share-link / fallback / empty-set boots.
+tabs.adoptInitial(initialName);
+
+tabStrip = mountTabStrip({
+  container: document.getElementById("tab-strip"),
+  getOpenItems: () => tabs.getOpenItems(),
+  getActiveItem: () => tabs.getActiveItem(),
+  getPlayingItem: () => tabs.getPlayingItem(),
+  getDirtySet: () => computeDirtySet(patternNames, patterns, store),
+  isUser: (name) => !(name in patterns),
+  onFocus: (name) => tabs.openOrFocus(name),
+  onClose: (name) => tabs.close(name),
+  onReorder: (name, toIndex) => tabs.reorder(name, toIndex),
+});
+refreshNowPlaying(); // initial state: nothing playing → chip hidden
+updateEmptyState(); // initial state: overlay shows only if the open set is empty
 
 window.addEventListener("beforeunload", () => {
   flushToStore();
@@ -915,6 +1050,7 @@ function openMidiImportDialog(file) {
     flushToStore,
     isDev: import.meta.env.DEV,
     file,
+    openPattern: (name) => tabs.openOrFocus(name),
   });
 }
 
@@ -1001,6 +1137,7 @@ const {
   setCurrentName,
   flushToStore,
   handleNewPatternClick,
+  openPattern: (name) => tabs.openOrFocus(name),
   focusEditorLocation,
   refreshRail,
   getEvalFeedback: () => evalFeedback,
@@ -1051,6 +1188,26 @@ evalFeedback = installEvalFeedback({
   getCurrentName: () => currentName,
 });
 
+// Tab playing-ownership: an autostart evaluate transfers scheduler ownership to
+// the focused tab. ALL play paths funnel through editor.evaluate() (the play
+// toggle, Cmd/Ctrl+Enter via the keymap, repl-evaluate, the palette), so wrapping
+// it here is the single chokepoint that makes acceptance #4/#5 deterministic
+// (including transferring ownership via Cmd+Enter while another tab plays — no
+// reliance on playback-state transitions). Wrapped AFTER eval-feedback's patch so
+// we compose with its tracking. The WAV export renders with evaluate(false); that
+// must NOT grab ownership — hence the autostart guard. Releasing happens on idle
+// (Stop), handled in onPlaybackStateChange above.
+const _evaluateForTabs = editor.evaluate.bind(editor);
+editor.evaluate = async function (...args) {
+  const autostart = args.length === 0 || args[0] !== false;
+  const result = await _evaluateForTabs(...args);
+  if (autostart && tabs) {
+    tabs.setPlaying(tabs.getActiveItem());
+    refreshNowPlaying();
+  }
+  return result;
+};
+
 // Cmd/Ctrl+B toggles the right rail (matches VSCode's sidebar toggle).
 document.addEventListener(
   "keydown",
@@ -1091,6 +1248,24 @@ const palette = mountCommandPalette({
     saveBtn,
     exportBtn,
     shareBtn,
+    onNextTab: () => {
+      const open = tabs.getOpenItems();
+      const a = tabs.getActiveItem();
+      if (open.length < 2) return;
+      const i = open.indexOf(a);
+      tabs.openOrFocus(open[(i + 1) % open.length]);
+    },
+    onPrevTab: () => {
+      const open = tabs.getOpenItems();
+      const a = tabs.getActiveItem();
+      if (open.length < 2) return;
+      const i = open.indexOf(a);
+      tabs.openOrFocus(open[(i - 1 + open.length) % open.length]);
+    },
+    onCloseActiveTab: () => {
+      const a = tabs.getActiveItem();
+      if (a) tabs.close(a);
+    },
   }),
 });
 
@@ -1236,6 +1411,7 @@ if (import.meta.env.DEV) {
     }
     leftRail.removeUserPattern(name);
     leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
+    tabStrip?.render();
     status.textContent = `saved → ${path}`;
     // Vite HMR will pick up the new file and re-fire the glob below.
   });
@@ -1329,6 +1505,7 @@ captureBtn.addEventListener("click", () =>
     leftRail,
     prompt,
     setCurrentName,
+    openPattern: (name) => tabs.openOrFocus(name),
   }),
 );
 
@@ -1370,6 +1547,7 @@ bootPromise.then(() => {
         };
         store.setIndex(idx);
       },
+      openPattern: (name) => tabs.openOrFocus(name),
     });
   } else if (action === "export") {
     exportBtn?.click();

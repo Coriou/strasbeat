@@ -24,6 +24,9 @@ export function buildPaletteCommands({
   saveBtn,
   exportBtn,
   shareBtn,
+  onNextTab,
+  onPrevTab,
+  onCloseActiveTab,
 }) {
   return buildCommands({
     onEvaluate: () => editor.evaluate(),
@@ -99,5 +102,8 @@ export function buildPaletteCommands({
     // then search/scroll. The cursor-aware reveal lives in
     // keymap-universal.js's Mod-Shift-b binding.
     onRevealSound: () => rightRail.activate("sounds"),
+    onNextTab,
+    onPrevTab,
+    onCloseActiveTab,
   });
 }

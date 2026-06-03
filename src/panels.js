@@ -32,6 +32,7 @@ export function registerPanels({
   setCurrentName,
   flushToStore,
   handleNewPatternClick,
+  openPattern,
   focusEditorLocation,
   refreshRail,
   getEvalFeedback,
@@ -75,8 +76,12 @@ export function registerPanels({
         flushToStore,
         prompt,
         isDev,
+        openPattern,
       });
       // If a new pattern was created, seed it with the learn content.
+      // `openPattern` routed it through the tab controller (so it's a managed
+      // tab — no currentName/controller desync); setCode then replaces THAT
+      // tab's buffer with the snippet, which the disk save / autosave persists.
       if (getCurrentName() !== before) {
         editor.setCode(code);
         saveBtn?.click();

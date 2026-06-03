@@ -161,7 +161,22 @@
       </aside>
 
       <main class="editor-pane">
+        <div id="tab-strip" class="tab-strip" role="tablist" aria-label="Open patterns"></div>
         <div id="editor" class="editor"></div>
+        <!--
+          Editor empty state — shown (via .editor-pane.is-empty, toggled by
+          updateEmptyState() in main.js) when the open set is empty, i.e. the
+          last tab was closed. An overlay over #editor, not a buffer clear, so
+          no autosave-to-a-null-name concern. See design/work/26-pattern-tabs.md
+          open question #1 ("allow empty with a clean editor empty state").
+        -->
+        <div id="editor-empty" class="editor-empty" aria-hidden="true">
+          <p class="editor-empty__line">Nothing open.</p>
+          <p class="editor-empty__hint">
+            Pick a pattern from the library, or
+            <span class="editor-empty__key">+</span> to start a new one.
+          </p>
+        </div>
       </main>
 
       <aside class="right-rail" id="right-rail" data-collapsed="true">

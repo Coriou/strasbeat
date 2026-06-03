@@ -99,6 +99,7 @@ export function createAutosave({
   getCurrentName,
   leftRail,
   transport,
+  onDirtyChange,
 }) {
   let timer = null;
   /** Tracks per-pattern dirty state to avoid redundant renderList() calls. */
@@ -136,6 +137,7 @@ export function createAutosave({
       if (isDirtyNow !== wasDirty) {
         lastDirtyState.set(currentName, isDirtyNow);
         leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
+        onDirtyChange?.();
       }
     }
   }
@@ -185,6 +187,7 @@ export async function saveNewPattern({
   setCurrentName,
   editor,
   transport,
+  openPattern, // optional: (name) => void — if provided, called instead of setCurrentName+setCode
 }) {
   try {
     const rec = {
@@ -212,8 +215,11 @@ export async function saveNewPattern({
     return { ok: false, error: String(err) };
   }
   leftRail.addUserPattern(name, folder);
-  setCurrentName(name);
-  editor.setCode(code);
+  if (openPattern) openPattern(name);
+  else {
+    setCurrentName(name);
+    editor.setCode(code);
+  }
   transport.setStatus(
     folder ? `created "${name}" in ${folder}` : `created "${name}"`,
   );
@@ -244,6 +250,7 @@ export async function handleNewPatternClick(ctx) {
     folders = [],
     lastNewPatternFolder = null,
     onLastNewPatternFolderChange,
+    openPattern,
   } = ctx;
   // Flush current buffer before creating a new pattern.
   flushToStore();
@@ -305,6 +312,7 @@ export async function handleNewPatternClick(ctx) {
     setCurrentName,
     editor,
     transport,
+    openPattern,
   });
   if (r.ok) onLastNewPatternFolderChange?.(folder);
 }
@@ -331,6 +339,7 @@ export async function handleDuplicateClick({
   flushToStore,
   formModal,
   folders,
+  openPattern,
 }) {
   flushToStore();
   // Resolve source code: working copy if it exists, else the original.
@@ -395,6 +404,7 @@ export async function handleDuplicateClick({
     setCurrentName,
     editor,
     transport,
+    openPattern,
   });
 }
 
@@ -419,6 +429,7 @@ export async function handleBulkDuplicateClick({
   flushToStore,
   formModal,
   folders,
+  openPattern,
 }) {
   flushToStore();
 
@@ -496,6 +507,7 @@ export async function handleBulkDuplicateClick({
       setCurrentName,
       editor,
       transport,
+      openPattern,
     });
     if (r.ok) n++;
   }

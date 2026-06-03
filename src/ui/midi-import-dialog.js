@@ -539,6 +539,7 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
       editor: ctx.editor,
       transport: ctx.transport,
       isDev: ctx.isDev,
+      openPattern: ctx.openPattern,
     });
 
     if (saveResult.ok) {

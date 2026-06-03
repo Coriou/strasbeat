@@ -328,6 +328,9 @@ export function buildCommands({
   onSwitchToRoll,
   onSwitchToScope,
   onRevealSound,
+  onNextTab,
+  onPrevTab,
+  onCloseActiveTab,
 }) {
   return [
     // ─── Transport ────────────────
@@ -483,6 +486,11 @@ export function buildCommands({
       shortcut: null,
       run: onFocusPatterns,
     },
+
+    // ─── Tabs ─────────────────────
+    { id: "nextTab", label: "Next Tab", run: onNextTab },
+    { id: "prevTab", label: "Previous Tab", run: onPrevTab },
+    { id: "closeTab", label: "Close Tab", run: onCloseActiveTab },
 
     // ─── File ─────────────────────
     { id: "save", label: "Save Pattern", shortcut: `${MOD}S`, run: onSave },

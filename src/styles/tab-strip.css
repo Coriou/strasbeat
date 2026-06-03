@@ -1,0 +1,481 @@
+/* Tab strip — the pattern working set, a chrome ribbon sitting flush above
+ * the editor canvas. A view over the open-set controller (src/tabs.js).
+ * See design/work/26-pattern-tabs.md §"Tab strip UI" and design/SYSTEM.md.
+ *
+ * Design intent (the family it belongs to):
+ *   • Surface vocabulary matches the shell panels (--surface-1 ribbon, 1px
+ *     hairline seam to the editor) — it reads as chrome, not canvas.
+ *   • The FOCUSED tab is a distinct chip — canvas-colored (--surface-0) with
+ *     an accent top rim — exactly the "distinct active chip + accent edge
+ *     marker" grammar the right-rail and bottom-panel tab bars already use
+ *     (right-rail.css, bottom-panel.css), so all three tab families agree.
+ *   • The "open pattern" grammar (active fill, --accent-hi dirty dot) is
+ *     borrowed verbatim from the left-rail rows so the library and the strip
+ *     speak the same language about the same patterns.
+ *   • Color is signal: accent = focus + playback ownership, nothing else. */
+
+.tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 1px; /* hairline seam between tabs; the fill change reads as the divider */
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0 var(--space-2);
+  min-width: 0; /* let flex children scroll, never widen the editor pane */
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border); /* the strip↔editor seam */
+
+  /* Overflow: a horizontally scrollable row. The focused tab is scrolled into
+     view by the controller on every render, so no tab is unreachable. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none; /* the edge fade is the affordance, not a scrollbar */
+
+  /* Edge fade — the overflow affordance. The mask fades content at both
+     inner edges; when tabs don't fill the strip the fade lands on empty
+     ribbon and is invisible, so it only ever appears when there's more to
+     scroll to. Padding keeps the first/last tab clear of the fade at rest. */
+  --fade: var(--space-5);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fade),
+    #000 calc(100% - var(--fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--fade),
+    #000 calc(100% - var(--fade)),
+    transparent 100%
+  );
+}
+.tab-strip::-webkit-scrollbar {
+  display: none;
+}
+
+/* ─── Tab ─────────────────────────────────────────────────────────────── */
+
+.tab-strip__tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  /* Fixed at content width, clamped to a legible band. Tabs never shrink to
+     illegibility — past the point where they fit, the strip scrolls (the
+     focused tab is scrolled into view on every render). */
+  flex: 0 0 auto;
+  min-width: 7.5rem;
+  max-width: 13.5rem;
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  color: var(--text-mut);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  /* Top rim is reserved for the focused tab's accent bar (inset box-shadow
+     below) so resting and focused tabs share the same metrics — no shift. */
+  transition:
+    background var(--t-hover),
+    color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+.tab-strip__tab:hover {
+  background: color-mix(in oklch, var(--surface-2) 70%, var(--surface-1));
+  color: var(--text);
+}
+
+.tab-strip__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Focused tab — the canvas color lifts it out of the ribbon and an accent
+   rim crowns its top edge. Unambiguous at a glance: it's the only tab the
+   color of the editor below it, the only one wearing the accent, the only
+   one at full text weight. The accent rim echoes the right-rail's active
+   edge marker (right-rail.css), placed on top because the editor is below. */
+.tab-strip__tab.is-active {
+  background: var(--surface-0);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow:
+    inset 0 2px 0 var(--accent),
+    inset 1px 0 0 var(--border-soft),
+    inset -1px 0 0 var(--border-soft);
+}
+
+/* ─── Label ───────────────────────────────────────────────────────────── */
+
+.tab-strip__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Playing marker ──────────────────────────────────────────────────────
+   A tiny accent play-triangle before the label — the strip's own answer to
+   "which tab owns the sound." Shape (triangle) is deliberately distinct from
+   the dirty dot (circle) so the two never read as the same thing. */
+.tab-strip__playing-mark {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 8px;
+  background: var(--accent);
+  /* Right-pointing triangle (a play glyph), via clip-path. */
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* ─── Dirty dot (modified Demos only) ──────────────────────────────────────
+   --accent-hi circle, matching the left-rail dirty dot exactly. Sits between
+   the label and the close button; it fades out on hover so attention shifts
+   cleanly to the × (mirroring the left-rail's dot→action handoff), while its
+   slot stays put so the layout never shifts. */
+.tab-strip__dirty-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-hi);
+  transition: opacity var(--t-hover);
+}
+.tab-strip__tab:hover .tab-strip__dirty-dot {
+  opacity: 0; /* the close button takes this slot on hover */
+}
+
+/* ─── Close affordance ─────────────────────────────────────────────────────
+   Hover-revealed on every tab, persistent on the focused tab. Its 18px box is
+   always present in layout so revealing it never shifts the label — it just
+   fades and scales in. */
+.tab-strip__close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity var(--t-hover),
+    transform var(--t-hover),
+    background var(--t-hover),
+    color var(--t-hover);
+}
+.tab-strip__close svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+}
+.tab-strip__tab:hover .tab-strip__close,
+.tab-strip__tab.is-active .tab-strip__close {
+  opacity: 1;
+  transform: none;
+}
+.tab-strip__close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.tab-strip__close:active {
+  background: var(--surface-2);
+  transform: scale(0.9); /* quick press feedback */
+}
+.tab-strip__close:focus-visible {
+  opacity: 1;
+  transform: none;
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* ─── Drag-to-reorder ─────────────────────────────────────────────────────
+   The dragged tab dims; the drop target shows a thin accent insertion bar on
+   its leading edge. Both are presentation-only — the gesture logic owns when
+   the classes apply (set by tab-strip.js drag handlers). */
+.tab-strip__tab.is-dragging {
+  opacity: 0.4;
+}
+.tab-strip__tab.is-drop-target::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* ─── Empty state ─────────────────────────────────────────────────────────
+   The honest IDE behavior (open question #1): closing the last tab is allowed
+   and lands here. A quiet, single-line invitation — never an error. */
+.tab-strip__empty {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+  user-select: none;
+}
+
+/* ─── Editor empty state ──────────────────────────────────────────────────
+   The companion to .tab-strip__empty, scaled to the editor canvas. When the
+   open set is empty (last tab closed) the controller leaves the live buffer in
+   place (src/tabs.js), so main.js's updateEmptyState() adds .is-empty to the
+   pane and this overlay covers the stale code with a quiet invitation. Same
+   family as the strip's empty line — --text-dim copy, no graphics — just
+   centered on the canvas. The strip keeps its own message uncovered: the
+   overlay starts below the 34px strip + its 1px seam (the literals the strip
+   itself uses above), so both read together as one "nothing open" state.
+
+   An overlay, not a buffer clear: nothing writes to a null pattern name, and
+   the next open-or-focus swap simply installs content under it and hides it. */
+/* Positioning context for the overlay below. The pane is otherwise a plain
+   flex column (shell.css); the empty state needs it as the anchor so it can
+   cover #editor without disturbing the strip↔editor flex flow. */
+.editor-pane {
+  position: relative;
+}
+
+.editor-empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(34px + 1px); /* clear the tab strip (height) + its bottom seam */
+  bottom: 0;
+  z-index: 1; /* above the CodeMirror scroller, within the pane */
+
+  display: none; /* flipped to flex by .editor-pane.is-empty */
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  text-align: center;
+  background: var(--surface-0); /* the canvas color — hides the stale buffer */
+  user-select: none;
+}
+.editor-pane.is-empty .editor-empty {
+  display: flex;
+  animation: editor-empty-enter var(--t-panel);
+}
+
+/* The lead line carries the same weight as the strip's empty message; the hint
+   drops to --text-dim so the two lines read as headline + caption, not two
+   equal statements. */
+.editor-empty__line {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--lh-md);
+  font-weight: 500;
+  color: var(--text-mut);
+}
+.editor-empty__hint {
+  margin: 0;
+  max-width: 32ch; /* keep the caption to a calm, readable measure */
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-dim);
+}
+
+/* Inline keycap for the "+" affordance — the new-pattern action lives in the
+   strip and the rail, so naming its glyph here points without duplicating the
+   library line. A quiet chip in the shell's button vocabulary, not a graphic. */
+.editor-empty__key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  height: 1.4em;
+  padding: 0 0.3em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-mut);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+/* Fades in with the panel motion (SYSTEM.md §9); no spatial drama — the canvas
+   simply settles into "empty". Gated to .is-empty so it plays on entry only. */
+@keyframes editor-empty-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ─── Now-playing chip ─────────────────────────────────────────────────────
+   Transport pill naming the tab that owns scheduler audio when it differs
+   from the focused tab. Sibling to the bank chip (transport__bank-chip) — same
+   metrics and resting surface — but it leads with an accent play-triangle so
+   it visually rhymes with the per-tab playing marker, and it earns the accent
+   because it is a live, clickable "jump to the sound" affordance. */
+.transport__now-playing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 22px;
+  max-width: 24ch;
+  padding: 0 var(--space-2);
+  background: var(--accent-wash);
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: color-mix(in oklch, var(--accent-hi) 60%, var(--text));
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover),
+    border-color var(--t-hover);
+}
+.transport__now-playing-chip[hidden] {
+  display: none;
+}
+
+/* Leading play-triangle — same shape language as the strip's playing mark. */
+.transport__now-playing-chip::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 8px;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* The pattern name truncates; the leading glyph and "(closed)" marker stay. */
+.transport__now-playing-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "(closed)" orphan marker — only present in the orphaned-playback state. */
+.transport__now-playing-closed {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-variant: small-caps;
+  letter-spacing: 0.04em;
+}
+.transport__now-playing-closed::before {
+  content: "(";
+}
+.transport__now-playing-closed::after {
+  content: ")";
+}
+.transport__now-playing-chip:not([data-orphan="true"])
+  .transport__now-playing-closed {
+  display: none;
+}
+
+.transport__now-playing-chip:hover {
+  background: color-mix(in oklch, var(--accent) 20%, var(--surface-2));
+  border-color: color-mix(in oklch, var(--accent) 48%, transparent);
+  color: var(--text);
+}
+.transport__now-playing-chip:active {
+  background: var(--accent-wash);
+}
+.transport__now-playing-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-wash);
+}
+
+/* Orphaned playback — the playing pattern was closed but is still sounding.
+   Drop to the neutral chip surface and mute the glyph: it's a fading state,
+   not a live destination, though it stays clickable to reopen. */
+.transport__now-playing-chip[data-orphan="true"] {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-mut);
+}
+.transport__now-playing-chip[data-orphan="true"]::before {
+  background: var(--text-dim);
+}
+.transport__now-playing-chip[data-orphan="true"]:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* ─── Motion ───────────────────────────────────────────────────────────────
+   Strictly within SYSTEM.md §9: 200ms panel cubic-bezier(0.16,1,0.3,1) for
+   appearance, 120ms hover ease-out (handled inline above), no spring, no
+   ambient idle animation. Every motion here explains a discrete change:
+   a tab joined the set, or playback diverged from focus. Switching focus and
+   reordering animate via the inline color/box-shadow transitions only — the
+   entrance keyframe is gated to genuinely new tabs in tab-strip.js. */
+
+/* Tab open — fades and rises into the strip. Plays once, only on tabs that
+   weren't open in the previous render (the .is-entering gate). */
+@keyframes tab-strip-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tab-strip__tab.is-entering {
+  animation: tab-strip-enter var(--t-panel);
+}
+
+/* Now-playing chip — fades and rises in when playback diverges from the
+   focused tab (or orphans). Replays whenever the chip leaves [hidden]. */
+@keyframes now-playing-chip-enter {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.transport__now-playing-chip:not([hidden]) {
+  animation: now-playing-chip-enter var(--t-pop-in);
+}
+
+/* Respect reduced motion: drop the spatial entrances (and the close button's
+   scale-in), keep the functional color/opacity transitions so focus, hover,
+   and reveal feedback still read. */
+@media (prefers-reduced-motion: reduce) {
+  .tab-strip__tab.is-entering,
+  .transport__now-playing-chip:not([hidden]) {
+    animation: none;
+  }
+  .tab-strip__close,
+  .tab-strip__close:active {
+    transform: none;
+  }
+}
