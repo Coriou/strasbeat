@@ -194,27 +194,26 @@
           >
             <button
               id="play"
-              class="btn transport__action transport__action--play"
+              class="btn transport__toggle"
               type="button"
-              title="Play current pattern (Ctrl/Cmd+Enter)"
+              title="Play current pattern  ·  ⌘↵"
               aria-label="Play current pattern"
             >
-              <span class="btn__icon" data-icon="play"></span>
-              <span class="btn__label">Play</span>
-              <kbd class="transport__kbd">⌘↵</kbd>
-            </button>
-            <button
-              id="stop"
-              class="btn transport__action transport__action--stop"
-              type="button"
-              title="Stop playback (Ctrl+. or Alt+.)"
-              aria-label="Stop playback"
-            >
-              <span class="btn__icon" data-icon="square"></span>
-              <span
-                class="btn__label transport__action-label transport__action-label--optional"
-                >Stop</span
-              >
+              <span class="transport__toggle-icon" aria-hidden="true">
+                <span
+                  class="transport__toggle-glyph transport__toggle-glyph--play"
+                  data-icon="play"
+                ></span>
+                <span
+                  class="transport__toggle-glyph transport__toggle-glyph--stop"
+                  data-icon="square"
+                ></span>
+              </span>
+              <span class="btn__label transport__toggle-label">Play</span>
+              <kbd class="transport__kbd">
+                <span class="transport__kbd-key">⌘</span>
+                <span class="transport__kbd-key">↵</span>
+              </kbd>
             </button>
           </div>
           <span

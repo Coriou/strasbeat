@@ -86,7 +86,6 @@ const editorRoot = document.getElementById("editor");
 const canvas = document.getElementById("roll");
 const status = document.getElementById("status");
 const playBtn = document.getElementById("play");
-const stopBtn = document.getElementById("stop");
 const saveBtn = document.getElementById("save");
 const exportBtn = document.getElementById("export-wav");
 const shareBtn = document.getElementById("share");
@@ -110,12 +109,11 @@ applyStoredAccent();
 if (import.meta.env.DEV) document.body.classList.add("dev-mode");
 installDefaultStrudelLogger(setLogger);
 
-// Platform-aware keyboard shortcut label on the Play button.
-{
-  const kbd = playBtn.querySelector(".transport__kbd");
-  if (kbd && !/Mac|iPhone|iPad/.test(navigator.platform)) {
-    kbd.textContent = "Ctrl\u21B5";
-  }
+// Platform-aware keyboard shortcut label on the transport button. Only the
+// modifier key glyph changes (\u2318 \u2192 Ctrl); the \u21B5 stays.
+if (!/Mac|iPhone|iPad/.test(navigator.platform)) {
+  const modKey = playBtn.querySelector(".transport__kbd-key");
+  if (modKey) modKey.textContent = "Ctrl";
 }
 
 // HiDPI piano roll — ResizeObserver handles window resize, right-rail
@@ -1185,15 +1183,22 @@ bottomModes.setOnChange((mode) => {
 });
 
 // ─── Transport ───────────────────────────────────────────────────────────
+// One button, two jobs. The visible state lives on the transport element's
+// `data-transport-state` (kept in lockstep with the scheduler by transport.js),
+// so reading it here is the authoritative "is the engine live?" check — no
+// separate flag to drift out of sync. Idle → play; anything else → stop.
 playBtn.addEventListener("click", async () => {
   if (isExportRunning()) {
     transport.setStatus("Export in progress");
     return;
   }
+  if ((transportEl.dataset.transportState ?? "idle") !== "idle") {
+    editor.stop();
+    return;
+  }
   await editor.evaluate();
   transport.kick(); // promote the readout loop to rAF immediately
 });
-stopBtn.addEventListener("click", () => editor.stop());
 
 // ─── Save current editor → patterns/<name>.js (dev-only) ────────────────
 if (import.meta.env.DEV) {

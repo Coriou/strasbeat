@@ -22,6 +22,37 @@ import { mountKeymapChip } from "./keymap-chip.js";
 const BEATS_PER_CYCLE = 4; // see comment above
 const PLAYBACK_STATES = new Set(["idle", "queued", "loading", "playing"]);
 
+// Single transport button — its label / tooltip / aria-label per playback
+// state. Idle invites play; every other state offers to stop (or cancel the
+// pending start). The button's *icon* and *backlight* are pure CSS driven by
+// the transport element's `data-transport-state`, so this table only owns the
+// text. Shortcut hints are platform-aware: ⌘↵ plays, Ctrl+. stops (the stop
+// binding is owned upstream by Strudel's keymap).
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+const PLAY_HINT = IS_MAC ? "⌘↵" : "Ctrl+Enter";
+const TOGGLE_PRESENTATION = {
+  idle: {
+    label: "Play",
+    aria: `Play current pattern (${PLAY_HINT})`,
+    title: `Play current pattern  ·  ${PLAY_HINT}`,
+  },
+  queued: {
+    label: "Starting",
+    aria: "Cancel queued playback",
+    title: "Cancel queued playback",
+  },
+  loading: {
+    label: "Starting",
+    aria: "Cancel playback start",
+    title: "Cancel playback start",
+  },
+  playing: {
+    label: "Stop",
+    aria: "Stop playback (Ctrl+.)",
+    title: "Stop playback  ·  Ctrl+.",
+  },
+};
+
 /**
  * @param {object} opts
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
@@ -45,7 +76,8 @@ export function mountTransport({
   onBankChipClick = null,
 }) {
   const transportEl = mustEl("transport");
-  const stopBtn = mustEl("stop");
+  const playBtn = mustEl("play");
+  const playLabel = playBtn.querySelector(".transport__toggle-label");
   const bpmEl = mustEl("bpm-readout");
   const cycleEl = mustEl("cycle-readout");
   const playheadProgressEl = mustEl("playhead-progress");
@@ -247,22 +279,15 @@ export function mountTransport({
     if (rootEl) rootEl.dataset.playback = state;
     if (state !== lastAppliedState) {
       lastAppliedState = state;
+      const pres = TOGGLE_PRESENTATION[state] ?? TOGGLE_PRESENTATION.idle;
+      if (playLabel) playLabel.textContent = pres.label;
+      playBtn.setAttribute("aria-label", pres.aria);
+      playBtn.title = pres.title;
       try {
         onPlaybackStateChange(state);
       } catch (err) {
         console.warn("[strasbeat/transport] onPlaybackStateChange threw:", err);
       }
-    }
-    stopBtn.disabled = state === "idle";
-    if (state === "queued") {
-      stopBtn.title = "Cancel queued playback";
-      stopBtn.setAttribute("aria-label", "Cancel queued playback");
-    } else if (state === "loading") {
-      stopBtn.title = "Cancel playback start";
-      stopBtn.setAttribute("aria-label", "Cancel playback start");
-    } else {
-      stopBtn.title = "Stop playback (Ctrl+. or Alt+.)";
-      stopBtn.setAttribute("aria-label", "Stop playback");
     }
   }
 
