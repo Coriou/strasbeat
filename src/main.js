@@ -14,6 +14,10 @@ import {
   _getShaderNode,
   _getDeriver,
 } from "./strudel-ext/shader.js";
+// App-internal Hydra plumbing (kept out of the pattern-global barrel, same as
+// clearShader above): pause/resume Hydra's render loop based on canvas
+// visibility so a hidden full-viewport GL render never burns frames.
+import { setHydraRenderEnabled } from "./strudel-ext/hydra.js";
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { toggleComment } from "@codemirror/commands";
@@ -54,6 +58,7 @@ import {
   handleNewPatternClick,
   handleDuplicateClick,
   handleBulkDuplicateClick,
+  resolveWorkingCopy,
 } from "./patterns.js";
 import { showMidiImportDialog, getMidiFile } from "./ui/midi-import-dialog.js";
 import {
@@ -82,11 +87,37 @@ const { getAudioContext, webaudioOutput, initAudio, setLogger, soundMap, getSoun
 const APP_VERSION = __APP_VERSION__;
 const STRUDEL_VERSION = __STRUDEL_VERSION__;
 
+// ─── Build / version marker (visuals hardening) ──────────────────────────
+// Bump this string whenever the visuals (hydra/shader) wrapper or its wiring
+// changes. It is logged LOUDLY at boot so a person can confirm in DevTools
+// whether the running tab is on the new code at all — the single fastest way
+// to rule out "stale cached bundle / HMR didn't apply" when a fix appears to
+// have "no effect". If you do NOT see this exact line on a fresh load, you are
+// running OLD code: hard-reload (Cmd+Shift+R) / disable cache / restart `vite`.
+const VISUALS_REV = "rescap+observe+heal-2";
+console.info(
+  `[strasbeat] boot — app ${APP_VERSION} · strudel ${STRUDEL_VERSION} · ` +
+    `visuals rev: ${VISUALS_REV} · dpr=${typeof window !== "undefined" ? window.devicePixelRatio : "?"}`,
+);
+
 // ─── Auto-discover patterns ──────────────────────────────────────────────
 // Every .js file in /patterns must `export default` a string of Strudel code.
 // Adding/removing files triggers Vite HMR (see hot.accept below).
 const patternModules = import.meta.glob("../patterns/*.js", { eager: true });
 const { patterns, patternNames } = discoverPatterns(patternModules);
+
+// Does a pattern's whole-tune source transpile? Mirrors how the editor
+// evaluates a pattern (top-level await is wrapped). Used by the working-copy
+// auto-heal so a broken cached Demo copy can fall back to its disk original.
+function canTranspilePattern(code) {
+  if (typeof code !== "string") return false;
+  try {
+    transpiler(code, { wrapAsync: true, addReturn: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // ─── Persistence store ───────────────────────────────────────────────────
 // See design/work/09-pattern-persistence.md.
@@ -174,8 +205,29 @@ mountScopeControls({
 // mode-change subscription, geometry-change callback from mountPianoRollResize,
 // and a debounced window-resize listener.
 const rollPaneEl = document.getElementById("roll-pane");
+
+// Efficiency gate: Hydra renders a full-viewport GL frame EVERY rAF, which is
+// pure waste while #hydra-canvas is hidden (Visuals mode off and not
+// full-window). Recompute visibility on every state change and pause/resume
+// the render loop accordingly so idle GPU cost is zero. Visible iff:
+//   - full-window mode is on, OR
+//   - Visuals bottom-panel mode is active AND the roll pane has real size.
+function isHydraCanvasVisible() {
+  if (visualsFullWindow) return true;
+  if (bottomModes.getMode() !== "visuals") return false;
+  const rect = rollPaneEl?.getBoundingClientRect();
+  return !!rect && rect.height > 1 && rect.width > 1;
+}
+function updateHydraRenderGate() {
+  setHydraRenderEnabled(isHydraCanvasVisible());
+}
+
 function syncVisualsClip() {
   const cv = document.getElementById("hydra-canvas");
+  // The render gate must update even when the canvas does not yet exist (e.g.
+  // mode toggled before initHydra) — setHydraRenderEnabled is a no-op until a
+  // Hydra is live, so this is safe and keeps the gate authoritative.
+  updateHydraRenderGate();
   if (!cv) return;
   const active = bottomModes.getMode() === "visuals";
   if (!active) {
@@ -225,9 +277,19 @@ if (shared) {
   initialCode = shared.code;
 } else if (storeIndex.lastOpen) {
   initialName = storeIndex.lastOpen;
-  const record = store.get(initialName);
-  if (record) initialCode = record.code;
-  else if (initialName in patterns) initialCode = patterns[initialName];
+  // resolveWorkingCopy heals the stale-broken-cache class: if lastOpen is a
+  // shipped Demo whose working copy no longer transpiles (e.g. an old broken
+  // shader copy shadowing a fixed 05-shader-demo.js), it drops the copy and
+  // falls back to the disk original — so a non-compiling cache can't strand
+  // boot on the very pattern the user left open. User patterns and healthy
+  // edits are returned untouched.
+  const { code } = resolveWorkingCopy({
+    name: initialName,
+    patterns,
+    store,
+    canTranspile: canTranspilePattern,
+  });
+  if (code != null) initialCode = code;
   else {
     initialName = fallbackName;
     initialCode = patterns[fallbackName] ?? `// no patterns found\nsound("bd sd hh*4")`; // prettier-ignore
@@ -347,6 +409,11 @@ function applyVisualsFullWindow() {
   // Reserved /polish hook — no CSS targets it yet; will cover transport/rail dimming in full-window.
   shellEl.classList.toggle("shell--visuals-fullwindow", visualsFullWindow);
   if (!visualsFullWindow) syncVisualsClip(); // back to panel-clipped
+  // Keep the render gate authoritative across the full-window toggle (the OFF
+  // branch already routes through syncVisualsClip → updateHydraRenderGate, but
+  // the ON branch does not — call it directly so turning full-window ON resumes
+  // rendering and turning it OFF re-evaluates panel visibility).
+  updateHydraRenderGate();
 }
 
 function toggleVisualsFullWindow() {
@@ -1148,6 +1215,11 @@ function installTabState(snap) {
 tabs = createTabController({
   store,
   patterns,
+  // Auto-heal a broken cached Demo copy on tab open: if a shipped pattern's
+  // working copy no longer transpiles but the disk original does, drop the copy
+  // and use the original (lossless — a non-compiling cache isn't a real edit).
+  resolveCode: (name) =>
+    resolveWorkingCopy({ name, patterns, store, canTranspile: canTranspilePattern }).code,
   buildState: buildTabState,
   installState: (snap) => {
     installTabState(snap);

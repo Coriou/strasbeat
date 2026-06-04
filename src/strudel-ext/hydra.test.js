@@ -7,7 +7,105 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import { mini } from "@strudel/mini";
-import { H } from "./hydra.js";
+import {
+  H,
+  installNodeGlobalShim,
+  initHydra,
+  clearHydra,
+  setHydraRenderEnabled,
+  computeHydraCanvasSize,
+  _setHydraTestHarness,
+  _resetHydraTestHarness,
+} from "./hydra.js";
+
+// ─── Teardown / lifecycle harness ────────────────────────────────────────
+// initHydra/clearHydra cannot run against the real hydra-synth in Node (it
+// touches window/document/WebGL at construction). The wrapper exposes an
+// injection seam (_setHydraTestHarness) so the TEARDOWN CONTRACT — the actual
+// regression target for the "slow + crash" leak — is testable headlessly:
+// a fake Hydra records whether its regl context was destroyed + lost, and a
+// fake rAF lets us assert the render loop is stopped (no orphaned tick).
+//
+// This is the leak that made the feature crash-prone: hydra-synth starts a
+// raf-loop whose handle it discards (hydra-synth.js:124) and hush() neither
+// stops that loop nor destroys the regl WebGL context (hydra-synth.js:139).
+// So each stop→play leaked a live GL context + an orphaned full-viewport
+// render loop. clearHydra() must now: stop OUR loop, regl.destroy(), and
+// loseContext() the GL.
+
+function makeFakeHarness({ throwOnTick = false } = {}) {
+  const calls = {
+    constructed: 0,
+    hush: 0,
+    reglDestroy: 0,
+    loseContext: 0,
+    ticks: 0,
+    canvasRemoved: 0,
+  };
+  let rafCallbacks = new Map();
+  let rafId = 0;
+  const canvas = {
+    _removed: false,
+    remove() {
+      this._removed = true;
+      calls.canvasRemoved++;
+    },
+  };
+  const loseContextExt = {
+    loseContext() {
+      calls.loseContext++;
+    },
+  };
+  const fakeHydra = {
+    regl: {
+      _gl: {
+        getExtension(name) {
+          return name === "WEBGL_lose_context" ? loseContextExt : null;
+        },
+      },
+      destroy() {
+        calls.reglDestroy++;
+      },
+    },
+    hush() {
+      calls.hush++;
+    },
+    tick(_dt) {
+      calls.ticks++;
+      if (throwOnTick) throw new Error("simulated GPU/render failure");
+    },
+  };
+
+  _setHydraTestHarness({
+    // Replaces the dynamic import('hydra-synth') + getDrawContext + new Hydra.
+    makeHydra() {
+      calls.constructed++;
+      return { hydra: fakeHydra, canvas };
+    },
+    // Deterministic rAF: callbacks fire only when we call flushRaf().
+    raf(cb) {
+      const id = ++rafId;
+      rafCallbacks.set(id, cb);
+      return id;
+    },
+    caf(id) {
+      rafCallbacks.delete(id);
+    },
+  });
+
+  return {
+    calls,
+    canvas,
+    flushRaf(times = 1) {
+      for (let i = 0; i < times; i++) {
+        const entries = [...rafCallbacks.entries()];
+        rafCallbacks = new Map();
+        for (const [, cb] of entries) cb(performance.now());
+      }
+    },
+    pendingRafCount: () => rafCallbacks.size,
+  };
+}
 
 describe("guarded H()", () => {
   test("never throws on a pattern that is empty at the query instant", () => {
@@ -37,5 +135,276 @@ describe("guarded H()", () => {
     assert.equal(dense(), 0.7);
     assert.doesNotThrow(() => dense());
     assert.equal(dense(), 0.7);
+  });
+});
+
+describe("computeHydraCanvasSize() — GPU-OOM resolution cap", () => {
+  // The crash hypothesis: hydra-synth allocates ~12 full-res FBOs on first
+  // render; an innerWidth×innerHeight×dpr canvas on a 4K/retina display is
+  // hundreds of MB of VRAM in one burst → OOM → tab crash on the first tick
+  // (which fires when Visuals mode is entered). The clamp removes that path.
+
+  test("small viewport at dpr 1 is returned unscaled (no clamp needed)", () => {
+    const r = computeHydraCanvasSize({ innerWidth: 800, innerHeight: 600 });
+    assert.equal(r.width, 800);
+    assert.equal(r.height, 600);
+    assert.equal(r.pixelRatio, 1);
+    assert.equal(r.clamped, false);
+  });
+
+  test("caps pixelRatio at 1 (a retina dpr=2 must not double the buffer)", () => {
+    const r = computeHydraCanvasSize({
+      innerWidth: 1000,
+      innerHeight: 700,
+      pixelRatio: 2,
+    });
+    assert.equal(r.pixelRatio, 1, "pixelRatio must be capped to 1");
+    // 1000x700 already fits the 1280 cap, so size stays at the dpr-1 viewport.
+    assert.equal(r.width, 1000);
+    assert.equal(r.height, 700);
+    assert.equal(r.clamped, true, "capping dpr counts as clamped");
+  });
+
+  test("clamps the long edge to the max while preserving aspect ratio", () => {
+    // A 4K-ish landscape viewport: long edge must come down to 1280.
+    const r = computeHydraCanvasSize({
+      innerWidth: 3840,
+      innerHeight: 2160,
+      pixelRatio: 2,
+    });
+    assert.equal(r.width, 1280, "long edge clamped to the cap");
+    // aspect 3840:2160 = 16:9 → height = 1280 * 2160/3840 = 720.
+    assert.equal(r.height, 720, "aspect ratio preserved");
+    assert.equal(r.clamped, true);
+    assert.ok(
+      Math.max(r.width, r.height) <= 1280,
+      "no edge may exceed the cap",
+    );
+  });
+
+  test("clamps a portrait viewport on its (vertical) long edge", () => {
+    const r = computeHydraCanvasSize({ innerWidth: 1080, innerHeight: 2400 });
+    assert.equal(r.height, 1280, "vertical long edge clamped");
+    assert.ok(r.width < r.height);
+    assert.equal(r.clamped, true);
+  });
+
+  test("respects a custom maxLongEdge", () => {
+    const r = computeHydraCanvasSize({
+      innerWidth: 2000,
+      innerHeight: 1000,
+      maxLongEdge: 800,
+    });
+    assert.equal(r.width, 800);
+    assert.equal(r.height, 400);
+  });
+
+  test("degenerate 0/NaN viewport yields a valid 1x1, never 0x0 or NaN", () => {
+    const z = computeHydraCanvasSize({ innerWidth: 0, innerHeight: 0 });
+    assert.equal(z.width, 1);
+    assert.equal(z.height, 1);
+    const n = computeHydraCanvasSize({ innerWidth: NaN, innerHeight: NaN });
+    assert.ok(Number.isFinite(n.width) && n.width >= 1);
+    assert.ok(Number.isFinite(n.height) && n.height >= 1);
+  });
+});
+
+describe("installNodeGlobalShim() — Node global() shim for the bundled hydra-synth", () => {
+  // Regression for "[eval] error: global is not defined" when playing
+  // patterns/04-hydra-demo.js. Root cause: hydra-synth's offline npm bundle
+  // pulls in `right-now/browser.js`, whose top-level `global.performance`
+  // reference assumes a browserify-style `global` shim (which the unpkg CDN
+  // build had, but Vite's esbuild pre-bundle does NOT). initHydra() must
+  // define `globalThis.global` before importing hydra-synth or the import
+  // throws at module-eval time. This asserts the real shim used by
+  // initHydra() — not a copy of it — restores `global` when absent.
+  test("defines globalThis.global when it is missing (the browser case)", () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, "global");
+    try {
+      delete globalThis.global;
+      assert.equal(
+        typeof globalThis.global,
+        "undefined",
+        "precondition: global must be absent to prove the shim sets it",
+      );
+
+      installNodeGlobalShim();
+
+      assert.equal(
+        globalThis.global,
+        globalThis,
+        "after the shim, globalThis.global must point at globalThis",
+      );
+    } finally {
+      // Restore whatever was there before (in Node `global` exists natively).
+      if (saved) Object.defineProperty(globalThis, "global", saved);
+    }
+  });
+
+  test("is a no-op when global already exists (does not clobber it)", () => {
+    const sentinel = { iAmTheRealGlobal: true };
+    const saved = Object.getOwnPropertyDescriptor(globalThis, "global");
+    try {
+      globalThis.global = sentinel;
+
+      installNodeGlobalShim();
+
+      assert.equal(
+        globalThis.global,
+        sentinel,
+        "an existing global (e.g. Node's) must be left untouched",
+      );
+    } finally {
+      if (saved) Object.defineProperty(globalThis, "global", saved);
+      else delete globalThis.global;
+    }
+  });
+});
+
+describe("clearHydra() teardown contract (the leak that crashed the tab)", () => {
+  test("stops the render loop, destroys regl, and loses the WebGL context", async () => {
+    const h = makeFakeHarness();
+    try {
+      await initHydra();
+      // A live Hydra must be rendering: the loop scheduled a frame.
+      assert.ok(h.pendingRafCount() > 0, "initHydra must start a render loop");
+      h.flushRaf(3);
+      assert.ok(h.calls.ticks >= 3, "the render loop must drive hydra.tick");
+
+      clearHydra();
+
+      // 1. regl context fully destroyed (frees FBOs/textures/programs).
+      assert.equal(
+        h.calls.reglDestroy,
+        1,
+        "clearHydra must call regl.destroy()",
+      );
+      // 2. WebGL context explicitly lost (browser reclaims the context slot —
+      //    this is what prevents the ~16-context ceiling crash).
+      assert.equal(
+        h.calls.loseContext,
+        1,
+        "clearHydra must loseContext() so the browser reclaims the GL context",
+      );
+      // 3. canvas removed from the DOM.
+      assert.equal(
+        h.calls.canvasRemoved,
+        1,
+        "clearHydra must remove the canvas",
+      );
+
+      // 4. THE LEAK REGRESSION: after teardown the loop must be dead. Flushing
+      //    any still-pending frame must NOT advance hydra.tick — an orphaned
+      //    loop ticking a destroyed context is exactly the bug.
+      const ticksAfterClear = h.calls.ticks;
+      h.flushRaf(5);
+      assert.equal(
+        h.calls.ticks,
+        ticksAfterClear,
+        "no tick may fire after clearHydra — the render loop must be stopped",
+      );
+    } finally {
+      _resetHydraTestHarness();
+    }
+  });
+
+  test("re-init after clear builds exactly one fresh instance (no orphan)", async () => {
+    const h = makeFakeHarness();
+    try {
+      await initHydra();
+      clearHydra();
+      await initHydra();
+      // Two full lifecycles → two constructions, two destroys after the second
+      // clear. The point: clear truly reset state so init builds anew.
+      assert.equal(
+        h.calls.constructed,
+        2,
+        "each init after a clear constructs anew",
+      );
+      clearHydra();
+      assert.equal(
+        h.calls.reglDestroy,
+        2,
+        "each lifecycle destroys its own context",
+      );
+    } finally {
+      _resetHydraTestHarness();
+    }
+  });
+
+  test("repeated initHydra() without clear does NOT build a second instance", async () => {
+    // Re-eval (Ctrl+Enter) calls initHydra() every time; constructing a second
+    // Hydra would orphan the first's loop + context (the multiply-leaked case).
+    const h = makeFakeHarness();
+    try {
+      await initHydra();
+      await initHydra();
+      await initHydra();
+      assert.equal(
+        h.calls.constructed,
+        1,
+        "initHydra must be idempotent across re-eval — one instance only",
+      );
+    } finally {
+      _resetHydraTestHarness();
+    }
+  });
+
+  test("setHydraRenderEnabled(false) pauses the loop; (true) resumes it", async () => {
+    // Efficiency: Hydra must not render a full-viewport frame every rAF when
+    // its canvas is hidden (Visuals mode off). Pausing the loop drops the
+    // idle cost to zero.
+    const h = makeFakeHarness();
+    try {
+      await initHydra();
+      h.flushRaf(2);
+      const before = h.calls.ticks;
+
+      setHydraRenderEnabled(false);
+      h.flushRaf(5);
+      assert.equal(
+        h.calls.ticks,
+        before,
+        "a paused Hydra must not tick while hidden",
+      );
+
+      setHydraRenderEnabled(true);
+      assert.ok(h.pendingRafCount() > 0, "resuming must reschedule the loop");
+      h.flushRaf(2);
+      assert.ok(h.calls.ticks > before, "resuming must drive ticks again");
+    } finally {
+      // Leave render enabled for any later test, then reset the harness.
+      setHydraRenderEnabled(true);
+      _resetHydraTestHarness();
+    }
+  });
+
+  test("a throwing render is non-fatal: the loop STOPS, does not respin or rethrow", async () => {
+    // Crash-guard contract: a render error must surface as a stopped loop, NOT a
+    // spinning loop hammering a broken context every frame, and NEVER an
+    // exception that escapes the rAF (which would bubble as an uncaught error).
+    const h = makeFakeHarness({ throwOnTick: true });
+    try {
+      await initHydra();
+      // Flushing the queued frame triggers the throwing tick. It must not throw
+      // out of flushRaf (the guard catches it).
+      assert.doesNotThrow(() => h.flushRaf(1), "a render throw must be caught");
+      assert.equal(h.calls.ticks, 1, "the throwing tick ran exactly once");
+      // The loop must be stopped now — no pending frame, and further flushes do
+      // not advance ticks (we are NOT respinning a throwing render).
+      assert.equal(
+        h.pendingRafCount(),
+        0,
+        "a throwing render must STOP the loop (no rescheduled frame)",
+      );
+      h.flushRaf(5);
+      assert.equal(
+        h.calls.ticks,
+        1,
+        "no further ticks after a throw — the loop stays stopped",
+      );
+    } finally {
+      _resetHydraTestHarness();
+    }
   });
 });

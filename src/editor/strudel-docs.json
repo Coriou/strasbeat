@@ -7684,12 +7684,12 @@
   },
   "shader": {
     "signature": "shader(src: string)",
-    "doc": "Compile and render a drop-in fragment shader, with named uniforms driven by the playing pattern's events. Built-in uTime / uResolution are always provided. Auto-uniforms derive from the pattern automatically — type these verbatim into your GLSL:   - drum lanes bd / sd / hh → uKick / uSnare / uHat   - every active sound `name` → u_<name>, with each non-alphanumeric char     replaced by _ and a leading _ so digit-leading names stay legal GLSL     (gm_pad_warm → u_gm_pad_warm, 909-clap → u_909_clap)   - any note/n hap → uKeyVelocity Override/extend any of these with .uniform({ dest, gain }).  SINGLE-QUOTE RULE: the shader source MUST be single-quoted. Strudel's transpiler rewrites every DOUBLE-quoted string literal into a mini(...) call, which would turn your GLSL into a Pattern and break the node. Drum/ note patterns in the same file still use double quotes (correct for s(\"…\")). See CLAUDE.md \"the single-quote rule\".",
+    "doc": "Compile and render a drop-in fragment shader, with named uniforms driven by the playing pattern's events. Built-in uTime / uResolution are always provided. Auto-uniforms derive from the pattern automatically — type these verbatim into your GLSL:   - drum lanes bd / sd / hh → uKick / uSnare / uHat   - every active sound `name` → u_<name>, with each non-alphanumeric char     replaced by _ and a leading _ so digit-leading names stay legal GLSL     (gm_pad_warm → u_gm_pad_warm, 909-clap → u_909_clap)   - any note/n hap → uKeyVelocity Override/extend any of these with .uniform({ dest, gain }).  SINGLE-QUOTE RULE: the shader source MUST be single-quoted. Strudel's transpiler rewrites every DOUBLE-quoted string literal into a mini(...) call, which would turn your GLSL into a Pattern and break the node. Drum/ note patterns in the same file still use double quotes (correct for s(\"…\")). See CLAUDE.md \"the single-quote rule\".  MULTI-LINE SHADERS: a single-quoted string can't span multiple physical lines, and the transpiler ALSO rewrites backtick template literals into mini(...) — so a `multi-line backtick` source is NOT safe either. Write a readable multi-line shader by concatenating single-quoted lines with '+', each ending in '\\n':   await shader(     'precision mediump float;\\n' +     'uniform float uKick;\\n' +     'void main(){ gl_FragColor = vec4(uKick, 0., 0., 1.); }\\n'   ) Every piece stays single-quoted (none gets mini-rewritten), it parses as plain JS, and the \\n keep GLSL line numbers intact in compile errors.",
     "params": [
       {
         "name": "src",
         "type": "string",
-        "doc": "single-quoted GLSL fragment shader source"
+        "doc": "single-quoted GLSL fragment shader source (concatenate"
       }
     ],
     "examples": [

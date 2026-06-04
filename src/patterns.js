@@ -81,6 +81,64 @@ export function computeDirtySet(patternNames, patterns, store) {
   return dirty;
 }
 
+/**
+ * Resolve the code for a pattern, auto-healing a broken cached working copy.
+ *
+ * The store (localStorage working copy) normally SHADOWS the shipped disk
+ * original — that's how live edits to a Demo persist. But a working copy that
+ * no longer *transpiles* is not an edit worth preserving: it can only error
+ * the instant you press play. The classic case is a Demo whose disk source was
+ * fixed upstream (e.g. a multi-line single-quoted shader string corrected to
+ * `'…\n' + '…\n'`) while a stale, broken copy from before the fix lingers in
+ * localStorage and keeps winning at boot — the user sees `Unterminated string
+ * constant` forever despite the disk file being correct.
+ *
+ * Auto-heal rule (lossless): for a SHIPPED pattern only (one with a disk
+ * original in `patterns`), if the working copy FAILS to transpile but the disk
+ * original SUCCEEDS, drop the working copy and fall back to the original. We
+ * never touch user patterns (no disk fallback exists), never drop a copy that
+ * transpiles (a real edit), and never drop a copy when the original ALSO fails
+ * (dropping would lose data without fixing anything). `canTranspile(code)` is
+ * injected so this stays headlessly testable and `patterns.js` keeps no
+ * transpiler dependency.
+ *
+ * @param {object} a
+ * @param {string} a.name
+ * @param {Record<string,string>} a.patterns  shipped disk originals (name→code)
+ * @param {{ get(name): {code?:string}|null, delete(name): void }} a.store
+ * @param {(code: string) => boolean} a.canTranspile  true iff `code` transpiles
+ * @returns {{ code: string|undefined, healed: boolean }}
+ *   code: the code to load; healed: true iff a broken copy was dropped.
+ */
+export function resolveWorkingCopy({ name, patterns, store, canTranspile }) {
+  const record = store.get(name);
+  const hasOriginal = name in patterns;
+  // No working copy → original (if any). Nothing to heal.
+  if (!record || typeof record.code !== "string") {
+    return { code: hasOriginal ? patterns[name] : undefined, healed: false };
+  }
+  // User pattern (no disk fallback) → always use the working copy as-is.
+  if (!hasOriginal) return { code: record.code, healed: false };
+  // Working copy transpiles → it's a real edit; honor it (the normal path).
+  if (canTranspile(record.code)) return { code: record.code, healed: false };
+  // Working copy is broken. Only heal if the ORIGINAL is itself healthy —
+  // otherwise dropping the copy loses data without producing a working file.
+  if (!canTranspile(patterns[name])) {
+    console.warn(
+      `[strasbeat] working copy of "${name}" fails to transpile, and so does ` +
+        `the shipped original — keeping the working copy (nothing to fall back to).`,
+    );
+    return { code: record.code, healed: false };
+  }
+  console.warn(
+    `[strasbeat] working copy of "${name}" no longer transpiles — falling back ` +
+      `to the shipped original and dropping the broken cached copy. (A ` +
+      `non-compiling cache is not a real edit; your disk version is used.)`,
+  );
+  store.delete(name);
+  return { code: patterns[name], healed: true };
+}
+
 /** Build ordered list of user pattern names from the store index. */
 export function getUserPatternNames(store) {
   const idx = store.getIndex();

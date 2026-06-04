@@ -227,15 +227,32 @@ function createNode() {
         rafId = null;
       }
     },
+    // Deterministic GPU teardown (mirrors clearHydra): free the program, then
+    // ask the browser to reclaim the WebGL context immediately rather than
+    // waiting for GC. Without this, each stop→play strands a context until the
+    // GC runs, compounding the ~16-context ceiling that hydra's canvas also
+    // pushes on. Loud-failure-safe: wrapped so a teardown hiccup can't throw.
+    destroy: () => {
+      try {
+        if (program) {
+          gl.deleteProgram(program);
+          program = null;
+        }
+        gl.getExtension("WEBGL_lose_context")?.loseContext();
+      } catch {
+        /* never let teardown throw */
+      }
+    },
     hasProgram: () => program != null,
     canvasEl: canvas,
   };
 }
 
-// Teardown — removes the canvas + stops the loop. Called on stop / re-init /
-// HMR dispose (mirrors clearHydra).
+// Teardown — removes the canvas, stops the loop, frees the GL context. Called
+// on stop / re-init / HMR dispose (mirrors clearHydra).
 export function clearShader() {
   node?.stop?.();
+  node?.destroy?.();
   document.getElementById(CANVAS_ID)?.remove();
   node = null;
   // Reset the shared deriver too so teardown is symmetric: otherwise a
@@ -293,7 +310,21 @@ function noopShaderApi() {
  * note patterns in the same file still use double quotes (correct for s("…")).
  * See CLAUDE.md "the single-quote rule".
  *
- * @param {string} src single-quoted GLSL fragment shader source
+ * MULTI-LINE SHADERS: a single-quoted string can't span multiple physical
+ * lines, and the transpiler ALSO rewrites backtick template literals into
+ * mini(...) — so a `multi-line backtick` source is NOT safe either. Write a
+ * readable multi-line shader by concatenating single-quoted lines with '+',
+ * each ending in '\n':
+ *   await shader(
+ *     'precision mediump float;\n' +
+ *     'uniform float uKick;\n' +
+ *     'void main(){ gl_FragColor = vec4(uKick, 0., 0., 1.); }\n'
+ *   )
+ * Every piece stays single-quoted (none gets mini-rewritten), it parses as
+ * plain JS, and the \n keep GLSL line numbers intact in compile errors.
+ *
+ * @param {string} src single-quoted GLSL fragment shader source (concatenate
+ *   single-quoted '…\n' lines with '+' for multi-line shaders)
  * @example
  * await shader('precision mediump float; uniform float uKick; void main(){ gl_FragColor = vec4(uKick,0.,0.,1.); }')
  */

@@ -87,6 +87,11 @@ export function migrateOpenSet(store) {
  *   flushToStore()                   → void            immediate autosave flush
  *   setCurrentName(name)             → void            wordmark + rail highlight
  *   onAfterSwitch?(name)             → void            optional UI hook (strip repaint)
+ *   resolveCode?(name)               → string          code for a tab (default:
+ *                                                       working copy else shipped).
+ *                                                       Host injects an auto-healing
+ *                                                       resolver so a broken cached
+ *                                                       Demo copy falls back to disk.
  */
 export function createTabController(deps) {
   const {
@@ -98,6 +103,7 @@ export function createTabController(deps) {
     flushToStore,
     setCurrentName,
     onAfterSwitch = () => {},
+    resolveCode = null,
   } = deps;
 
   let openItems = [];
@@ -119,6 +125,13 @@ export function createTabController(deps) {
   }
 
   function codeFor(name) {
+    // Host may inject an auto-healing resolver (drops a broken cached Demo copy
+    // and returns the disk original). Default preserves the original behavior:
+    // working copy shadows the shipped original.
+    if (resolveCode) {
+      const code = resolveCode(name);
+      if (code != null) return code;
+    }
     const rec = store.get(name);
     if (rec) return rec.code;
     if (name in patterns) return patterns[name];
