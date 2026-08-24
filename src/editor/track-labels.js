@@ -18,13 +18,11 @@ export function getLabelShape(rawName) {
   const body = hasSoloPrefix ? rawName.slice(1) : rawName;
   const muted = rawName.startsWith('_') || rawName.endsWith('_');
   const name = body.replace(/^_+/, '').replace(/_+$/, '');
-  const muteStyle = !muted ? null : body.startsWith('_') ? 'prefix' : 'suffix';
   return {
     name,
     muted,
     soloed: hasSoloPrefix && !muted,
     soloSuppressed: hasSoloPrefix && muted,
-    muteStyle,
   };
 }
 
