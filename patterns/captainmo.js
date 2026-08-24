@@ -159,7 +159,7 @@ const rightHand = note(
   ),
 ).slice([0, 0.25, 0.5, 0.75], "0 1 1 <2 3>")
 
-Slead: rightHand
+lead: rightHand
   .s("gm_electric_guitar_clean")
   .room(0.5)
   .roomsize(4)
