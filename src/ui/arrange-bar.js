@@ -18,8 +18,6 @@
 //
 // See design/work/18-arrangement-timeline.md for the full spec.
 
-import { StateEffect } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
 import {
   parseArrangements,
   findTrailingDurationTransform,
@@ -38,12 +36,14 @@ import { makeIcon } from "./icons.js";
  * @param {object} opts
  * @param {HTMLElement} opts.container    outer element (gets `hidden` when empty)
  * @param {import("@codemirror/view").EditorView} opts.view  CodeMirror view
+ * @param {import("../editor/doc-sync.js").createDocSync} opts.docSync  shared doc-change signal
  * @param {() => any} opts.getScheduler   returns editor.repl.scheduler (or null)
  * @param {() => Promise<any>} opts.onEvaluate  trigger a re-evaluate (used after solo toggle)
  */
 export function mountArrangeBar({
   container,
   view,
+  docSync,
   getScheduler,
   onEvaluate,
 }) {
@@ -447,13 +447,13 @@ export function mountArrangeBar({
     scheduleRebuild();
   });
 
-  // Editor edits — keep the parser-preview fresh even before first play.
-  view.dispatch({
-    effects: StateEffect.appendConfig.of(
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) scheduleRebuild();
-      }),
-    ),
+  // Editor edits — keep the parser-preview fresh even before first play — plus
+  // tab swaps, which change the buffer without firing any updateListener.
+  // docSync owns the signal for all three bottom bars; see
+  // src/editor/doc-sync.js for why this is NOT our own appendConfig listener.
+  docSync.subscribe(({ immediate }) => {
+    if (immediate) rebuild();
+    else scheduleRebuild();
   });
 
   // Initial render (subscribeRegistry already called fn once above; this

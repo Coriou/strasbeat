@@ -58,6 +58,7 @@ import {
 } from "./editor-setup.js";
 import { createTabController } from "./tabs.js";
 import { freshTabState, liveCompartmentValues } from "./editor/build-editor-state.js";
+import { createDocSync } from "./editor/doc-sync.js";
 import { readSelectedCompletion } from "./editor/keymap-universal.js";
 import { previewSoundName, insertSoundName } from "./editor-actions.js";
 import { installDefaultStrudelLogger } from "./strudel-logger.js";
@@ -913,6 +914,21 @@ editor.editor.dispatch({
   ]),
 });
 
+// ─── Doc-change fan-out for the bottom bars ──────────────────────────────
+// The single doc-change signal the track bar, arrange bar and beat grid all
+// render from. Installed HERE — before `cleanBaseState` is captured below — so
+// it lands in the config every per-tab EditorState inherits. The mounts
+// subscribe much later (they're built at the bottom of this file); subscribing
+// is a plain closure push, so it reaches every tab no matter when it happens.
+//
+// Do NOT go back to a per-mount `StateEffect.appendConfig` listener: anything
+// appended after the capture below is invisible to every fresh tab. That was
+// BUG-2 in design/work/27, and doc-sync.js's header documents it in full.
+const docSync = createDocSync();
+editor.editor.dispatch({
+  effects: StateEffect.appendConfig.of([docSync.extension]),
+});
+
 // ─── Pattern tabs: playing-ownership helpers ─────────────────────────────
 // refreshNowPlaying is a hoisted function so it can be called from
 // onPlaybackStateChange (which fires synchronously at transport mount, before
@@ -955,10 +971,16 @@ function updateEmptyState() {
 // we capture/restore scroll alongside the state.
 // Captured ONCE here, at the controller block — after the editor is fully
 // configured (dispatchEditorExtensions + installCompletions + the appended
-// updateListeners) and before any user edit, so it has the full config with an
-// EMPTY undo history. EditorStates are immutable, so this stays a clean base
-// for every fresh tab; freshTabState reconfigures it to the current live
-// compartment values at build time.
+// updateListeners, including docSync above) and before any user edit, so it has
+// the full config with an EMPTY undo history. EditorStates are immutable, so
+// this stays a clean base for every fresh tab; freshTabState reconfigures it to
+// the current live compartment values at build time.
+//
+// INVARIANT: nothing below this line may add to the editor's config. A
+// `StateEffect.appendConfig` dispatched after this point exists only in the
+// tab that was live at the time and is silently dead in every other one
+// (design/work/27 BUG-2). Views that need to react to the buffer subscribe to
+// `docSync` instead — that list is a closure, not CodeMirror config.
 const cleanBaseState = editor.editor.state;
 function buildTabState({ code }) {
   return {
@@ -986,6 +1008,12 @@ function installTabState(snap) {
   // or evaluate() would play the previous tab's buffer.
   editor.code = editor.editor.state.doc.toString();
   editor.repl.setCode?.(editor.code);
+  // Same reason: the bottom bars are driven by docSync, whose updateListener
+  // setState skips. Without this the track bar keeps showing the OUTGOING tab's
+  // tracks and its buttons act on names the new buffer may not have — a dead
+  // no-op at best, the wrong track at worst (design/work/27 BUG-2). `immediate`
+  // because the repaint has to beat the user's next click, not wait a frame.
+  docSync.notify({ immediate: true });
   // Restore scroll after the new state lays out (setState resets it).
   const scroller = editor.editor.scrollDOM;
   if (scroller) {
@@ -1289,11 +1317,13 @@ mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
 mountTrackBar({
   container: document.getElementById("track-bar"),
   view: editor.editor,
+  docSync,
   onEvaluate: () => editor.evaluate(),
 });
 mountArrangeBar({
   container: document.getElementById("arrange-bar"),
   view: editor.editor,
+  docSync,
   getScheduler: () => editor?.repl?.scheduler ?? null,
   onEvaluate: () => editor.evaluate(),
 });
@@ -1310,6 +1340,7 @@ mountArrangeBar({
 beatGrid = mountBeatGrid({
   container: canvas.parentElement,
   view: editor.editor,
+  docSync,
   onLanesChange: (count) => bottomModes.setBeatsAvailable(count > 0),
   getSoundMap: () => soundMap.get(),
   // Playhead sweep reads editor.repl.scheduler.now() each frame — same

@@ -13,13 +13,11 @@
 // (PALETTE[i % 10]), which matches the insertion-order behavior of the piano
 // roll's colorForKey Map when labels are not reordered mid-session.
 
-import { StateEffect } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
 import { parseLabels, toggleMute, toggleSolo } from "../editor/track-labels.js";
 import { computeNewSelection } from "../editor/format.js";
 import { PALETTE } from "./palette.js";
 
-export function mountTrackBar({ container, view, onEvaluate }) {
+export function mountTrackBar({ container, view, docSync, onEvaluate }) {
   function rebuild() {
     const code = view.state.doc.toString();
     const labels = parseLabels(code);
@@ -146,11 +144,11 @@ export function mountTrackBar({ container, view, onEvaluate }) {
     });
   }
 
-  view.dispatch({
-    effects: StateEffect.appendConfig.of(
-      EditorView.updateListener.of((update) => {
-        if (update.docChanged) scheduleRebuild();
-      }),
-    ),
+  // Re-render on every doc change and on every tab swap. docSync owns the
+  // signal for all three bottom bars — see src/editor/doc-sync.js for why this
+  // is NOT a StateEffect.appendConfig listener of our own.
+  docSync.subscribe(({ immediate }) => {
+    if (immediate) rebuild();
+    else scheduleRebuild();
   });
 }

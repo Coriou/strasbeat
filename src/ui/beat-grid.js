@@ -12,7 +12,6 @@
 //
 // See design/work/19-beat-grid.md for the full spec, including phasing.
 
-import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { parseDrumLanes, READ_ONLY_REASONS } from "../editor/drum-parse.js";
 import {
@@ -247,6 +246,8 @@ const READ_ONLY_BADGES = {
  * @param {object} opts
  * @param {HTMLElement} opts.container  host element (typically .roll-pane)
  * @param {EditorView} opts.view        CodeMirror view
+ * @param {{ subscribe: Function }} opts.docSync  shared doc-change signal
+ *   (src/editor/doc-sync.js) — fires on buffer edits and on tab swaps
  * @param {() => void} [opts.onLanesChange]
  *   fired when the lane count transitions zero ↔ non-zero
  * @param {() => Record<string, any>} [opts.getSoundMap]
@@ -266,6 +267,7 @@ const READ_ONLY_BADGES = {
 export function mountBeatGrid({
   container,
   view,
+  docSync,
   onLanesChange,
   getSoundMap = () => ({}),
   onPreview = null,
@@ -629,13 +631,6 @@ export function mountBeatGrid({
   // Initial render and live updates on doc change.
   rebuild();
 
-  // Track the last doc version we rendered. A raw string compare is
-  // expensive for large docs; the CM doc's identity changes on every
-  // transaction so a reference-equality check is the cheapest signal
-  // that nothing has happened yet. Length is a fast fallback.
-  let lastDoc = view.state.doc;
-  let lastLen = lastDoc.length;
-
   // scheduleRebuild runs the next tick via a microtask — fast enough
   // that multiple dispatches inside the same stack collapse into one
   // rebuild, robust against rAF throttling in background tabs
@@ -646,39 +641,22 @@ export function mountBeatGrid({
     scheduled = true;
     queueMicrotask(() => {
       scheduled = false;
-      lastDoc = view.state.doc;
-      lastLen = lastDoc.length;
       rebuild();
     });
   }
 
-  view.dispatch({
-    effects: StateEffect.appendConfig.of(
-      EditorView.updateListener.of((u) => {
-        if (u.docChanged) scheduleRebuild();
-      }),
-    ),
+  // Doc changes and tab swaps, both via docSync — see src/editor/doc-sync.js.
+  //
+  // This used to be a per-mount StateEffect.appendConfig listener plus a
+  // permanent 100ms setInterval poll, added because that listener "sometimes
+  // stopped firing after unrelated CM reconfigurations". The real cause was
+  // BUG-2 in design/work/27: the listener was appended after main.js captured
+  // the clean base EditorState, so it was missing from every tab built later,
+  // and the poll was what kept the grid alive. Root cause fixed, poll gone.
+  docSync.subscribe(({ immediate }) => {
+    if (immediate) rebuild();
+    else scheduleRebuild();
   });
-
-  // Belt-and-suspenders: the StateEffect.appendConfig listener above
-  // sometimes stops firing after unrelated CM reconfigurations —
-  // reproducible in both beat-grid and arrange-bar during the same
-  // session. A 100ms interval poll catches every missed doc update.
-  // Text objects are reference-compared so the common no-op case is
-  // a single pointer check; real diffs fall through to scheduleRebuild
-  // which coalesces with the listener via a shared rAF slot.
-  // setInterval (not rAF) so the poll keeps working in background
-  // tabs and when the throttled-rAF path is squashed by the browser.
-  const pollHandle = setInterval(() => {
-    if (!root.isConnected) {
-      clearInterval(pollHandle);
-      return;
-    }
-    const doc = view.state.doc;
-    if (doc !== lastDoc || doc.length !== lastLen) {
-      scheduleRebuild();
-    }
-  }, 100);
 
   // ─── Playhead rAF loop ──────────────────────────────────────────────
   // One loop for the whole grid. Gates itself on visibility + playback so
