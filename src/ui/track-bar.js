@@ -3,15 +3,18 @@
 //
 // Mounted once from main.js after the editor is fully set up:
 //
-//   mountTrackBar({ container, view, onEvaluate })
+//   mountTrackBar({ container, view, docSync, onEvaluate })
 //
 // The strip auto-hides (via container.hidden) when the pattern has no named
 // labels, causing the auto-sized grid row to collapse to 0 height. It
 // reappears as soon as labels are detected on the next doc change.
 //
 // Palette color assignment uses the label's index in source order
-// (PALETTE[i % 10]), which matches the insertion-order behavior of the piano
-// roll's colorForKey Map when labels are not reordered mid-session.
+// (PALETTE[i % PALETTE.length]). The piano roll derives its color the same
+// way, from the same parseLabels array — `PALETTE[labels.indexOf(label) %
+// PALETTE.length]` at piano-roll.js:411 — so the two agree by construction,
+// not by coincidence. colorForKey's insertion-order Map is only the piano
+// roll's fallback for haps it cannot attribute to a label at all.
 
 import { parseLabels, toggleMute, toggleSolo } from "../editor/track-labels.js";
 import { computeNewSelection } from "../editor/format.js";
