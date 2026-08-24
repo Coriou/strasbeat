@@ -18,9 +18,27 @@ import { computeNewSelection } from "../editor/format.js";
 import { PALETTE } from "./palette.js";
 
 export function mountTrackBar({ container, view, docSync, onEvaluate }) {
+  // rebuild() runs on every doc change, so the duplicate-name warning is
+  // deduped by the offending set — otherwise a single bad file would spam the
+  // console once per keystroke. Reset when the names stop colliding.
+  let warnedDuplicates = "";
+
   function rebuild() {
     const code = view.state.doc.toString();
     const labels = parseLabels(code);
+
+    const duplicates = [...new Set(labels.filter((l) => l.duplicate).map((l) => l.displayName))];
+    const dupKey = duplicates.join(",");
+    if (dupKey !== warnedDuplicates) {
+      warnedDuplicates = dupKey;
+      if (duplicates.length) {
+        console.warn(
+          `[strasbeat/track-bar] duplicate track ${duplicates.length > 1 ? "names" : "name"} ${duplicates
+            .map((n) => `"${n}"`)
+            .join(", ")}: Strudel keeps only the last block with a given label, so the earlier one never plays and its mute/solo button does nothing. Rename one of them.`,
+        );
+      }
+    }
 
     // Clear previous children without innerHTML to avoid unnecessary reflow.
     while (container.firstChild) container.removeChild(container.firstChild);
@@ -63,6 +81,12 @@ export function mountTrackBar({ container, view, docSync, onEvaluate }) {
       // No toggle can write `S<name>_` any more, but a hand-edited file can
       // still contain it. Say what Strudel actually does with it rather than
       // reporting a state it will not honour (design/work/27 BUG-1).
+      // Duplicate names are a broken file, not a state: Strudel keeps only the
+      // last block with a given id and the toggles target the first, so the
+      // button is an audible no-op. Say so rather than looking functional.
+      const dupText = label.duplicate
+        ? " · duplicate name — only the last block plays, so this button does nothing"
+        : "";
       const stateText = label.soloSuppressed
         ? "Muted — the S prefix is ignored while muted"
         : label.muted
@@ -70,10 +94,11 @@ export function mountTrackBar({ container, view, docSync, onEvaluate }) {
           : label.soloed
             ? "Soloed"
             : "Active";
-      btn.title = `${displayName} · ${stateText} · Click mute · Shift-click solo`;
+      if (label.duplicate) btn.classList.add("track-bar__entry--duplicate");
+      btn.title = `${displayName} · ${stateText}${dupText} · Click mute · Shift-click solo`;
       btn.setAttribute(
         "aria-label",
-        `${displayName}. ${stateText}. Click toggles mute. Shift-click toggles solo.`,
+        `${displayName}. ${stateText}.${dupText ? ` Warning: ${dupText.slice(3)}.` : ""} Click toggles mute. Shift-click toggles solo.`,
       );
 
       const dot = document.createElement("span");

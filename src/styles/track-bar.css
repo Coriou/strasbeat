@@ -116,14 +116,11 @@
   --track-entry-fg: var(--text);
 }
 
-.track-bar__entry--muted.track-bar__entry--soloed {
-  --track-entry-bg: color-mix(
-    in oklch,
-    var(--accent-wash) 58%,
-    var(--surface-2)
-  );
-  --track-entry-bd: color-mix(in oklch, var(--accent) 30%, var(--border));
-  --track-entry-fg: var(--text);
+/* A duplicated track name is a broken file, not a state: Strudel keeps only
+   the last block with a given label, so this button is an audible no-op.
+   Tinted with --rec, the semantic "something is wrong" hue (SYSTEM.md § 5). */
+.track-bar__entry--duplicate {
+  --track-entry-bd: color-mix(in oklch, var(--rec) 45%, var(--border));
 }
 
 /* Palette dot matching the piano roll layer color. */

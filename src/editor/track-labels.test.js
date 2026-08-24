@@ -317,6 +317,45 @@ describe('mute + solo are mutually exclusive (design/work/27 BUG-1)', () => {
   });
 });
 
+describe('duplicate track names', () => {
+  const CODE = [
+    'drums: s("bd*2")',
+    'lead: note("c4")',
+    'lead: note("e4")',
+  ].join('\n');
+
+  test('every label in a duplicated group is flagged', () => {
+    assert.deepEqual(
+      parseLabels(CODE).map((l) => ({ name: l.displayName, duplicate: l.duplicate })),
+      [
+        { name: 'drums', duplicate: false },
+        { name: 'lead', duplicate: true },
+        { name: 'lead', duplicate: true },
+      ],
+    );
+  });
+
+  test('anonymous labels are never duplicates — they get distinct ids', () => {
+    // `$: … $: …` is the normal drum idiom, not a mistake: repl.mjs appends an
+    // incrementing index to every id containing `$`, and parseLabels mirrors
+    // that with $1/$2. Flagging these would cry wolf on most patterns here.
+    assert.deepEqual(
+      parseLabels('$: s("bd")\n$: s("sd")').map((l) => l.duplicate),
+      [false, false],
+    );
+  });
+
+  test('muting a duplicated track is an audible no-op', () => {
+    // Why the flag is worth having. repl.mjs registers with
+    // `pPatterns[id] = this`, so the LAST block of a duplicated name wins,
+    // while findTargetLabel targets the FIRST. Muting the first just hands
+    // the id to the second — the button looks like it worked, and nothing
+    // about the sound changes, in either direction, forever.
+    assert.deepEqual(audibleTracks(CODE), ['drums', 'lead']);
+    assert.deepEqual(audibleTracks(toggleMute(CODE, 'lead')), ['drums', 'lead']);
+  });
+});
+
 describe('toggle round-trips', () => {
   // Applying the same toggle twice must return the buffer byte-for-byte, so a
   // mute-then-unmute leaves nothing in the diff.

@@ -69,6 +69,26 @@ function assignAnonymousNames(labels) {
   }
 }
 
+// Flag every label whose display name is shared with another. Strudel keeps
+// only the LAST block of a duplicated id (`pPatterns[id] = this` overwrites),
+// while findTargetLabel below targets the FIRST — so a mute click on such a
+// track just hands the id to the other block and nothing audible changes.
+// Both members of the pair are flagged: the whole group is broken, and there
+// is no principled way to say which one the author meant.
+//
+// Anonymous `$` labels are exempt by construction — repl.mjs appends an
+// incrementing index to any id containing `$`, so they never collide, and
+// assignAnonymousNames mirrors that as $1/$2/…
+function flagDuplicates(labels) {
+  const counts = new Map();
+  for (const label of labels) {
+    counts.set(label.displayName, (counts.get(label.displayName) ?? 0) + 1);
+  }
+  for (const label of labels) {
+    label.duplicate = counts.get(label.displayName) > 1;
+  }
+}
+
 function finalizeRanges(labels, code) {
   const lineCount = getLineCount(code);
   for (let i = 0; i < labels.length; i++) {
@@ -223,6 +243,7 @@ export function parseLabels(code) {
   }
 
   assignAnonymousNames(labels);
+  flagDuplicates(labels);
   finalizeRanges(labels, code);
   return labels;
 }
