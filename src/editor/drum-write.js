@@ -241,28 +241,14 @@ export function resolveSoundKey(soundMap, bank, sound) {
 //   _$        muted (prefix)
 //   $_        muted (suffix)
 //   S$        soloed
-//   S$_       soloed + muted
-//   _S$       (parsed as muted + soloed — underscore prefix wins)
 //
-// We preserve the existing mute-style (prefix vs. suffix) when the user
-// flips solo, so the diff stays small.
-
-function decorateLabel(core, muted, soloed, muteStyle) {
-  let body = core;
-  if (muted) {
-    // When solo is on, the `S` takes the prefix slot — so mute has to go
-    // to the suffix. Otherwise the parser reads `S_$` as "soloed, not
-    // muted" (the leading `S` strips off; the remaining body `_$` doesn't
-    // start or end with `_`, so no mute is detected). Forcing suffix when
-    // soloed keeps both decorations observable.
-    const style = soloed ? "suffix" : muteStyle;
-    body = style === "prefix" ? `_${body}` : `${body}_`;
-  }
-  if (soloed) {
-    body = `S${body}`;
-  }
-  return body;
-}
+// Mute and solo are MUTUALLY EXCLUSIVE — `S$_` is deliberately unwritable.
+// repl.mjs's p() short-circuits a `_`-decorated id to silence before it is
+// registered, so such a lane is dropped AND never reaches the solo scan, which
+// means solo filtering is skipped for the whole pattern: the one lane you asked
+// to hear is the only one silenced. The beat grid's lane buttons are one of
+// four entry points into this rule; track-labels.js enforces the same one for
+// the track bar, the keymap and the command palette. See design/work/27 BUG-1.
 
 /**
  * Replace just the label name (`$`, `_$`, `S$`, etc.) with a freshly
@@ -281,34 +267,20 @@ function changeForLabelRewrite(lane, nextRaw) {
 }
 
 /**
- * Flip the `_` mute decoration on the lane label. Preserves solo + original
- * mute-style (prefix `_$` vs suffix `$_`).
+ * Flip the `_` mute decoration on the lane label. Muting clears any solo.
+ * New mutes use the prefix spelling (`_$`); both spellings unmute.
  */
 export function changeForMuteToggle(lane) {
   if (!lane) return null;
-  const muteStyle =
-    !lane.soloed && lane.rawLabel?.startsWith("_")
-      ? "prefix"
-      : lane.rawLabel?.endsWith("_")
-        ? "suffix"
-        : "prefix"; // default new mute goes to prefix, same as track-labels.js
-  const nextRaw = decorateLabel("$", !lane.muted, !!lane.soloed, muteStyle);
-  return changeForLabelRewrite(lane, nextRaw);
+  return changeForLabelRewrite(lane, lane.muted ? "$" : "_$");
 }
 
 /**
- * Flip the `S` solo decoration on the lane label. Preserves mute + style.
+ * Flip the `S` solo decoration on the lane label. Soloing clears any mute.
  */
 export function changeForSoloToggle(lane) {
   if (!lane) return null;
-  const muteStyle =
-    !lane.soloed && lane.rawLabel?.startsWith("_")
-      ? "prefix"
-      : lane.rawLabel?.endsWith("_")
-        ? "suffix"
-        : "prefix";
-  const nextRaw = decorateLabel("$", !!lane.muted, !lane.soloed, muteStyle);
-  return changeForLabelRewrite(lane, nextRaw);
+  return changeForLabelRewrite(lane, lane.soloed ? "$" : "S$");
 }
 
 /**

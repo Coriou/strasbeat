@@ -1,14 +1,31 @@
-function getLabelShape(rawName) {
-  const soloed = rawName.length > 1 && rawName.startsWith('S');
-  const body = soloed ? rawName.slice(1) : rawName;
+// Decode one raw label name (`lead`, `_lead`, `lead_`, `Slead`, `$`, …) into
+// the state the ENGINE will act on — not the state the characters suggest.
+//
+// @strudel/core repl.mjs applies its two rules in a fixed order (v1.2.6):
+//   p()   (:172) returns silence for any id starting or ending in `_`, and
+//         returns BEFORE registering the id in pPatterns.
+//   solo  (:240) scans pPatterns only, keeping S-prefixed keys once any is seen.
+// So a muted track never reaches the solo scan: mute wins, and a `Slead_` label
+// is not merely "both" — its solo is inert, and because it never registers, it
+// also fails to trigger solo filtering for the rest of the pattern.
+//
+// `soloed` therefore reports the effective state. `soloSuppressed` flags the
+// discrepancy for a hand-written label so the UI can say what is happening
+// rather than describing a state Strudel will not honour. No toggle can emit
+// that combination — see toggleMute/toggleSolo and design/work/27 BUG-1.
+export function getLabelShape(rawName) {
+  const hasSoloPrefix = rawName.length > 1 && rawName.startsWith('S');
+  const body = hasSoloPrefix ? rawName.slice(1) : rawName;
   const muted = rawName.startsWith('_') || rawName.endsWith('_');
   const name = body.replace(/^_+/, '').replace(/_+$/, '');
-  const muteStyle = !soloed && body.startsWith('_')
-    ? 'prefix'
-    : muted
-      ? 'suffix'
-      : null;
-  return { name, muted, soloed, muteStyle };
+  const muteStyle = !muted ? null : body.startsWith('_') ? 'prefix' : 'suffix';
+  return {
+    name,
+    muted,
+    soloed: hasSoloPrefix && !muted,
+    soloSuppressed: hasSoloPrefix && muted,
+    muteStyle,
+  };
 }
 
 function getLineCount(code) {
@@ -228,13 +245,11 @@ export function toggleMute(code, labelName) {
     console.warn(`[strasbeat/track-labels] could not find label "${labelName}" for mute toggle`);
     return code;
   }
-  const rawName = label.muted
-    ? label.soloed
-      ? `S${label.name}`
-      : label.name
-    : label.soloed
-      ? `S${label.name}_`
-      : `${label.name}_`;
+  // Mute and solo are mutually exclusive per track: muting drops any solo.
+  // The combined `S<name>_` form must stay unwritable — Strudel drops such a
+  // track entirely AND skips solo filtering for the whole pattern, so the UI
+  // could otherwise display a state the engine inverts (design/work/27 BUG-1).
+  const rawName = label.muted ? label.name : `${label.name}_`;
   return replaceLabelName(code, label, rawName);
 }
 
@@ -245,12 +260,7 @@ export function toggleSolo(code, labelName) {
     console.warn(`[strasbeat/track-labels] could not find label "${labelName}" for solo toggle`);
     return code;
   }
-  const rawName = label.soloed
-    ? label.muted
-      ? `${label.name}_`
-      : label.name
-    : label.muted
-      ? `S${label.name}_`
-      : `S${label.name}`;
+  // Mirror of toggleMute: soloing drops any mute, in either spelling.
+  const rawName = label.soloed ? label.name : `S${label.name}`;
   return replaceLabelName(code, label, rawName);
 }

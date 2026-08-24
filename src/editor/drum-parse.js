@@ -22,6 +22,11 @@
 //   *N  !N  @N  /N  [...]  <...>  ,
 // Anything richer renders read-only with a specific `readOnlyReason`.
 
+// The single source of truth for what a decorated label MEANS — including the
+// mute-wins rule the engine applies (design/work/27 BUG-1). Duplicating it here
+// is how the beat grid's lane buttons drifted out of step with the track bar.
+import { getLabelShape } from "./track-labels.js";
+
 const IDENT_PART_RE = /[A-Za-z0-9_$]/;
 
 /**
@@ -230,14 +235,6 @@ function scanLane(code, lineStart, lineEnd, lineAt) {
 }
 
 const STEP_COUNT_OK = new Set([4, 8, 16]);
-
-function getLabelShape(rawName) {
-  const soloed = rawName.length > 1 && rawName.startsWith("S");
-  const body = soloed ? rawName.slice(1) : rawName;
-  const muted = rawName.startsWith("_") || rawName.endsWith("_");
-  const name = body.replace(/^_+/, "").replace(/_+$/, "");
-  return { name, muted, soloed };
-}
 
 function pickPrimarySound(steps) {
   const counts = new Map();

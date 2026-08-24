@@ -60,14 +60,16 @@ export function mountTrackBar({ container, view, docSync, onEvaluate }) {
       btn.className = "track-bar__entry";
       if (label.muted) btn.classList.add("track-bar__entry--muted");
       if (label.soloed) btn.classList.add("track-bar__entry--soloed");
-      const stateText =
-        label.muted && label.soloed
-          ? "Muted and soloed"
-          : label.muted
-            ? "Muted"
-            : label.soloed
-              ? "Soloed"
-              : "Active";
+      // No toggle can write `S<name>_` any more, but a hand-edited file can
+      // still contain it. Say what Strudel actually does with it rather than
+      // reporting a state it will not honour (design/work/27 BUG-1).
+      const stateText = label.soloSuppressed
+        ? "Muted — the S prefix is ignored while muted"
+        : label.muted
+          ? "Muted"
+          : label.soloed
+            ? "Soloed"
+            : "Active";
       btn.title = `${displayName} · ${stateText} · Click mute · Shift-click solo`;
       btn.setAttribute(
         "aria-label",

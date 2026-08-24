@@ -395,19 +395,21 @@ describe("changeForMuteToggle()", () => {
     assert.equal(apply(code, change), '$: s("bd ~ sd ~")');
   });
 
-  test("preserves solo: S$ → S$_ (suffix style when no prefix mute)", () => {
+  test("muting a soloed lane clears the solo: S$ → _$", () => {
+    // Mute and solo are mutually exclusive — the beat grid's lane buttons are
+    // a fourth entry point into the same rule the track bar enforces, and
+    // `S$_` is a state Strudel will not honour. See design/work/27 BUG-1.
     const code = 'S$: s("bd ~ sd ~")';
     const [lane] = parseDrumLanes(code);
     const change = changeForMuteToggle(lane);
-    // When solo is present, mute goes to the suffix — matches track-labels.js.
-    assert.equal(apply(code, change), 'S$_: s("bd ~ sd ~")');
+    assert.equal(apply(code, change), '_$: s("bd ~ sd ~")');
   });
 
-  test("S$_ → S$ (unmute with solo intact)", () => {
+  test("unmuting a hand-written S$_ lands on the plain label", () => {
     const code = 'S$_: s("bd ~ sd ~")';
     const [lane] = parseDrumLanes(code);
     const change = changeForMuteToggle(lane);
-    assert.equal(apply(code, change), 'S$: s("bd ~ sd ~")');
+    assert.equal(apply(code, change), '$: s("bd ~ sd ~")');
   });
 });
 
@@ -428,14 +430,21 @@ describe("changeForSoloToggle()", () => {
     assert.equal(apply(code, change), '$: s("bd ~ sd ~")');
   });
 
-  test("preserves mute prefix: _$ → S_$?  (prefix mute blocks solo → we fold into S$_ variant)", () => {
+  test("soloing a muted lane clears the mute: _$ → S$", () => {
+    // Before the fix this emitted `S$_`, which Strudel drops entirely — the
+    // one lane you asked to hear was the only one silenced, and solo filtering
+    // was skipped for the whole pattern.
     const code = '_$: s("bd ~ sd ~")';
     const [lane] = parseDrumLanes(code);
     const change = changeForSoloToggle(lane);
-    // Solo turns on. The mute style in `_$` is prefix; since `S` takes
-    // the prefix slot, the label promotes to `S$_` so both decorations
-    // coexist without confusing the parser.
-    assert.equal(apply(code, change), 'S$_: s("bd ~ sd ~")');
+    assert.equal(apply(code, change), 'S$: s("bd ~ sd ~")');
+  });
+
+  test("soloing a hand-written S$_ turns the inert solo into a real one", () => {
+    const code = 'S$_: s("bd ~ sd ~")';
+    const [lane] = parseDrumLanes(code);
+    const change = changeForSoloToggle(lane);
+    assert.equal(apply(code, change), 'S$: s("bd ~ sd ~")');
   });
 });
 
