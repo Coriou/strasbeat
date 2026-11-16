@@ -1,6 +1,6 @@
 // Journey: opening and switching pattern tabs. Start: the click. End: three
 // frames later.
-import { open, clickDOM, Skip } from "../lib/browser.mjs";
+import { open, settle, clickDOM, Skip } from "../lib/browser.mjs";
 import { windowMeasure } from "../lib/measure.mjs";
 export const name = "tabs";
 export const description =
@@ -24,6 +24,7 @@ export async function tabNames(ctx) {
 }
 export async function run(ctx) {
   await open(ctx);
+  await settle(ctx);
   const names = await tabNames(ctx);
   await ctx.driver.stop();
   const opens = [],

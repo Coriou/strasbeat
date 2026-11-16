@@ -69,6 +69,42 @@ export async function ready(ctx) {
   if (!(await ctx.page.evaluate(() => window.__perf.wrapEditor())))
     throw new Skip("window.editor.editor.dispatch unavailable");
 }
+// The app is not finished when it reports ready. At idle it fetches its
+// lazy panels one after another and, in a build with a service worker,
+// registers it; the worker then downloads its precache and takes the page
+// over. A journey that starts at "ready" runs on top of that tail, and by
+// a different amount in each build: the sooner a build is ready, the more
+// of the tail lands inside its window (the same 103 keys read 3–8 % slower
+// in the build whose worker was installing while they were typed, with
+// identical call counts). Journeys about interaction wait it out; the
+// launch journeys measure it and must not.
+export async function settle(ctx) {
+  if (ctx.hasServiceWorker)
+    await ctx.page.waitForFunction(
+      () => !!navigator.serviceWorker?.controller,
+      null,
+      { polling: 100, timeout: 60000 },
+    );
+  // The panels are preloaded in a fixed order, the settings panel last. A
+  // build without that chunk gets the idle callback's own five-second
+  // timeout, and the log says so.
+  const preloaded = await ctx.page
+    .waitForFunction(
+      () =>
+        performance
+          .getEntriesByType("resource")
+          .some((e) => /\/assets\/settings-panel-/.test(e.name)),
+      null,
+      { polling: 100, timeout: 6000 },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+  if (!preloaded)
+    console.log(`STEP ${ctx.label} no panel preload seen in 6 s; continuing`);
+  await sleep(500);
+}
 export async function setCode(ctx, code) {
   if (
     !(await ctx.page.evaluate(

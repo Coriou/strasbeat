@@ -3,7 +3,15 @@
 // code, one at a time. The same keys are also typed into a short document
 // and a long one: the cost of a key grows with the document, and that
 // spread is what shows whether the counts move with the time.
-import { open, setCode, play, synth, steady, Skip } from "../lib/browser.mjs";
+import {
+  open,
+  settle,
+  setCode,
+  play,
+  synth,
+  steady,
+  Skip,
+} from "../lib/browser.mjs";
 import { windowMeasure } from "../lib/measure.mjs";
 export const name = "typing";
 export const description =
@@ -15,6 +23,7 @@ const text =
   '\n$: s("bd*2 sd hh*4").bank("tr909").gain(0.8).room(0.2)\n$: note("c2 eb2 g2 bb2").s("sawtooth").lpf(800)';
 export async function run(ctx) {
   await open(ctx);
+  await settle(ctx);
   if (ctx.variant === "playing") {
     await setCode(ctx, synth());
     await play(ctx);

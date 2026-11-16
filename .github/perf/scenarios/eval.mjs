@@ -1,6 +1,8 @@
 // Journey: Ctrl+Enter to the first scheduled sound. Start: the keydown.
-// End: the first AudioScheduledSourceNode.start() call after it.
-import { open, setCode, synth, play } from "../lib/browser.mjs";
+// End: the first AudioScheduledSourceNode.start() call after it. The app
+// is at rest first: pressed the instant boot reports ready, the key shares
+// its window with the lazy panels still loading.
+import { open, settle, setCode, synth, play } from "../lib/browser.mjs";
 import { windowMeasure, network } from "../lib/measure.mjs";
 import { sleep } from "../lib/server.mjs";
 export const name = "eval";
@@ -9,6 +11,7 @@ export const description =
 export const variants = ["first", "again", "cpu4"];
 export async function run(ctx) {
   await open(ctx, { controlled: false });
+  await settle(ctx);
   await setCode(ctx, synth());
   if (ctx.variant === "again") {
     await play(ctx);

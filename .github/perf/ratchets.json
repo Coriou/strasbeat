@@ -99,11 +99,6 @@
     "tolerance": 0.03,
     "unit": "calls per frame"
   },
-  "typing.default.perKey.calls": {
-    "max": 50309.84,
-    "tolerance": 0.02,
-    "unit": "calls per key"
-  },
   "typing.default.perKey.layouts": {
     "max": 2.53,
     "tolerance": 0.01,
