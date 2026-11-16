@@ -1835,3 +1835,61 @@ Side effects worth knowing:
 - `/assets/*` is served `immutable` in production.
 - "Tempo carries over between tabs" is documented in `STRUDEL.md` as a
   known difference from strudel.cc.
+
+### Independent review (16 commits)
+
+A final read of the whole change set (`origin/main..upgrade`) by reviewers
+who had not written it, area by area, with every finding traced or run
+before it was fixed. Each commit passed `pnpm test` and `pnpm build` on a
+runner. What it changed:
+
+- **Data loss, fixed (19ddf4e).** Auto-heal deleted a shipped pattern's
+  stored working copy whenever it failed to transpile — which is what
+  autosave leaves behind when an edit session ends mid-expression. The copy
+  is now kept as `<name>-recovered`. This came in with 6f2a4ab on `main`,
+  not with the upgrade branch.
+- **Library import (006afb9, 8c4d9e2).** Importing replaced local edits to
+  a shipped pattern regardless of the conflict choice; `__proto__` was left
+  out of exports; a refused write reported "created"; the new-folder
+  prompts wrote back a stale index.
+- **Doubled layers (cd11451).** Stop-then-play, or play during boot, on a
+  pattern with a top-level `await` ahead of its `$:` lines (the shipped
+  Hydra and shader demos) evaluated beside the evaluate still in the repl
+  and stacked every layer twice. A request now waits, bounded, for an
+  abandoned or first-frame evaluate. Still open: the scrubber's live
+  evaluate and the capture preview call the repl directly and are not
+  sequenced against a patched evaluate that starts while they are awaiting.
+- **Export (3cd8600, ed0849b).** Sound previews, beat-grid cell previews
+  and the capture audition were not held back while an export renders.
+- **MIDI import (ed0849b, 478a43b).** Tracks of different lengths looped
+  out of step; `ride`, `tamb` and `hq` were not registered sounds;
+  implausible tempo and meter events are ignored; an unbuildable take is
+  reported.
+- **Dev server (7edd2a5).** `/api/save` passed a DNS-rebinding page.
+- **Build guard (5e69b41).** A production build fails, and a test fails,
+  when a new `@strudel/codemirror` no longer matches the redirects.
+- **Smaller:** drum-machine aliases after a slow manifest (72da274); the
+  `+` chord symbol (3455ed8); completions inside comments (cb4ec32);
+  keyboard focus on last-tab close, rail collapse at a breakpoint,
+  beat-grid menus, IME keys, palette over a dialog (fe60624, f70a50e);
+  beat-grid lane edits across an open bracket, and `_` as a hit (560fe67,
+  aa1c36d).
+
+Found and left, none of them introduced by the upgrade branch unless noted:
+
+| Where | What |
+|---|---|
+| `src/editor-setup.js`, `src/capture.js` | The scrubber's evaluate and the capture preview are outside the evaluate sequencer (see above) |
+| `src/strudel-ext/visuals-host.js` | A failed evaluate that created a visual layer before throwing leaves it up until stop or the next good evaluate |
+| `src/midi-to-strudel.js` | Grid candidates do not divide 5- or 7-beat bars; two same-pitch notes in one slot are written as a chord of duplicates; format-2 files are overlaid without a warning |
+| `src/user-setup.js` | Before MIDI output is enabled, a stored output device that is unplugged is passed upstream as is (logged per hap, no fallback until the next evaluate); a failing setup script is only reported in devtools |
+| `src/editor/format.js` | A regex literal containing `//` hides the rest of the line from the quote-restoring scan, so a single-quoted string after it can come back double-quoted |
+| `src/editor/drum-parse.js` | A lane's block takes the comment lines that follow it (they usually belong to the next lane); `sound*N` expansion caps at 32 without saying so; a non-literal `.bank(kit)` gets a second `.bank()` |
+| `src/ui/bottom-canvas.js`, `piano-roll.js` | Painters of the previous tab stay registered after a stopped tab switch; an accent change while stopped does not repaint; a throwing painter warns every frame |
+| `src/ui/left-rail.js` | A rail re-render during an inline rename (autosave's dirty-set update) discards the input |
+| `src/ui/arrange-bar.js` | Sections are `button role=listitem` with buttons nested inside |
+| `src/panels.js` | "Copy to new pattern" judges success by the current name having changed, which another window deleting the active pattern can also cause |
+| `src/editor/lazy-keymaps.js` | Each use of a keymap whose fetch failed retries and reports again |
+| `src/boot.js` | dirt-samples' audio base now comes from the manifest's `_base`; if that field were dropped the kit would be silent with no boot warning |
+| share links | Shared code is evaluated once at boot for the first frame, without sound and without a gesture, as on strudel.cc |
+

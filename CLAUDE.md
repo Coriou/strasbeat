@@ -65,8 +65,13 @@ callers must be able to tell "evaluated" from "kept the previous pattern".
 The repl is always called with autostart off; the patched evaluate starts
 the scheduler itself, and only for the request that is still the latest.
 Evaluates run one at a time (two inside the repl at once corrupt its `$:`
-table and the arrange registry), the latest wins, and `editor.stop()`
-cancels whatever is waiting. New code that evaluates should call
+table and the arrange registry — every `$:` layer plays twice), the latest
+wins, and `editor.stop()` cancels whatever is waiting. An evaluate a stop
+abandoned is still inside the repl, so the next request waits for it, for
+at most `ABANDON_WAIT_MS` (`eval-state.js`). The editor is built with
+`autodraw: false`; `main.js` calls `drawFirstFrame()` itself and hands the
+promise to the sequencer, so a play pressed during boot waits for that
+evaluate too. New code that evaluates should call
 `editor.evaluate()`, not `editor.repl.evaluate()`; the two deliberate
 exceptions are the scrubber's live evaluate (`editor-setup.js`, which
 brackets the arrange state itself and only runs while this tab is
@@ -90,7 +95,8 @@ localStorage.
 `vite.config.js` ships a tiny dev-only middleware at `POST /api/save` that
 writes the editor buffer to `patterns/<name>.js` so the browser-side ⤓ save
 button has a disk-side counterpart. It refuses cross-origin posts (403 on a
-mismatched `Origin` or `Sec-Fetch-Site`), requires
+mismatched `Origin` or `Sec-Fetch-Site`, and on a `Host` that is neither
+`localhost` nor an IP address — a rebound hostname), requires
 `content-type: application/json` (415), and answers 409 instead of
 replacing an existing file unless the body says `overwrite: true`. It also
 proxies `/strudel-cc/*` → `https://strudel.cc/*`
@@ -409,6 +415,15 @@ Rules:
   Ctrl+hover tooltip consequently shows nothing) and the two keymap
   packages resolve to `src/editor/lazy-keymaps.js`. Always import the bare
   `@strudel/codemirror` specifier so every import lands on the one copy.
+- **An upgrade of `@strudel/codemirror` is checked twice.** The redirects
+  match upstream's import specifiers by name, so a release that moves them
+  would otherwise build fine with everything back in the entry chunk. The
+  plugin fails a production build when a redirect never fired or when a
+  keymap package or `doc.json` is in a chunk loaded up front, and
+  `src/strudel-codemirror-shape.test.js` reads the installed sources for
+  what the build cannot see (what is read from the docs stand-in, how `Vim`
+  is called, dependencies missing from `optimizeDeps.include`). When either
+  fails after an upgrade, update the plugin and `lazy-keymaps.js` together.
 - **The `optimizeDeps.include` list is required, not a warm-up.** The
   package is excluded from pre-bundling so the plugin redirects apply in
   dev too; the dependencies only it imports must then be listed, or dev
@@ -558,6 +573,14 @@ at boot and during export.
   path.
 - **Closing a tab, `pagehide` and `visibilitychange → hidden` flush**, as
   well as `beforeunload`. Delete paths opt out.
+- **Auto-heal never discards.** A shipped pattern whose stored working copy
+  does not transpile (while the original does) falls back to the original,
+  but the copy is first moved to a listed user pattern `<name>-recovered`
+  (`resolveWorkingCopy` in `patterns.js`) — autosave stores the buffer as
+  typed, so such a copy is usually someone's unfinished edit. No path that
+  reacts to stored data may delete a record the user did not ask to delete.
+- **Library import** treats differing local edits to a shipped pattern as a
+  conflict, like a user pattern of the same name.
 - **Share links** (`#code=…`) arrive as an indexed user pattern named
   `shared-<name>` (`-2`, `-3`, … when taken) and the hash is cleared once
   it is stored, so a reload restores the recipient's edits rather than the
