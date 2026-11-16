@@ -1,8 +1,10 @@
 // Journey: keystroke to painted frame. Start: a key goes down at the end of
 // a ~180-line pattern. End: two frames later. 103 keys of ordinary Strudel
 // code, one at a time. The same keys are also typed into a short document
-// and a long one: the cost of a key grows with the document, and that
-// spread is what shows whether the counts move with the time.
+// and a long one (`default@short`, `default@long`): the cost of a key
+// grows with the document, and that spread is what shows whether a count
+// moves with the time. Typing while a pattern plays is another condition,
+// not another size, and is not compared with them.
 import {
   open,
   settle,
@@ -16,9 +18,15 @@ import { windowMeasure } from "../lib/measure.mjs";
 export const name = "typing";
 export const description =
   "From first keydown at the end of captainmo to two frames after the final key; one key at a time.";
-export const variants = ["default", "playing", "cpu4", "short", "long"];
+export const variants = [
+  "default",
+  "playing",
+  "cpu4",
+  "default@short",
+  "default@long",
+];
 // How many copies of the fixture the document holds.
-const COPIES = { short: 0.2, long: 3 };
+const COPIES = { "default@short": 0.2, "default@long": 3 };
 const text =
   '\n$: s("bd*2 sd hh*4").bank("tr909").gain(0.8).room(0.2)\n$: note("c2 eb2 g2 bb2").s("sawtooth").lpf(800)';
 export async function run(ctx) {

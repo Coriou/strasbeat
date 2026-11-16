@@ -26,6 +26,8 @@ const names = [
   "idle",
   "memory",
 ];
+// Run only when asked for by name.
+const onDemand = ["sweep"];
 const args = process.argv.slice(2),
   options = {};
 for (let i = 0; i < args.length; i += 2) {
@@ -49,7 +51,7 @@ if (
 )
   throw new Error("Invalid repeats or net delay");
 const selected = options.scenarios?.split(",") ?? names;
-if (selected.some((n) => !names.includes(n)))
+if (selected.some((n) => !names.includes(n) && !onDemand.includes(n)))
   throw new Error("Unknown scenario");
 if (options.mode && options.mode !== "ratchet") throw new Error("Unknown mode");
 await fs.mkdir(out, { recursive: true });
@@ -276,9 +278,15 @@ try {
               Object.assign(row, measured, {
                 info: { ...row.info, ...measured.info },
               });
+              // Not a failure of the build: this runner could not step the
+              // variant at its rate, so the variant has no number. Whether
+              // that matters is the ratchet check's call — a ceiling on a
+              // window that did not hold pace fails there. Without this,
+              // the heaviest variants, which are evidence only, failed the
+              // whole run whenever the job landed on a slow machine.
               if (row.pacingValid === false) {
-                row.status = "error";
-                row.error =
+                row.status = "unpaced";
+                row.reason =
                   "No measured window held pace within 1% after three attempts";
               }
             } catch (e) {
@@ -288,7 +296,7 @@ try {
               row.info = { ...row.info, ...e.details };
             }
             console.log(
-              `${row.status === "ok" ? "PASS" : row.status === "skipped" ? "SKIP" : "FAIL"} ${target}/${name}/${variant}/${repeat + 1}/${pass}${row.error ? ": " + row.error.split("\n")[0] : ""}`,
+              `${{ ok: "PASS", skipped: "SKIP", unpaced: "SLOW" }[row.status] ?? "FAIL"} ${target}/${name}/${variant}/${repeat + 1}/${pass}${row.error || row.reason ? ": " + (row.error ?? row.reason).split("\n")[0] : ""}`,
             );
             result.records.push(row);
             await persist();

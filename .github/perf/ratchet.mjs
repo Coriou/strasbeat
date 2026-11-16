@@ -31,7 +31,8 @@ try {
     if (!errors.length) console.log("PASS ratchet guard");
     process.exitCode = errors.length ? 1 : 0;
   } else if (command === "check" || command === "lower") {
-    const measured = measurements(read(args[0]), option("--target", "head"));
+    const results = read(args[0]);
+    const measured = measurements(results, option("--target", "head"));
     const ratchets = read(file);
     if (command === "lower") {
       const init = args.includes("--init")
@@ -42,8 +43,13 @@ try {
         JSON.stringify(lower(ratchets, measured, init), null, 2) + "\n",
       );
     } else {
-      const rows = check(ratchets, measured, option("--prefix", ""));
+      const journeys = results.options?.scenarios?.split(",") ?? null;
+      const rows = check(ratchets, measured, option("--prefix", ""), journeys);
       console.table(rows);
+      if (journeys)
+        console.log(
+          `PARTIAL run of ${journeys.join(", ")}: ceilings of other journeys were not checked`,
+        );
       rows
         .filter((r) => r.canLower)
         .forEach((r) =>

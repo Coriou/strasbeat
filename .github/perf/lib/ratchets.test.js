@@ -85,6 +85,49 @@ test("a missing or failed repeat invalidates an otherwise present metric", () =>
     false,
   );
 });
+test("a window that could not hold pace has no number, and a ceiling on it fails", () => {
+  const row = {
+    target: "head",
+    scenario: "a",
+    variant: "default",
+    pass: "count",
+    status: "unpaced",
+    pacingValid: false,
+    counts: { calls: 10 },
+  };
+  const measured = measurements({
+    records: [
+      row,
+      { ...row, variant: "light", status: "ok", pacingValid: true },
+    ],
+  });
+  assert.equal(check(r, measured)[0].reason, "invalid window");
+  assert.equal(measured["a.light.calls"].valid, true);
+});
+test("a run of chosen journeys answers for their ceilings and the bundle only", () => {
+  const three = {
+    "bundle.default.initialJsRaw": { max: 10, tolerance: 0, unit: "bytes" },
+    "b.default.calls": { max: 10, tolerance: 0, unit: "calls" },
+    ...r,
+  };
+  const measured = {
+    "bundle.default.initialJsRaw": { value: 10, valid: true },
+    "a.default.calls": { value: 50, valid: true },
+  };
+  // A full run: the journey nobody measured is missing.
+  assert.deepEqual(
+    check(three, measured).map((row) => row.reason),
+    ["", "missing", ""],
+  );
+  assert.deepEqual(
+    check(three, measured, "", ["a"]).map((row) => row.key),
+    ["bundle.default.initialJsRaw", "a.default.calls"],
+  );
+  assert.deepEqual(
+    check(three, measured, "", ["sweep"]).map((row) => row.key),
+    ["bundle.default.initialJsRaw"],
+  );
+});
 test("a lowered ceiling is rounded up to two decimals and raises stays last", () => {
   const two = {
     "b.default.calls": { max: 10, tolerance: 0, unit: "calls" },

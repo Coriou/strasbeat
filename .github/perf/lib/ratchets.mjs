@@ -69,10 +69,15 @@ export function validate(ratchets) {
       throw new Error(`Invalid ratchet: ${k}`);
   }
 }
-export function check(ratchets, measured, prefix = "") {
+// `journeys`: the journeys a run was asked for, when it was asked for some
+// only (`--scenarios`). Ceilings of the others are not its business; the
+// bundle is measured by every run. A full run answers for every ceiling.
+export function check(ratchets, measured, prefix = "", journeys = null) {
   validate(ratchets);
+  const asked = (k) =>
+    !journeys || ["bundle", ...journeys].includes(k.split(".")[0]);
   return Object.entries(ratchets)
-    .filter(([k]) => k !== "raises" && k.startsWith(prefix))
+    .filter(([k]) => k !== "raises" && k.startsWith(prefix) && asked(k))
     .map(([key, r]) => {
       const m = measured[key];
       const reason =

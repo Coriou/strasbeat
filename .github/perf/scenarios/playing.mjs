@@ -1,6 +1,12 @@
 // Journey: frame cost while a pattern plays.
 // Start: playback has reached a steady state (the roll's window is full).
 // End: 600 frames later, stepped at exactly 120 Hz (five seconds).
+//
+// A variant is a view, or `<view>@<n>`: the same view with a pattern of n
+// layers instead of the usual size. The sizes are the evidence for a
+// calls-per-frame ceiling: a count earns one in a view by moving with
+// script time as the pattern grows. Views are never compared with each
+// other — they differ in native work (canvas) that a call count cannot see.
 import {
   open,
   setCode,
@@ -15,7 +21,7 @@ import { median, stats } from "../lib/stats.mjs";
 
 export const name = "playing";
 export const description =
-  "Steady playback, then 600 frames stepped at exactly 120 Hz (5 s). Modes: roll visible, roll collapsed, scope, beat grid; Hydra and shader at 30 Hz (300 frames); plus the same synth pattern with 1, 2 and 8 layers (roll is the 4-layer point) as a dose-response series.";
+  "Steady playback, then 600 frames stepped at exactly 120 Hz (5 s). Views: roll visible, roll collapsed, scope, beat grid; Hydra and shader at 30 Hz (300 frames); plus the roll at 1, 2 and 8 layers (roll is the 4-layer point).";
 export const variants = [
   "roll",
   "collapsed",
@@ -23,9 +29,19 @@ export const variants = [
   "beats",
   "hydra",
   "shader",
-  "layers1",
-  "layers2",
-  "layers8",
+  "roll@1",
+  "roll@2",
+  "roll@8",
+];
+// The beat grid's pattern, by lines; the view's usual size is the first
+// three.
+const drums = [
+  '$: s("bd*2")',
+  '$: s("hh*4")',
+  '$: s("~ sd")',
+  '$: s("bd*3")',
+  '$: s("hh*8")',
+  '$: s("sd*2")',
 ];
 
 // The WebGL modes are stepped at 30 Hz: under software GL a frame of theirs
@@ -40,12 +56,13 @@ const TIMING_WINDOWS = 3;
 
 export async function run(ctx) {
   await open(ctx);
-  const v = ctx.variant,
+  const [v, size] = ctx.variant.split("@"),
     visual = ["hydra", "shader"].includes(v);
   let fixtureAdjustment;
-  let code = synth(v.startsWith("layers") ? Number(v.slice(6)) : 4);
-  if (v === "beats")
-    code = 'setcps(0.5)\n$: s("bd*2")\n$: s("hh*4")\n$: s("~ sd")';
+  let code =
+    v === "beats"
+      ? ["setcps(0.5)", ...drums.slice(0, Number(size ?? 3))].join("\n")
+      : synth(Number(size ?? 4));
   if (visual) {
     if (
       !(await ctx.page.evaluate(

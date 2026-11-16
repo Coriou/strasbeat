@@ -3,7 +3,8 @@
 //   node scripts/ci-run.mjs test  [name]   tests + build            (ci/<name>)
 //   node scripts/ci-run.mjs smoke [name]   … + the browser smoke    (ci/smoke-<name>)
 //   node scripts/ci-run.mjs perf  [name]   … + the performance rig  (ci/perf-<name>)
-//     [--ref <commit>] [--base <ref>] [--keep] [--timeout <minutes>]
+//     [--ref <commit>] [--base <ref>] [--scenarios a,b] [--keep]
+//     [--timeout <minutes>]
 //
 // It pushes the commit to a throwaway branch, waits for every workflow run
 // of it, prints the results, and deletes the branch whatever happened.
@@ -27,12 +28,12 @@ export function parseArgs(args) {
   const options = { mode: args[0], timeout: 45, keep: false };
   if (!["test", "smoke", "perf"].includes(options.mode))
     throw new Error(
-      "Usage: ci-run.mjs test|smoke|perf [name] [--ref commit] [--keep] [--timeout minutes] [--base ref]",
+      "Usage: ci-run.mjs test|smoke|perf [name] [--ref commit] [--keep] [--timeout minutes] [--base ref] [--scenarios a,b]",
     );
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--keep") options.keep = true;
-    else if (["--ref", "--timeout", "--base"].includes(arg)) {
+    else if (["--ref", "--timeout", "--base", "--scenarios"].includes(arg)) {
       if (args[i + 1] == null || args[i + 1].startsWith("--"))
         throw new Error(`Missing value for ${arg}`);
       options[arg.slice(2)] = args[++i];
@@ -44,6 +45,12 @@ export function parseArgs(args) {
     throw new Error("Timeout must be positive");
   if (options.base !== undefined && options.mode !== "perf")
     throw new Error("--base is only supported for perf");
+  if (options.scenarios !== undefined) {
+    if (options.mode !== "perf")
+      throw new Error("--scenarios is only supported for perf");
+    if (!/^[a-z][a-z0-9-]*(,[a-z][a-z0-9-]*)*$/.test(options.scenarios))
+      throw new Error("--scenarios takes journey names separated by commas");
+  }
   if (options.name && !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,80}$/.test(options.name))
     throw new Error("Name must use letters, digits, hyphens or underscores");
   return options;
@@ -173,9 +180,12 @@ export async function main(args, exec = command) {
     // Mark before pushing: a connection can fail after the server accepted it.
     pushed = true;
     await push(`${sha}:${remoteRef}`);
-    if (o.mode === "perf" && o.base !== undefined) {
-      // A push also starts Perf. Cancel that run before dispatching the custom
-      // base; expected runs below include CI and the dispatched Perf run.
+    // Another base, or some journeys only, are inputs of a dispatched run.
+    const dispatched =
+      o.mode === "perf" && (o.base !== undefined || o.scenarios !== undefined);
+    if (dispatched) {
+      // A push also starts Perf. Cancel that run before dispatching ours;
+      // expected runs below include CI and the dispatched Perf run.
       const until = Date.now() + 120000;
       let pushPerf;
       while (!pushPerf && Date.now() < until && !interrupted) {
@@ -200,7 +210,7 @@ export async function main(args, exec = command) {
       }
       if (!pushPerf)
         throw new Error(
-          "Push Perf run did not appear; custom-base dispatch not started",
+          "Push Perf run did not appear; the dispatch was not started",
         );
       if (pushPerf.status !== "completed")
         await gh("run", "cancel", String(pushPerf.databaseId));
@@ -211,7 +221,8 @@ export async function main(args, exec = command) {
         "--ref",
         branch,
         "-f",
-        `base=${o.base}`,
+        `base=${o.base ?? "main"}`,
+        ...(o.scenarios ? ["-f", `scenarios=${o.scenarios}`] : []),
       );
     }
     const expected = [
@@ -240,13 +251,7 @@ export async function main(args, exec = command) {
       // Only the explicitly superseded push Perf run is excluded; all other
       // runs for this SHA and branch must finish successfully.
       const runs = all.filter(
-        (r) =>
-          !(
-            o.mode === "perf" &&
-            o.base !== undefined &&
-            r.workflowName === "Perf" &&
-            r.event === "push"
-          ),
+        (r) => !(dispatched && r.workflowName === "Perf" && r.event === "push"),
       );
       const summary = runStates(runs, expected);
       for (const s of summary.states)

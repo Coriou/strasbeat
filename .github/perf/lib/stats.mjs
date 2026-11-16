@@ -37,6 +37,18 @@ export function pearson(points) {
   }
   return xx && yy ? xy / Math.sqrt(xx * yy) : null;
 }
+// Whether a count has been shown to move with time: in every build
+// measured at four or more points, r clears 0.8 and the 5 % significance
+// level for that many points. A high r over few points proves little —
+// four points reach 0.8 by chance one time in five.
+const CRITICAL = { 4: 0.95, 5: 0.878, 6: 0.811 };
+export const bar = (n) => (n < 4 ? Infinity : (CRITICAL[n] ?? 0.8));
+export function proven(byTarget) {
+  const judged = Object.values(byTarget).filter((t) => t.n >= 4);
+  return (
+    judged.length > 0 && judged.every((t) => t.r != null && t.r >= bar(t.n))
+  );
+}
 export function paired(base, head) {
   const differences = head.slice(0, base.length).map((v, i) => v - base[i]);
   return {

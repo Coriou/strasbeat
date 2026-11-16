@@ -18,6 +18,12 @@ test("arguments and branch names", () => {
   assert.throws(() => parseArgs(["perf", "../bad"]));
   assert.throws(() => parseArgs(["test", "--base", "main"]));
   assert.throws(() => parseArgs(["perf", "--timeout", "0"]));
+  assert.equal(
+    parseArgs(["perf", "--scenarios", "sweep,typing"]).scenarios,
+    "sweep,typing",
+  );
+  assert.throws(() => parseArgs(["smoke", "--scenarios", "sweep"]));
+  assert.throws(() => parseArgs(["perf", "--scenarios", "a b"]));
 });
 test("guard requires exact committed deployment disable", () => {
   assert.equal(
@@ -176,5 +182,59 @@ test("tracked changes require an explicit ref", async () => {
             : " M file.js",
     })),
     /Tracked changes/,
+  );
+});
+
+test("chosen journeys run as a dispatch that replaces the push run", async () => {
+  const calls = [];
+  let dispatched = false;
+  const respond = async (program, args) => {
+    calls.push([program, ...args].join(" "));
+    let stdout = "";
+    if (program === "git") {
+      if (args[0] === "rev-parse") stdout = "abc123";
+      else if (args[0] === "show")
+        stdout = '{"git":{"deploymentEnabled":{"ci/**":false}}}';
+      else if (args[0] === "remote")
+        stdout = "git@github.com:Coriou/strasbeat.git";
+    } else if (args[1] === "user") stdout = "Coriou";
+    else if (args.join(" ").includes("deployments?sha=")) stdout = "[]";
+    else if (args[0] === "workflow") dispatched = true;
+    else if (args[0] === "run" && args[1] === "list") {
+      const run = (databaseId, workflowName, event, done) => ({
+        databaseId,
+        workflowName,
+        event,
+        status: done ? "completed" : "in_progress",
+        conclusion: done ? "success" : "",
+        url: "u",
+      });
+      stdout = JSON.stringify([
+        run(7, "CI", "push", true),
+        // Cancelled once the dispatch replaces it, and left out of the verdict.
+        { ...run(8, "Perf", "push", dispatched), conclusion: "cancelled" },
+        ...(dispatched ? [run(9, "Perf", "workflow_dispatch", true)] : []),
+      ]);
+    }
+    return { stdout, stderr: "", code: 0 };
+  };
+  const timers = globalThis.setTimeout;
+  globalThis.setTimeout = (fn) => timers(fn, 0);
+  try {
+    assert.equal(
+      await main(
+        ["perf", "evidence", "--ref", "HEAD", "--scenarios", "sweep"],
+        respond,
+      ),
+      0,
+    );
+  } finally {
+    globalThis.setTimeout = timers;
+  }
+  assert.ok(calls.includes("gh run cancel 8"));
+  assert.ok(
+    calls.includes(
+      "gh workflow run perf.yml --ref ci/perf-evidence -f base=main -f scenarios=sweep",
+    ),
   );
 });

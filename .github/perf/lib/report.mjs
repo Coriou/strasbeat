@@ -2,7 +2,7 @@
 // the profiles and top-call tables, and the correlation evidence that says
 // which counts moved together with wall-clock time in this run.
 import { flatten } from "./ratchets.mjs";
-import { stats, paired, pearson } from "./stats.mjs";
+import { stats, paired, pearson, proven, bar } from "./stats.mjs";
 const fmt = (n) =>
   n == null
     ? "—"
@@ -18,6 +18,12 @@ export function summary(results) {
     "",
   ];
   const records = results.records;
+  const unpaced = records.filter((r) => r.status === "unpaced");
+  if (unpaced.length)
+    lines.push(
+      `**Not measured on this runner.** These windows could not hold their frame pace, so they have no number: ${unpaced.map((r) => `${r.target}/${r.scenario}/${r.variant}/${r.pass}`).join(", ")}. A ceiling on one of them fails the ratchet check; the others are evidence only.`,
+      "",
+    );
   for (const scenario of [...new Set(records.map((r) => r.scenario))]) {
     lines.push(
       `## ${scenario}`,
@@ -129,7 +135,7 @@ export function summary(results) {
     "",
     "## Correlation evidence",
     "",
-    'Each point pairs an uninstrumented timing pass with the count pass for the same build, variant and repeat. r is Pearson\'s, computed within each build: a change that removes cheap calls moves the count much further than the time, so points from two builds do not lie on one line (the pooled value is given for information). A count is "proven" when every build with four or more points has r ≥ 0.8. Windows that did not hold pace are excluded, and per-frame counts are only compared between variants stepped at the same rate.',
+    `Each point pairs an uninstrumented timing pass with the count pass for the same build, variant and repeat. r is Pearson's, computed within each build: a change that removes cheap calls moves the count much further than the time, so points from two builds do not lie on one line (the pooled value is given for information). While playing or typing, a variant is only compared with itself at other sizes (\`roll\`, \`roll@1\`, \`roll@8\`…): views differ in native canvas work that a call count cannot see, and typing while a pattern plays is another condition, not another size. A count is "proven" when, in every build measured at four or more points, r clears both 0.8 and the 5 % significance level for that many points (${[4, 5, 6].map((n) => `${bar(n)} at ${n}`).join(", ")}). Groups with fewer than three points in every build are left out. Windows that did not hold pace are excluded, and per-frame counts are only compared between variants stepped at the same rate.`,
     "",
   );
   const pointsByMetric = new Map();
@@ -156,7 +162,8 @@ export function summary(results) {
         continue;
       // A per-frame count at 30 Hz is not the same quantity as one at 120.
       if (/PerFrame/.test(metric) && (r.info?.hz ?? 120) !== 120) continue;
-      let partner = r.scenario === "playing" ? "scriptMsPerSecond" : "scriptMs";
+      const playing = ["playing", "sweep"].includes(r.scenario);
+      let partner = playing ? "scriptMsPerSecond" : "scriptMs";
       if (/network|requests/i.test(metric))
         partner = metric.startsWith("interactive.")
           ? "interactive"
@@ -171,11 +178,15 @@ export function summary(results) {
       const time = times[partner];
       if (!Number.isFinite(time)) continue;
       // Opening a tab and switching to one are the same kind of operation
-      // at two sizes: together they are four points, apart two each.
+      // at two sizes: together they are four points, apart two each. While
+      // playing or typing, a variant is only compared with its own sizes
+      // (`roll`, `roll@8`): another view or condition is not another size.
       const key =
         r.scenario === "tabs"
           ? `tabs.${metric.replace(/^(firstOpen|switch)\./, "*.")} ↔ *.scriptMs`
-          : `${r.scenario}.${metric} ↔ ${partner}`;
+          : playing || r.scenario === "typing"
+            ? `${r.scenario}[${r.variant.split("@")[0]}].${metric} ↔ ${partner}`
+            : `${r.scenario}.${metric} ↔ ${partner}`;
       const points = pointsByMetric.get(key) ?? [];
       points.push({
         target: r.target,
@@ -197,15 +208,20 @@ export function summary(results) {
         r: pearson(own.map((p) => [p.count, p.ms])),
       };
     }
-    const judged = Object.values(byTarget).filter((t) => t.n >= 4);
-    const proven =
-      judged.length > 0 && judged.every((t) => t.r != null && t.r >= 0.8);
-    results.correlations.push({ metric, points, r: pooled, byTarget, proven });
+    if (Object.values(byTarget).every((t) => t.n < 3)) continue;
+    const ok = proven(byTarget);
+    results.correlations.push({
+      metric,
+      points,
+      r: pooled,
+      byTarget,
+      proven: ok,
+    });
     const within = Object.entries(byTarget)
       .map(([target, t]) => `${target} r=${fmt(t.r)} (n=${t.n})`)
       .join(", ");
     lines.push(
-      `- **${cell(metric)}**: ${within}; pooled r=${fmt(pooled)}; ${proven ? "proven in this run" : "not proven"}. ${points.map((p) => `${p.label} (${fmt(p.count)}, ${fmt(p.ms)})`).join("; ")}`,
+      `- **${cell(metric)}**: ${within}; pooled r=${fmt(pooled)}; ${ok ? "proven in this run" : "not proven"}. ${points.map((p) => `${p.label} (${fmt(p.count)}, ${fmt(p.ms)})`).join("; ")}`,
     );
   }
   if (!pointsByMetric.size)
