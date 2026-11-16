@@ -16,7 +16,8 @@ Sections: [Overview](#overview) · [Pattern file contract](#pattern-file-contrac
 [WAV export](#wav-export) · [Visuals lifecycle](#visuals-lifecycle) ·
 [Persistence](#persistence) · [The single-quote rule](#the-single-quote-rule) ·
 [MIDI](#midi) · [Tempo](#tempo) · [Dev server](#dev-server) ·
-[CI and the smoke test](#ci-and-the-smoke-test) · [Console helpers](#console-helpers)
+[CI and the smoke test](#ci-and-the-smoke-test) ·
+[Performance rig and ratchets](#performance-rig-and-ratchets) · [Console helpers](#console-helpers)
 
 ## Overview
 
@@ -688,7 +689,8 @@ lazy loading").
 `.github/workflows/ci.yml` runs `pnpm test` and `pnpm build` on pull
 requests, on pushes to `main`, and on pushes to `ci/**` branches. Those
 branches exist to check work in progress on a clean runner without opening
-a PR (`git push origin <branch>:ci/<name>`); `vercel.json` keeps them from
+a PR. Use `node scripts/ci-run.mjs test` (guards, wait, artifacts and cleanup);
+`vercel.json` keeps them from
 creating preview deployments. Tests are `node:test` files listed
 explicitly in the `test` script in `package.json` — a new `*.test.js` does
 not run until it is added there.
@@ -701,9 +703,7 @@ only for branches named `ci/smoke-*` and from the Actions tab — never on
 `main` or pull requests:
 
 ```sh
-git push origin HEAD:ci/smoke-<name>       # start it for the current commit
-gh run list --branch ci/smoke-<name>       # then: gh run view <id> --log
-git push origin --delete ci/smoke-<name>   # remove the branch afterwards
+node scripts/ci-run.mjs smoke
 ```
 
 After the existing smoke test, the workflow runs `.github/smoke/sw.mjs`
@@ -720,6 +720,111 @@ Screenshots and `report.json` are uploaded as the run's `smoke` artifact.
 The runner image and the Playwright version are pinned in the workflow;
 bump them deliberately. When a fix has a browser-visible effect, add a
 check for it to the script. Nothing here is run locally.
+
+## Performance rig and ratchets
+
+`.github/perf/perf.mjs` observes finished builds from outside the app. No
+product hook or production asset is added. `.github/workflows/perf.yml`
+runs on `ci/perf-**` or manual dispatch, using ubuntu-24.04, Node 24,
+Playwright 1.65.1 and trace-mapping 0.3.25 installed outside the project.
+Hidden source maps preserve the production JS bytes. Ordinary CI also
+runs `bundle.mjs`: static entry/import graph JS and linked CSS raw/gzip
+(level 9), total JS, largest lazy chunks, and file count excluding maps.
+
+| Journey | Start → end |
+|---|---|
+| launch-cold | Fresh navigation → editor insertion, following MessageChannel task, shell ready; default, CPU ×4, 150 ms response delay |
+| launch-warm | Second/third navigation in one context → the same boundaries; records SW control and requests reaching the server |
+| typing | First key at end of captainmo → two frames after final key; stopped, playing, CPU ×4 timing only |
+| playing | After eight pattern cycles → 600 paced frames at 120 Hz; roll, collapsed, scope, beats, Hydra, shader, and 1/2/4/8/16 synth layers |
+| tabs | Each of three tree opens / twenty tab switches → three frames later |
+| eval | Capture-phase Ctrl+Enter → first audio source start call; first, after stop, CPU ×4 |
+| idle | Ready plus two seconds settling → ten stopped seconds, without a measurement frame clock |
+| memory | Forty evaluate/300 ms/stop cycles, then forty tab switches; GC every ten, regression over cycles 10–40 |
+
+Use `node scripts/ci-run.mjs perf --base main` for a runner comparison.
+The wrapper verifies the **pushed commit's** Vercel guard and the active
+GitHub account, refuses existing remote branch names, checks for deployments,
+and removes the branch in `finally` (also on interruption; `--keep` opts out).
+For custom bases it cancels the automatic push Perf run and dispatches a
+replacement; that explicitly superseded run is excluded from success checks.
+CI and all other runs must succeed. A commit with tracked edits requires
+explicit `--ref`; it tests the commit, not those edits.
+
+On a runner with the tools installed beside the rig:
+
+```sh
+node perf/perf.mjs --head /checkout/dist --base /base/dist --repeats 1
+node perf/perf.mjs --head /checkout/dist --scenarios typing,playing --mode ratchet
+node perf/perf.mjs --head /checkout/dist --scenarios playing --profile playing --trace playing
+```
+
+`--net-delay`, `--out`, `--head-sha` and `--base-sha` are also supported.
+One repeat is the bounded default for a full census; increase repeats for
+spread estimates on selected journeys. Counts-only mode omits CPU variants
+and memory stress. Within each repeat and pass, base runs immediately before
+head. Timing and precise-coverage/count passes use separate contexts.
+CPU profiling is always enabled for launch timing passes. Other profiles
+and traces are opt-in; their timings include diagnostic overhead.
+
+`out/results.json` is schema-versioned and retains each target/pass/repeat,
+window attempts, errors, skipped hooks, request logs, and raw frame samples.
+`out/summary.md` gives medians, relative spread (range / absolute median),
+paired differences, module groups, top functions and profile self time.
+A single repeat has no useful spread estimate. Count/time correlation is
+observational: fewer than four points, constant values or Pearson r < 0.8
+means **not proven**. Counts miss expensive single calls (sound registration,
+for example); inspect CPU profiles and same-runner A/B timings too.
+
+The frame driver pumps during boot/setup, then serializes beginFrame calls.
+Only paced 600-frame windows within 1% of nominal duration are valid; three
+failed attempts record an error and cannot pass a ceiling. Main-thread
+frame time is measured from the first rAF callback through a MessageChannel
+task after rendering, against the 8.33 ms budget. CDP round trips are only
+diagnostics. `--disable-gpu` avoids SwiftShader raster stalls, but moves
+canvas rasterization onto the main thread, pessimistic versus real hardware.
+Visual demos retry in a GL browser if software mode fails or misses pace.
+Idle never starts the permanent measurement rAF clock. Launch DOM milestones
+are in-page; their coverage/Performance snapshots include CDP binding latency.
+Typing reports aggregate counts per key and retains two-frame timing samples;
+it does not take a coverage snapshot between individual keys. Eval reports
+TaskDuration and long tasks, not a total task count (CDP has no such metric).
+
+The static server uses immutable asset caching, revalidation elsewhere and
+gzip text responses. Required JSON manifests are fetched once with retries,
+validated before browsers start, hashed in results and shared by both targets.
+The shader demo uses sawtooth in place of its GM lead in memory only: the
+GM loader fetches external JS, forbidden by the fixture policy. This
+substitution is recorded in results. All external audio files receive the same tiny WAV; this is a workload lab,
+not an audio-quality test. Other external requests abort and fail the scenario.
+Contexts allow service workers; routing is external-only and CDP explicitly
+re-enables the page HTTP cache. Warm results include cached response evidence
+and SW control rather than assuming a successful second navigation is warm.
+
+Ceilings are flat `scenario.variant.metric` entries with `max`, `tolerance`,
+and `unit`, plus `raises`. Exact counts default to zero tolerance, calls to
+2%, heap/timers to 5%. Checks reject missing metrics and invalid pacing.
+Only counts enter checks; elapsed time never gates CI.
+
+```sh
+node .github/perf/ratchet.mjs check out/results.json
+node .github/perf/ratchet.mjs lower out/results.json
+node .github/perf/ratchet.mjs guard base-ratchets.json .github/perf/ratchets.json
+```
+
+No existing build was available when introducing the rig, so **ceilings are
+not initialized yet**, including bundles. This is reported explicitly by
+`check`; no fabricated ceiling is enforced. First obtain a green runner
+census, then initialize the bundle keys with `lower bundle-results.json
+--init` (the default list lives in `lib/ratchets.mjs`). Initialize browser
+keys with `lower out/results.json --init --metrics
+playing.roll.callsPerFrame,typing.default.perKey.layouts` (a comma-separated
+list), choosing counts whose repeatability and correlation were reviewed.
+The browser section starts empty. `lower` never adds/removes keys without
+`--init` and never raises an existing ceiling. Guard rejects removal,
+increased max/tolerance or changed unit unless `raises` includes
+`{ "key": "scenario.variant.metric", "reason": "why this measurement changed" }`.
+Keep exceptions narrow and review them with the changed fixture or metric.
 
 ## Console helpers
 

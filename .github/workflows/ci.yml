@@ -41,3 +41,8 @@ jobs:
       - run: pnpm test
 
       - run: pnpm build
+
+      - name: Bundle counts and ceilings
+        run: |
+          node .github/perf/bundle.mjs dist bundle-results.json
+          node .github/perf/ratchet.mjs check bundle-results.json --prefix bundle.

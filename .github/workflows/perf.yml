@@ -1,0 +1,115 @@
+name: Perf
+
+on:
+  push:
+    branches: ["ci/perf-**"]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Comparison ref; empty means head only'
+        default: main
+      scenarios:
+        description: 'Comma-separated journeys; empty means all'
+      repeats:
+        description: 'Repeats per target (one full census fits about 20 minutes)'
+        default: '1'
+      profile:
+        description: 'Comma-separated journeys for CPU profiles'
+      trace:
+        description: 'Comma-separated journeys for Chrome traces'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS: '1'
+      BASE_REF: ${{ github.event_name == 'push' && 'main' || inputs.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.BASE_REF != ''
+        with:
+          ref: ${{ env.BASE_REF }}
+          path: base
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build --sourcemap hidden
+      - if: env.BASE_REF != ''
+        working-directory: base
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build --sourcemap hidden
+
+      - name: Install lab tools outside the project
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw"
+          cd "$RUNNER_TEMP/pw"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.65.1 @jridgewell/trace-mapping@0.3.25
+          npx playwright install --with-deps chromium
+          cp -R "$GITHUB_WORKSPACE/.github/perf" ./perf
+
+      - name: Measure journeys
+        id: measure
+        continue-on-error: true
+        env:
+          SCENARIOS: ${{ inputs.scenarios }}
+          REPEATS: ${{ inputs.repeats || '1' }}
+          PROFILE: ${{ inputs.profile }}
+          TRACE: ${{ inputs.trace }}
+        run: |
+          args=(--head "$GITHUB_WORKSPACE/dist" --head-sha "$(git rev-parse HEAD)" --out "$RUNNER_TEMP/pw/out" --repeats "$REPEATS")
+          if [ -n "$BASE_REF" ]; then args+=(--base "$GITHUB_WORKSPACE/base/dist" --base-sha "$(git -C base rev-parse HEAD)"); fi
+          if [ -n "$SCENARIOS" ]; then args+=(--scenarios "$SCENARIOS"); fi
+          if [ -n "$PROFILE" ]; then args+=(--profile "$PROFILE"); fi
+          if [ -n "$TRACE" ]; then args+=(--trace "$TRACE"); fi
+          node "$RUNNER_TEMP/pw/perf/perf.mjs" "${args[@]}"
+
+      - name: Guard ceilings
+        id: guard
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -n "$BASE_REF" ] && [ -f base/.github/perf/ratchets.json ]; then
+            node .github/perf/ratchet.mjs guard base/.github/perf/ratchets.json .github/perf/ratchets.json
+          fi
+
+      - name: Check head ceilings
+        id: check
+        if: always()
+        continue-on-error: true
+        run: node .github/perf/ratchet.mjs check "$RUNNER_TEMP/pw/out/results.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf
+          path: ${{ runner.temp }}/pw/out
+          retention-days: 7
+
+      - name: Fail after retaining diagnostics
+        if: always()
+        env:
+          MEASURE: ${{ steps.measure.outcome }}
+          GUARD: ${{ steps.guard.outcome }}
+          CHECK: ${{ steps.check.outcome }}
+        run: test "$MEASURE" = success && test "$GUARD" = success && test "$CHECK" = success

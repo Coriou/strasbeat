@@ -50,21 +50,29 @@ The maintainer's machine must stay lightly loaded.
 
 - Locally: run the one test file you touched. No browsers, dev or preview
   servers, or performance runs, and no repeated full `pnpm test` / `pnpm build`.
-- Full check on GitHub runners, through a throwaway branch. `ci/**` runs
-  `pnpm test` and `pnpm build`; `ci/smoke-*` also runs the browser smoke test
-  (`.github/smoke/smoke.mjs`, plus `sw.mjs` across three deploy variants,
-  headless Chromium against production builds):
+- Everything else runs on GitHub runners, through one command that pushes
+  the commit to a throwaway `ci/` branch, waits, prints the verdict and
+  deletes the branch:
 
   ```sh
-  git push origin HEAD:refs/heads/ci/<name>         # tests + build
-  git push origin HEAD:refs/heads/ci/smoke-<name>   # tests + build + smoke
-  gh run list --branch ci/<name>
-  gh run view <id> --log-failed
-  git push origin --delete ci/<name>                # once the run has been read
+  node scripts/ci-run.mjs test                 # pnpm test, pnpm build, bundle ceilings
+  node scripts/ci-run.mjs smoke                # … + the browser smoke test and the
+                                               #   service-worker lifecycle test
+  node scripts/ci-run.mjs perf                 # … + the performance rig, against main
+  node scripts/ci-run.mjs perf --base <ref>    # the rig, against another commit
   ```
 
-  `ci/**` branches never deploy. Delete every one you push; `origin` should
-  end with only `main`.
+  It refuses a commit whose `vercel.json` lacks the `ci/**` deployment
+  guard (Vercel reads that file from the pushed commit, so an old tree
+  pushed to a `ci/` branch becomes a public preview), refuses the wrong
+  GitHub account, refuses uncommitted changes unless `--ref` is given, and
+  checks afterwards that no deployment appeared. To run an old commit, pass
+  it as `--base`; never push it. `--keep` leaves the branch for you to
+  delete. `origin` should end with only `main`.
+- Performance ceilings (`.github/perf/ratchets.json`) only go down. After a
+  measured win, lower them with the rig's `lower` command; raising or
+  removing one needs an entry in `raises` with a reason. Read "Performance
+  rig and ratchets" in `docs/architecture.md` before touching a metric.
 - A new `*.test.js` does not run until it is added to the `test` script in
   `package.json`. A browser-visible fix gets a check in the smoke script.
 - You cannot hear audio or see the app. What needs ears or eyes (sound,
@@ -122,6 +130,7 @@ section first; most were learned from bugs that produced no error.
 | layout CSS, breakpoints, left rail, tab strip, focus | Responsive layout and keyboard models |
 | workflows, `.github/smoke/`, `vercel.json` | CI and the smoke test |
 | `src/sw/`, `src/app-update.js`, `src/flags.js`, PWA/offline or update notices | Service worker, updates and offline |
+| `.github/perf/`, `scripts/ci-run.mjs`, performance ceilings | Performance rig and ratchets |
 
 Other references:
 

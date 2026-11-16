@@ -1,0 +1,138 @@
+{
+  "bundle.default.initialCssGzip": {
+    "max": 25623.0,
+    "tolerance": 0.01,
+    "unit": "bytes"
+  },
+  "bundle.default.initialCssRaw": {
+    "max": 191691.0,
+    "tolerance": 0.01,
+    "unit": "bytes"
+  },
+  "bundle.default.initialJsGzip": {
+    "max": 597188.0,
+    "tolerance": 0.01,
+    "unit": "bytes"
+  },
+  "bundle.default.initialJsRaw": {
+    "max": 1949220.0,
+    "tolerance": 0.01,
+    "unit": "bytes"
+  },
+  "idle.default.calls": {
+    "max": 90.0,
+    "tolerance": 0.1,
+    "unit": "calls per 10 s"
+  },
+  "idle.default.mutations": {
+    "max": 0.0,
+    "tolerance": 0,
+    "unit": "mutation records per 10 s"
+  },
+  "idle.default.raf": {
+    "max": 0.0,
+    "tolerance": 0,
+    "unit": "rAF callbacks per 10 s"
+  },
+  "idle.default.timers": {
+    "max": 11.0,
+    "tolerance": 0.1,
+    "unit": "timers per 10 s"
+  },
+  "launch-cold.default.ready.network.Document.requests": {
+    "max": 1.0,
+    "tolerance": 0,
+    "unit": "requests"
+  },
+  "launch-cold.default.ready.network.Fetch.requests": {
+    "max": 8.0,
+    "tolerance": 0,
+    "unit": "requests"
+  },
+  "launch-cold.default.ready.network.Script.requests": {
+    "max": 3.0,
+    "tolerance": 0,
+    "unit": "requests"
+  },
+  "launch-cold.default.ready.nodes": {
+    "max": 1880.0,
+    "tolerance": 0.02,
+    "unit": "DOM nodes"
+  },
+  "launch-warm.third.serverByClass.assets": {
+    "max": 0.0,
+    "tolerance": 0,
+    "unit": "requests"
+  },
+  "playing.beats.callsPerFrame": {
+    "max": 2330.36,
+    "tolerance": 0.03,
+    "unit": "calls per frame"
+  },
+  "playing.collapsed.callsPerFrame": {
+    "max": 6247.08,
+    "tolerance": 0.03,
+    "unit": "calls per frame"
+  },
+  "playing.roll.callsPerFrame": {
+    "max": 9365.93,
+    "tolerance": 0.03,
+    "unit": "calls per frame"
+  },
+  "playing.roll.canvasPerFrame": {
+    "max": 692.79,
+    "tolerance": 0.01,
+    "unit": "canvas calls per frame"
+  },
+  "playing.roll.rafPerFrame": {
+    "max": 2.04,
+    "tolerance": 0.02,
+    "unit": "rAF callbacks per frame"
+  },
+  "playing.roll.transactionsPerSecond": {
+    "max": 120.0,
+    "tolerance": 0.15,
+    "unit": "transactions per second"
+  },
+  "playing.scope.callsPerFrame": {
+    "max": 6251.73,
+    "tolerance": 0.03,
+    "unit": "calls per frame"
+  },
+  "tabs.default.firstOpen.calls": {
+    "max": 33769.34,
+    "tolerance": 0.02,
+    "unit": "calls per open"
+  },
+  "tabs.default.switch.calls": {
+    "max": 17856.4,
+    "tolerance": 0.02,
+    "unit": "calls per switch"
+  },
+  "tabs.default.switch.mutations": {
+    "max": 148.4,
+    "tolerance": 0.01,
+    "unit": "mutation records per switch"
+  },
+  "typing.default.perKey.calls": {
+    "max": 50427.6,
+    "tolerance": 0.02,
+    "unit": "calls per key"
+  },
+  "typing.default.perKey.layouts": {
+    "max": 2.53,
+    "tolerance": 0.01,
+    "unit": "layouts per key"
+  },
+  "typing.default.perKey.mutations": {
+    "max": 9.77,
+    "tolerance": 0.01,
+    "unit": "mutation records per key"
+  },
+  "typing.default.perKey.transactions": {
+    "max": 1.0,
+    "tolerance": 0,
+    "unit": "transactions per key"
+  },
+  "raises": []
+}
