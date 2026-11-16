@@ -116,6 +116,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .cm-scrub-chip__inner {
+    animation: none;
+  }
+}
+
 /* ─── Cursor lock during drag ──────────────────────────────────────────── */
 
 /*

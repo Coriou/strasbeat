@@ -31,9 +31,9 @@
 //     entry. So one drag = one Mod-z.
 //
 //   • The `evaluate` callback is called after every dispatch so the audio
-//     responds in real time. We use the underlying repl.evaluate (skipping
-//     StrudelMirror.evaluate) to avoid the visual flash that would otherwise
-//     fire 60 times per second during a drag.
+//     responds in real time. It is a *request*, not a guarantee: the host
+//     (editor-setup.js) coalesces requests so at most one evaluate is in
+//     flight, and skips them entirely when this buffer isn't the one playing.
 //
 //   • The "active" overlay (chip + accent color on the dragged literal) is a
 //     StateField. The base decorations (mark + handle widget) come from the
@@ -77,11 +77,18 @@ class HandleWidget extends WidgetType {
     // pointerdown handler can read them without bookkeeping per-widget JS
     // state. The handle widget gets recreated on every doc update; storing
     // the truth in the DOM means we don't have to thread state through.
+    this.updateDOM(el);
+    return el;
+  }
+  // Every edit earlier in the document shifts `from`/`to`, which makes eq()
+  // fail for each handle after the cursor. Refreshing the data attrs in
+  // place lets CM6 keep the existing node instead of recreating it.
+  updateDOM(el) {
     el.dataset.from = String(this.from);
     el.dataset.to = String(this.to);
     el.dataset.value = String(this.value);
     el.dataset.integer = this.isInteger ? '1' : '0';
-    return el;
+    return true;
   }
   ignoreEvent() {
     // We *want* pointer events on this widget — that's its whole job.
@@ -110,6 +117,15 @@ class ChipWidget extends WidgetType {
     inner.textContent = this.text;
     wrap.appendChild(inner);
     return wrap;
+  }
+  // The text changes on every frame of a drag. Without this CM6 would
+  // replace the node each time, restarting the chip's pop-in animation so it
+  // never settles at full opacity while the value is moving.
+  updateDOM(dom) {
+    const inner = dom.firstChild;
+    if (!inner) return false;
+    inner.textContent = this.text;
+    return true;
   }
   ignoreEvent() {
     return true;
@@ -325,15 +341,24 @@ function makeScrubberPlugin({ evaluate }) {
             this.cleanupDrag();
           }
         }
-        if (update.docChanged || update.viewportChanged) {
+        // The tree check covers a large buffer whose background parse
+        // reaches the viewport after the last edit — without it those
+        // numbers would get no handle until the next keystroke or scroll.
+        if (
+          update.docChanged ||
+          update.viewportChanged ||
+          syntaxTree(update.startState) !== syntaxTree(update.state)
+        ) {
           this.decorations = buildBaseDecorations(update.view);
         }
       }
 
       destroy() {
         this.view.dom.removeEventListener('pointerdown', this.handlePointerDown);
-        this.removeWindowListeners();
-        if (this.rafId != null) cancelAnimationFrame(this.rafId);
+        // A tab switch swaps the state (and this plugin instance) out from
+        // under an in-progress drag; cleanupDrag also restores the body
+        // cursor so it isn't left stuck on ew-resize.
+        if (this.drag) this.cleanupDrag();
       }
 
       removeWindowListeners() {
@@ -444,17 +469,11 @@ function makeScrubberPlugin({ evaluate }) {
         });
         this.drag.to = newTo;
 
-        // Trigger an audio re-eval. We deliberately don't await: the next
-        // rAF can supersede this one even if Strudel hasn't finished
-        // processing yet, and Strudel's repl handles the overlap fine.
+        // Ask for an audio re-eval. Never awaited: the doc edit and the
+        // chip must keep up with the pointer whatever the evaluate costs.
         if (typeof evaluate === 'function') {
           try {
-            const ret = evaluate();
-            if (ret && typeof ret.catch === 'function') {
-              ret.catch((err) =>
-                console.warn('[scrubber] eval rejected:', err),
-              );
-            }
+            evaluate();
           } catch (err) {
             console.warn('[scrubber] eval threw:', err);
           }
@@ -501,10 +520,10 @@ function makeScrubberPlugin({ evaluate }) {
  * Build the inline numeric scrubber as a CodeMirror 6 extension.
  *
  * @param {object} [options]
- * @param {() => unknown} [options.evaluate] - Called after every committed
- *   scrub change so the audio can re-evaluate. Pass a thin wrapper around
- *   the underlying repl evaluate (skipping any visual flash) — the scrubber
- *   may call this up to once per animation frame.
+ * @param {() => void} [options.evaluate] - Called after every committed
+ *   scrub change so the audio can re-evaluate. The scrubber may call this up
+ *   to once per animation frame, so it must return immediately — coalesce
+ *   the actual work (see createLatestWinsRunner in latest-wins.js).
  * @returns {import('@codemirror/state').Extension[]}
  */
 export function numericScrubber({ evaluate } = {}) {

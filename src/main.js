@@ -74,6 +74,7 @@ import {
   readStoredCmSettingsFromLocalStorage,
   applyInitialSettings,
   dispatchEditorExtensions,
+  editorClaimsCtrlB,
   strasbeatOverlayCompartment,
 } from "./editor-setup.js";
 import { createTabController } from "./tabs.js";
@@ -518,6 +519,20 @@ dispatchEditorExtensions(editor, {
     if (!soundBrowser) return;
     rightRail.activate("sounds");
     soundBrowser.focusSearch(word);
+  },
+  // Format outcomes the user should see (syntax error, result dropped).
+  onStatus: (s) => transport?.setStatus(s),
+  // Live edits (numeric scrubbing) only re-evaluate the buffer that is
+  // actually playing. `tabs` is assigned further down; read lazily. The
+  // caller has already checked that the scheduler runs, so "no owner
+  // recorded and nothing orphaned" is a play that has started but not been
+  // credited to its tab yet (ownership is claimed once the evaluate
+  // resolves) — that is the focused tab too.
+  isFocusedTabPlaying: () => {
+    if (!tabs) return true;
+    if (tabs.getOrphanedPlaying() != null) return false;
+    const playing = tabs.getPlayingItem();
+    return playing == null || playing === tabs.getActiveItem();
   },
 });
 
@@ -1550,11 +1565,17 @@ editor.evaluate = async function (...args) {
 document.addEventListener(
   "keydown",
   (e) => {
+    // Platform modifier only: on macOS Ctrl+B is cursor-left (natively and
+    // in the Emacs profile) and must keep reaching the editor. Elsewhere the
+    // platform modifier IS Ctrl, so the Emacs / Vim / Helix profiles keep
+    // Ctrl+B for themselves while the editor has the key.
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
     if (
-      (e.metaKey || e.ctrlKey) &&
+      (isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) &&
       !e.shiftKey &&
       !e.altKey &&
-      e.key.toLowerCase() === "b"
+      e.key.toLowerCase() === "b" &&
+      (isMac || !editorClaimsCtrlB(e.target))
     ) {
       e.preventDefault();
       rightRail.toggle();

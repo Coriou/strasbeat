@@ -2,12 +2,22 @@ import { Compartment, Prec, StateEffect } from "@codemirror/state";
 import { createUniversalKeymap } from "./editor/keymap-universal.js";
 import { getProfile, getStoredProfileId } from "./editor/keymap-profiles.js";
 import { codemirrorSettings, defaultSettings } from "@strudel/codemirror";
-import { formatExtension } from "./editor/format.js";
+import { formatExtension, formatStatus } from "./editor/format.js";
 import { errorMarksExtension } from "./editor/error-marks.js";
 import { createVscodeKeymap } from "./editor/keymap.js";
 import { numericScrubber } from "./editor/numeric-scrubber.js";
 import { hoverDocs } from "./editor/hover-docs.js";
 import { signatureHint } from "./editor/signature-hint.js";
+import { createLatestWinsRunner } from "./editor/latest-wins.js";
+import { parseArrangements } from "./editor/arrange-parse.js";
+import {
+  primeArrangementParser,
+  resetRegistry as resetArrangeRegistry,
+  beginEvaluate as beginArrangeEvaluate,
+  endEvaluate as endArrangeEvaluate,
+  markEvalAppliedFor as markArrangeEvalAppliedFor,
+  isEvalInProgress as isArrangeEvalInProgress,
+} from "./strudel-ext/arrange.js";
 
 // CodeMirror compartment for the strasbeat-side editing overlay
 // (createVscodeKeymap). Wrapped so we can swap it in/out when the user
@@ -108,6 +118,60 @@ export function applyInitialSettings(editor, storedSettings) {
   });
 }
 
+// Ctrl+B belongs to the editor in the Emacs profile (cursor left) and in the
+// modal ones (Vim / Helix page up). The app's Ctrl+B shortcut must stand
+// down while one of them is active and the key is typed into the editor.
+export function editorClaimsCtrlB(target) {
+  const profile = getProfile(getStoredProfileId());
+  if (!profile.isModal && profile.id !== "emacs") return false;
+  return Boolean(target?.closest?.(".cm-editor"));
+}
+
+// Mute/solo edit the buffer and re-evaluate so the change is heard — but
+// only while something is playing. With the transport stopped the toggle is
+// just an edit; it must not start playback.
+function evaluateIfPlaying(editor, onEvaluate) {
+  return () => {
+    if (editor.repl?.scheduler?.started) onEvaluate();
+  };
+}
+
+// Re-evaluate for a live edit (the numeric scrubber) without the ceremony of
+// a user-initiated evaluate: no flash, no console divider, no transport
+// "loading" flicker, no diagnostics pass — a drag fires this many times a
+// second. What it must NOT skip is the arrange() bookkeeping the full
+// evaluate does (eval-feedback.js): the wrapper in strudel-ext/arrange.js
+// numbers arrange() calls from the last registry reset, so evaluating
+// without one makes the registry grow on every call and silently drops a
+// soloed section (its index stops matching).
+async function evaluateLiveEdit(editor) {
+  // A full evaluate is mid-flight and owns the arrange registry, so this
+  // edit is skipped. That evaluate read the buffer when it started: a value
+  // scrubbed after that point is only heard if another scrub request follows
+  // (the runner's trailing run) or on the next evaluate.
+  if (isArrangeEvalInProgress()) return;
+  const code = editor.code ?? "";
+  try {
+    primeArrangementParser(parseArrangements(code));
+    resetArrangeRegistry();
+    beginArrangeEvaluate();
+  } catch (err) {
+    console.warn("[strasbeat/arrange] failed to prime parser:", err);
+  }
+  let applied = false;
+  try {
+    await editor.repl.evaluate(code, false);
+    applied = true;
+  } finally {
+    try {
+      endArrangeEvaluate();
+      if (applied) markArrangeEvalAppliedFor(code);
+    } catch (err) {
+      console.warn("[strasbeat/arrange] endEvaluate failed:", err);
+    }
+  }
+}
+
 // Inject our editor extensions (Prettier formatter + keymaps + numeric
 // scrubber) into the live EditorView via StateEffect.appendConfig.
 //
@@ -121,24 +185,47 @@ export function applyInitialSettings(editor, storedSettings) {
 // the user changes profiles, without remounting the editor.
 export function dispatchEditorExtensions(
   editor,
-  { onOpenReference, onAuditionSelected, onRevealSound, onFocusBrowser },
+  {
+    onOpenReference,
+    onAuditionSelected,
+    onRevealSound,
+    onFocusBrowser,
+    onStatus,
+    isFocusedTabPlaying,
+  },
 ) {
   const profile = getProfile(getStoredProfileId());
   const onEvaluate = () => editor.evaluate();
+
+  // Scrubbing only re-evaluates when the result would be heard *and* belongs
+  // to what is playing: with the transport stopped there is nothing to
+  // update, and evaluating a tab that isn't the playing one would replace
+  // the playing tab's audio while the tab strip still credits the other tab.
+  const requestScrubEvaluate = createLatestWinsRunner(
+    () => {
+      if (!editor.repl?.scheduler?.started) return;
+      if (isFocusedTabPlaying && !isFocusedTabPlaying()) return;
+      return evaluateLiveEdit(editor);
+    },
+    { onError: (err) => console.warn("[scrubber] eval rejected:", err) },
+  );
 
   editor.editor.dispatch({
     effects: StateEffect.appendConfig.of([
       errorMarksExtension,
       Prec.highest(formatExtension),
+      onStatus ? formatStatus.of(onStatus) : [],
       Prec.highest(createUniversalKeymap({ onEvaluate, onAuditionSelected, onRevealSound, onFocusBrowser })),
       strasbeatOverlayCompartment.of(
         profile.applyStrasbeatOverlay
-          ? Prec.highest(createVscodeKeymap({ onEvaluate }))
+          ? Prec.highest(
+              createVscodeKeymap({
+                onEvaluate: evaluateIfPlaying(editor, onEvaluate),
+              }),
+            )
           : [],
       ),
-      numericScrubber({
-        evaluate: () => editor.repl.evaluate(editor.code, false),
-      }),
+      numericScrubber({ evaluate: requestScrubEvaluate }),
       hoverDocs({ onOpenReference }),
       signatureHint,
     ]),
@@ -152,7 +239,11 @@ export function reconfigureOverlay(editor, applyOverlay, onEvaluate) {
   editor.editor.dispatch({
     effects: strasbeatOverlayCompartment.reconfigure(
       applyOverlay
-        ? Prec.highest(createVscodeKeymap({ onEvaluate }))
+        ? Prec.highest(
+            createVscodeKeymap({
+              onEvaluate: evaluateIfPlaying(editor, onEvaluate),
+            }),
+          )
         : [],
     ),
   });
