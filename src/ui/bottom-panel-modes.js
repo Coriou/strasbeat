@@ -39,6 +39,10 @@ export function createBottomPanelModes() {
   let toggleEl = null;
   let statusEl = null;
   let playbackState = "idle";
+  // The user was looking at Visuals when the visuals went away (every stop
+  // tears them down). Reselect it when they come back, so stop → play of a
+  // visual pattern doesn't drop the user back to the roll each time.
+  let resumeVisuals = false;
   const modesAvailable = new Set(["roll", "scope"]);
   const onChangeListeners = new Set();
 
@@ -69,6 +73,7 @@ export function createBottomPanelModes() {
     if (mode === currentMode) return;
     if (!MODES.find((m) => m.id === mode)) return;
     if (!modesAvailable.has(mode)) return;
+    resumeVisuals = false; // any new choice replaces the remembered one
     currentMode = mode;
     updateToggle();
     emitChange(mode);
@@ -105,16 +110,25 @@ export function createBottomPanelModes() {
     updateToggle();
   }
 
-  // Visuals availability is gated by the hydra wrapper: available iff
-  // initHydra() has succeeded, unavailable on clearHydra / teardown. Like
-  // beats, we do not auto-switch when it appears — the user opts in. We do
-  // switch back to roll if it disappears while it's the active view.
+  // Visuals availability is gated by the visuals host: available iff a
+  // Hydra/shader layer is live, unavailable on teardown. Like beats, we do
+  // not auto-switch the first time it appears — the user opts in. We do
+  // switch back to roll if it disappears while it's the active view, and
+  // return to it when it reappears (see resumeVisuals). Picking any other
+  // mode in between cancels that.
   function setVisualsAvailable(available) {
     if (available) {
       modesAvailable.add("visuals");
+      if (resumeVisuals) {
+        resumeVisuals = false;
+        setMode("visuals");
+      }
     } else {
       modesAvailable.delete("visuals");
-      if (currentMode === "visuals") setMode("roll");
+      if (currentMode === "visuals") {
+        setMode("roll");
+        resumeVisuals = true;
+      }
     }
     updateToggle();
   }
