@@ -1612,7 +1612,7 @@ document.addEventListener(
   true,
 );
 
-mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas, onGeometryChange: syncVisualsClip });
+mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
 mountTrackBar({
   container: document.getElementById("track-bar"),
   view: editor.editor,

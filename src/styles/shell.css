@@ -102,6 +102,12 @@
   }
 }
 
+/* Dragging the roll divider writes --roll-h on every pointer move; easing
+   each write makes the divider lag the pointer. */
+.shell.shell--roll-resizing {
+  transition: none;
+}
+
 /* Collapsed state — toggled by JS on the body or shell. */
 .shell.shell--roll-collapsed {
   --roll-h: 0px;
