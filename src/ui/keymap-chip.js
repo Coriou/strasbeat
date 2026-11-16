@@ -516,7 +516,8 @@ function renderPopover({ anchor, activeId, onPick, onDismiss }) {
   }
 
   function onClickOutside(e) {
-    if (!popover.contains(e.target) && e.target !== anchor) onDismiss();
+    // (contains: the chip's label and chevron are children of the anchor)
+    if (!popover.contains(e.target) && !anchor.contains(e.target)) onDismiss();
   }
 
   document.addEventListener("keydown", onKey, true);

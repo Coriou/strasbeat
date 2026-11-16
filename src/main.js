@@ -1261,7 +1261,18 @@ function refreshNowPlaying() {
 // moment any pattern is opened (the open-or-focus swap installs its content).
 function updateEmptyState() {
   if (!tabs) return;
-  editorPane?.classList.toggle("is-empty", tabs.getActiveItem() == null);
+  const empty = tabs.getActiveItem() == null;
+  editorPane?.classList.toggle("is-empty", empty);
+  // With nothing open the editor is covered by the "Nothing open" overlay but
+  // still holds the closed pattern's text. Take it out of the tab order and
+  // the accessibility tree so nobody types into a buffer they cannot see
+  // (and that is saved nowhere), and let the overlay be read instead.
+  const hadFocus = empty && editorRoot.contains(document.activeElement);
+  editorRoot.inert = empty;
+  document
+    .getElementById("editor-empty")
+    ?.setAttribute("aria-hidden", empty ? "false" : "true");
+  if (hadFocus) document.getElementById("pattern-menu")?.focus();
 }
 
 // ─── Pattern tabs: open-set controller + per-tab EditorState swap ──────────

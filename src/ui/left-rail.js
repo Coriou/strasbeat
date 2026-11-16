@@ -401,11 +401,21 @@ export function mount({
   // open/close is never written back (see src/ui/responsive.js).
   const storedCollapsed = () => localStorage.getItem(COLLAPSE_KEY) === "true";
   const narrow = watchNarrow((isNarrow) => {
+    // Crossing a breakpoint can close the rail under the keyboard's feet
+    // (and below 600px stop drawing it altogether): move focus out first,
+    // as a user-driven collapse does.
+    const hadFocus = container.contains(document.activeElement);
     isPanelCollapsed = !resolveRailExpanded({
       storedExpanded: !storedCollapsed(),
       narrow: isNarrow,
     });
     applyCollapseState();
+    if (hadFocus && isPanelCollapsed) {
+      pickFocusReturn(
+        [collapseBtn, document.getElementById("pattern-menu")],
+        isRendered,
+      )?.focus();
+    }
   });
   let isPanelCollapsed = !resolveRailExpanded({
     storedExpanded: !storedCollapsed(),
@@ -839,7 +849,8 @@ export function mount({
       }
       return;
     }
-    if (e.key === "Enter" || e.key === " ") {
+    // (a space in the middle of a type-to-find query is part of the query)
+    if (e.key === "Enter" || (e.key === " " && typeahead === "")) {
       e.preventDefault();
       if (isRow) node.click();
       else toggleCollapse(folderKey);
@@ -875,6 +886,7 @@ export function mount({
 
     // Type-to-find among the visible nodes.
     if (e.key.length === 1) {
+      if (e.key === " ") e.preventDefault(); // never scroll the list instead
       typeahead += e.key;
       clearTimeout(typeaheadTimer);
       typeaheadTimer = setTimeout(() => (typeahead = ""), TYPEAHEAD_RESET_MS);

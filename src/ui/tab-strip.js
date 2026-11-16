@@ -172,6 +172,10 @@ export function mountTabStrip(opts) {
         "No open patterns — open one from the library",
       );
       container.appendChild(empty);
+      // The last tab was closed from the keyboard: the focused tab is gone
+      // and the strip has no tab stop left. Hand focus to the control that
+      // opens the library rather than dropping it on the page.
+      if (hadFocus?.keyboard) document.getElementById("pattern-menu")?.focus();
       return;
     }
 
