@@ -23,6 +23,19 @@
  * --right-rail-w defaults to the collapsed strip width (just the tab bar)
  * and is grown to the user's chosen panel width by JS when expanded. See
  * src/ui/right-rail.js + design/work/08-feature-parity-and-beyond.md.
+ *
+ * The canvas is king at every width (SYSTEM.md §2.1), so the rails only
+ * share its row while there is room for all three:
+ *
+ *   ≥ 900px   docked — the diagram above. The right rail's track is capped
+ *             so the editor keeps --editor-min-w even at the rail's widest.
+ *   < 900px   both rails fall back to their strips; an opened rail floats
+ *             over the editor (same row, same seams) instead of squeezing it.
+ *   < 600px   the collapsed left strip goes too — the top bar's pattern
+ *             button opens the library — and the transport may wrap.
+ *
+ * The breakpoints are mirrored in src/ui/responsive.js, which also keeps a
+ * rail that was left open on a wide screen from opening on a narrow one.
  */
 
 .shell {
@@ -32,9 +45,22 @@
      — which the tab strip's nowrap tabs blow past once enough are open,
      widening the whole grid (top bar included) beyond 100vw. Clamping the
      floor to 0 lets the strip stay inside the column and scroll instead. */
-  grid-template-columns: var(--left-rail-w) minmax(0, 1fr) var(--right-rail-w);
+  grid-template-columns:
+    var(--left-rail-w)
+    minmax(0, 1fr)
+    min(
+      var(--right-rail-w),
+      max(
+        var(--right-rail-tabs-w),
+        100vw - var(--left-rail-w) - var(--editor-min-w)
+      )
+    );
+  /* The two rows that change with the viewport go through their own
+     properties so the narrow / short rules below only restate one value. */
+  --transport-track: var(--transport-h);
+  --roll-track: var(--roll-h);
   grid-template-rows:
-    var(--top-bar-h) 1fr var(--transport-h) auto auto auto var(--roll-h);
+    var(--top-bar-h) 1fr var(--transport-track) auto auto auto var(--roll-track);
   grid-template-areas:
     "topbar      topbar      topbar"
     "rail        editor      right-rail"
@@ -43,6 +69,7 @@
     "trackbar    trackbar    trackbar"
     "midibar     midibar     midibar"
     "roll        roll        roll";
+  position: relative; /* containing block for a rail floating over the editor */
   height: 100dvh;
   width: 100vw;
   overflow: hidden;
@@ -234,8 +261,8 @@
 }
 
 .btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .btn:disabled {
@@ -288,6 +315,88 @@
   letter-spacing: 0.01em;
 }
 
+/* ─── Narrow and short viewports ───────────────────────────────────────────
+ *
+ * Below 900px the rails stop being columns that grow: each track is pinned
+ * to its strip, and a rail that is open leaves the grid flow to float over
+ * the editor's row. An absolutely positioned grid child takes its grid area
+ * as containing block, so `top/bottom: 0` is exactly the editor row — the
+ * top bar, transport and bottom panel are never covered.
+ */
+@media (max-width: 899.98px) {
+  .shell {
+    grid-template-columns:
+      var(--rail-strip-w)
+      minmax(0, 1fr)
+      var(--right-rail-tabs-w);
+  }
+
+  .shell > .left-rail[data-collapsed="false"],
+  .shell > .right-rail[data-collapsed="false"] {
+    position: absolute;
+    grid-area: 2 / 1 / 3 / -1;
+    top: 0;
+    bottom: 0;
+    z-index: 20;
+    box-shadow: var(--shadow-pop);
+  }
+  /* Both leave at least a thumb's width of canvas showing: that strip is
+     the scrim, and tapping it closes the rail (left-rail.js, right-rail.js). */
+  .shell > .left-rail[data-collapsed="false"] {
+    left: 0;
+    width: min(280px, 100% - var(--target-min) - var(--space-1));
+  }
+  .shell > .right-rail[data-collapsed="false"] {
+    right: 0;
+    width: min(var(--right-rail-w), 100% - var(--target-min) - var(--space-1));
+  }
+
+  /* Scrim over the canvas while a rail floats on it. It is a pseudo-element
+     of the pane so a tap on it reports the pane itself as the event target. */
+  .shell:has(
+      > .left-rail[data-collapsed="false"],
+      > .right-rail[data-collapsed="false"]
+    )
+    > .editor-pane::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    background: var(--scrim);
+  }
+}
+
+@media (max-width: 599.98px) {
+  .shell {
+    grid-template-columns: 0 minmax(0, 1fr) var(--right-rail-tabs-w);
+    /* The transport wraps instead of clipping (transport.css). */
+    --transport-track: auto;
+  }
+  .shell > .left-rail:not([data-collapsed="false"]) {
+    display: none;
+  }
+}
+
+/* A short window (a phone on its side, 200% zoom on a laptop): the bottom
+   panel gives way before the editor does. */
+@media (max-height: 640px) {
+  .shell {
+    --roll-track: min(var(--roll-h), 30dvh);
+  }
+}
+
+/* Coarse pointers: the bars are taller (tokens.css), so their buttons can be
+   a full target. */
+@media (pointer: coarse) {
+  .top-bar .btn,
+  .transport .btn {
+    min-height: var(--target-min);
+  }
+  .top-bar .btn--icon {
+    min-width: var(--target-min);
+  }
+}
+
 /* ─── PWA display modes ────────────────────────────────────────────────────
  *
  * Standalone / fullscreen — iOS and Android installed PWA with
@@ -298,8 +407,10 @@
 @supports (padding: env(safe-area-inset-top, 0px)) {
   @media (display-mode: standalone), (display-mode: fullscreen) {
     :root {
-      --top-bar-h: calc(40px + env(safe-area-inset-top, 0px));
-      --transport-h: calc(32px + env(safe-area-inset-bottom, 0px));
+      --top-bar-h: calc(var(--top-bar-base-h) + env(safe-area-inset-top, 0px));
+      --transport-h: calc(
+        var(--transport-base-h) + env(safe-area-inset-bottom, 0px)
+      );
     }
 
     .top-bar {

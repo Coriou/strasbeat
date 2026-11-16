@@ -8,9 +8,14 @@
   height: var(--top-bar-h);
 }
 
+/* The brand is the page's <h1>; undo the heading defaults so it stays the
+   same quiet wordmark. */
 .top-bar__brand {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
+  margin: 0;
+  font: inherit;
 }
 
 .brand-mark {
@@ -32,6 +37,8 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  /* May shrink: on a narrow bar the name ellipsises before anything clips. */
+  min-width: 0;
   height: 28px;
   padding: 0 var(--space-3);
   background: transparent;
@@ -50,19 +57,24 @@
   color: var(--text);
 }
 .pattern-menu:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .pattern-menu__name {
   font-weight: 600;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pattern-menu__chevron {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   color: var(--text-mut);
 }
 .pattern-menu__chevron svg {
@@ -77,5 +89,38 @@
 .top-bar__actions {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: var(--space-1);
+}
+
+/* Phone width: the actions drop to their icons (the label stays in the
+   accessibility tree) so brand, pattern name and share all fit. */
+@media (max-width: 599.98px) {
+  .top-bar {
+    gap: var(--space-2);
+    padding: 0 var(--space-2) 0 var(--space-3);
+  }
+  .top-bar__actions .btn {
+    min-width: 28px;
+    padding: 0;
+    gap: 0;
+  }
+  .top-bar__actions .btn__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@media (pointer: coarse) {
+  .pattern-menu {
+    min-height: var(--target-min);
+  }
+  .top-bar__actions .btn {
+    min-width: var(--target-min);
+  }
 }

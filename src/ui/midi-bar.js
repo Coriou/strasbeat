@@ -623,6 +623,9 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   }
   function onDocKeydown(e) {
     if (popoverOpen && e.key === "Escape") {
+      // Claim the key so an outer Escape handler (a floating rail) leaves
+      // its own layer open.
+      e.preventDefault();
       closePopover();
       presetBtn.focus();
     }

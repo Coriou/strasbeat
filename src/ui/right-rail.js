@@ -44,10 +44,27 @@
 // taking keyboard focus. A stored id that no panel claims falls back to the
 // first registered panel once the registration pass is over.
 //
+// Narrow viewports (src/ui/responsive.js) — below the breakpoint an open
+// rail floats over the editor instead of sitting beside it (shell.css). The
+// stored expanded flag is a wide-layout preference there: the rail always
+// starts collapsed, opens only when the user asks, closes again on Escape
+// or a tap on the scrim, and none of that is written back.
+//
 // Pure DOM, no framework. Tab buttons are rebuilt on every register
 // call so the order matches registration order.
 
 import { makeIcon } from './icons.js';
+import {
+  watchNarrow,
+  resolveRailExpanded,
+  expandedToPersist,
+  rightRailMaxPanelWidth,
+  resizedRailWidth,
+  railTakesEscape,
+  pickFocusReturn,
+  isRendered,
+  ESCAPE_LAYER_SELECTOR,
+} from './responsive.js';
 
 const DEFAULT_STORAGE_KEY = 'strasbeat:right-rail';
 const DEFAULT_WIDTH = 320;
@@ -69,9 +86,26 @@ export function mountRightRail({
 
   // ─── State ────────────────────────────────────────────────────────────
   const stored = readStored(storageKey);
-  let expanded = stored?.expanded === true;
+  // What the user chose on a wide layout — the value that gets persisted.
+  let preferredExpanded = stored?.expanded === true;
+  const narrow = watchNarrow((isNarrow) => {
+    const want = resolveRailExpanded({
+      storedExpanded: preferredExpanded,
+      narrow: isNarrow,
+    });
+    if (want === expanded) return;
+    // The viewport changed, not the user's mind: opening takes no focus
+    // (closing still moves it out of a panel that is about to be hidden).
+    if (want) expand({ focus: false });
+    else collapse();
+  });
+  let expanded = resolveRailExpanded({
+    storedExpanded: preferredExpanded,
+    narrow: narrow.isNarrow(),
+  });
   let widthPx = clampWidth(stored?.width ?? DEFAULT_WIDTH);
   let activeId = stored?.activeId ?? null;
+  let openerEl = null;
 
   /** @type {Map<string, {id, icon, label, create, activate, deactivate, tabBtn, mounted}>} */
   const panels = new Map();
@@ -94,11 +128,19 @@ export function mountRightRail({
   // by CSS (pointer-events: none on [data-collapsed="true"]).
   let dragStartX = null;
   let dragStartWidth = null;
+  let dragCap = MAX_WIDTH;
   if (resizeHandle) {
     resizeHandle.addEventListener('pointerdown', (e) => {
       if (!expanded) return;
       dragStartX = e.clientX;
       dragStartWidth = widthPx;
+      // The track is capped by the viewport (shell.css); drag within what is
+      // actually drawn, or the handle would move through a dead zone first.
+      dragCap = rightRailMaxPanelWidth({
+        viewportWidth: window.innerWidth,
+        leftRailWidth: leftRailTrackWidth(),
+        tabsWidth: TABS_W,
+      });
       resizeHandle.setPointerCapture(e.pointerId);
       e.preventDefault();
       document.body.style.cursor = 'ew-resize';
@@ -109,7 +151,13 @@ export function mountRightRail({
       if (dragStartX == null) return;
       // Dragging left = bigger panel (panel is on the right edge of the page).
       const dx = dragStartX - e.clientX;
-      widthPx = clampWidth(dragStartWidth + dx);
+      widthPx = resizedRailWidth({
+        stored: dragStartWidth,
+        dx,
+        min: MIN_WIDTH,
+        max: MAX_WIDTH,
+        cap: dragCap,
+      });
       applyShellWidth();
     });
     const endDrag = (e) => {
@@ -139,8 +187,39 @@ export function mountRightRail({
   panelContainer.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !e.defaultPrevented) {
       e.preventDefault();
-      onFocusEditor();
+      // Floating over the editor, the panel is in the way of where focus is
+      // going — close it. collapse() moves focus out of the panel itself.
+      if (narrow.isNarrow()) collapse();
+      else onFocusEditor();
     }
+  });
+
+  // Floating over the editor, Escape closes the rail from anywhere — its tab
+  // strip, the editor underneath — unless something above it claimed the key.
+  // Listening on window (bubble) puts this after every other handler.
+  window.addEventListener('keydown', (e) => {
+    const otherRail = document.activeElement?.closest?.('.left-rail');
+    if (
+      !railTakesEscape({
+        key: e.key,
+        defaultPrevented: e.defaultPrevented,
+        narrow: narrow.isNarrow(),
+        open: expanded,
+        layerOpen: document.querySelector(ESCAPE_LAYER_SELECTOR) != null,
+        focusInOtherRail: otherRail != null,
+      })
+    ) {
+      return;
+    }
+    e.preventDefault();
+    collapse();
+  });
+
+  // A tap on the scrim beside the floating rail (the editor pane's own box,
+  // not anything inside it — see shell.css) closes it.
+  const paneEl = shellEl.querySelector?.('.editor-pane');
+  paneEl?.addEventListener?.('pointerdown', (e) => {
+    if (e.target === paneEl && narrow.isNarrow()) collapse();
   });
 
   // ─── Keyboard: arrow keys move between tabs (vertical tablist) ────────
@@ -220,7 +299,15 @@ export function mountRightRail({
       console.warn(`[right-rail] activate: unknown panel "${id}"`);
       return;
     }
+    if (!expanded && !focus && narrow.isNarrow()) {
+      // An open the user didn't ask for would cover the editor here. Keep
+      // the tab as the one their first tap on the strip brings up.
+      activeId = id;
+      saveState();
+      return;
+    }
     if (!expanded) {
+      rememberOpener();
       expanded = true;
       syncCollapsedAttr();
       applyShellWidth();
@@ -239,15 +326,16 @@ export function mountRightRail({
     else expand();
   }
 
-  function expand() {
+  function expand({ focus = true } = {}) {
     if (expanded) return;
+    rememberOpener();
     expanded = true;
     syncCollapsedAttr();
     applyShellWidth();
     if ((activeId == null || !panels.has(activeId)) && panelOrder.length > 0) {
       activeId = panelOrder[0];
     }
-    if (activeId) doActivate(activeId);
+    if (activeId) doActivate(activeId, { focus });
     saveState();
   }
 
@@ -272,7 +360,30 @@ export function mountRightRail({
     syncCollapsedAttr();
     applyShellWidth();
     saveState();
-    if (hadFocus) onFocusEditor();
+    const opener = openerEl;
+    openerEl = null;
+    if (!hadFocus) return;
+    // A floating rail gives focus back to whatever opened it; docked (or
+    // with the opener gone) it goes to the editor.
+    const back = pickFocusReturn([opener], isRendered);
+    if (back) back.focus();
+    else onFocusEditor();
+  }
+
+  // What had focus when a floating rail was opened, so closing can return
+  // there. Not tracked while docked: the rail isn't in the editor's way.
+  function rememberOpener() {
+    const active = document.activeElement;
+    openerEl =
+      narrow.isNarrow() && active && active !== document.body ? active : null;
+  }
+
+  // The left rail's current track: its inline width on the shell, or the
+  // stylesheet default before the left rail has mounted.
+  function leftRailTrackWidth() {
+    const read = (style) => parseFloat(style.getPropertyValue('--left-rail-w'));
+    const inline = read(shellEl.style);
+    return Number.isFinite(inline) ? inline : read(getComputedStyle(shellEl)) || 0;
   }
 
   function isExpanded() {
@@ -378,8 +489,13 @@ export function mountRightRail({
   }
 
   function saveState() {
-    writeStored(storageKey, {
+    preferredExpanded = expandedToPersist({
       expanded,
+      narrow: narrow.isNarrow(),
+      storedExpanded: preferredExpanded,
+    });
+    writeStored(storageKey, {
+      expanded: preferredExpanded,
       width: widthPx,
       activeId,
     });
