@@ -508,3 +508,23 @@
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* <code> inside the <pre> falls back to the UA's `monospace` (Courier on
+   macOS) unless told otherwise — keep examples in the editor's typeface. */
+.learn-panel__code code {
+  font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .learn-panel *,
+  .learn-panel *::before,
+  .learn-panel *::after {
+    transition: none;
+    animation: none;
+  }
+
+  /* Out-specifies the universal rule above, so it needs its own reset. */
+  .learn-panel__btn.is-feedback {
+    animation: none;
+  }
+}

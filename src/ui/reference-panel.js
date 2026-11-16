@@ -343,6 +343,11 @@ export function createReferencePanel({
   let countEl = null;
   let mounted = false;
   let searchTimer = null;
+  // Whether the panel is the rail's visible tab. "In use" marks are only
+  // touched while visible; a change that arrives while hidden just sets
+  // `inUseStale` and is applied on the next activate().
+  let visible = false;
+  let inUseStale = false;
 
   // Each render() flattens visible entries into this list so keyboard
   // nav can map activeIndex → entry name without re-walking the DOM.
@@ -400,7 +405,8 @@ export function createReferencePanel({
 
     // Category pills.
     pillsEl = el("div", "reference-panel__pills");
-    pillsEl.setAttribute("role", "tablist");
+    // Filter toggles, not tabs: there's one list and no tabpanel per pill.
+    pillsEl.setAttribute("role", "group");
     pillsEl.setAttribute("aria-label", "Reference category");
     for (const c of CATEGORIES) {
       const pill = document.createElement("button");
@@ -409,8 +415,7 @@ export function createReferencePanel({
       pill.dataset.category = c.id;
       pill.textContent = c.label;
       if (c.title) pill.title = c.title;
-      pill.setAttribute("role", "tab");
-      pill.setAttribute("aria-selected", c.id === category ? "true" : "false");
+      pill.setAttribute("aria-pressed", c.id === category ? "true" : "false");
       if (c.id === category) pill.classList.add("is-active");
       pill.addEventListener("click", () => {
         if (category === c.id) return;
@@ -436,9 +441,11 @@ export function createReferencePanel({
     render();
   }
 
-  function activate() {
+  function activate({ focus = true } = {}) {
     if (!mounted) return;
-    if (searchInput) {
+    visible = true;
+    if (inUseStale) applyInUse();
+    if (focus && searchInput) {
       searchInput.focus();
       searchInput.select();
     }
@@ -447,13 +454,42 @@ export function createReferencePanel({
   function deactivate() {
     // No timers/listeners that need teardown — the panel keeps its DOM
     // (and scroll position) so re-activate is fast.
+    visible = false;
   }
 
   // ─── Public helpers ────────────────────────────────────────────────────
 
   function setBufferText(text) {
-    inUse = scanInUse(text ?? "", allEntries);
-    if (mounted) render();
+    const next = scanInUse(text ?? "", allEntries);
+    if (sameSet(next, inUse)) return;
+    inUse = next;
+    if (!mounted) return;
+    // Runs on every evaluate. Rebuilding the list here would throw away
+    // scroll position, the expanded entry and keyboard focus, so only the
+    // "used" chips and the counts are patched — and only while on screen.
+    if (visible) applyInUse();
+    else inUseStale = true;
+  }
+
+  function applyInUse() {
+    inUseStale = false;
+    if (!listEl) return;
+    let usedVisibleCount = 0;
+    for (const wrap of listEl.querySelectorAll(".reference-panel__entry")) {
+      const used = inUse.has(wrap.dataset.entryName);
+      if (used) usedVisibleCount++;
+      const head = wrap.firstElementChild;
+      const chip = head.querySelector(".reference-panel__entry-state");
+      if (used && !chip) {
+        // Sits right after the name/preview text, ahead of any "mini" tag.
+        head
+          .querySelector(".reference-panel__entry-text")
+          .after(buildUsedChip());
+      } else if (!used && chip) {
+        chip.remove();
+      }
+    }
+    updateCounts(flatVisible.length, usedVisibleCount);
   }
 
   /**
@@ -593,20 +629,12 @@ export function createReferencePanel({
 
     // 2. Filter + rank by query (or sort alpha if no query).
     const ranked = query ? rankEntries(visible, query) : sortAlpha(visible);
-    const categoryDef = getCategory(category);
     const usedVisibleCount = ranked.filter((entry) =>
       inUse.has(entry.name),
     ).length;
 
-    updateSummary(categoryDef, ranked.length, usedVisibleCount);
-
-    const countText =
-      ranked.length === allEntries.length
-        ? `${allEntries.length} entries`
-        : `${ranked.length} of ${allEntries.length}`;
-    countEl.textContent = usedVisibleCount
-      ? `${countText} · ${usedVisibleCount} used`
-      : countText;
+    inUseStale = false;
+    updateCounts(ranked.length, usedVisibleCount);
 
     if (allEntries.length === 0) {
       const empty = el("div", "reference-panel__empty", "no docs loaded");
@@ -633,6 +661,23 @@ export function createReferencePanel({
       flatVisible.push({ name: entry.name, source: entry.source });
     }
     listEl.appendChild(frag);
+  }
+
+  function updateCounts(visibleCount, usedVisibleCount) {
+    updateSummary(getCategory(category), visibleCount, usedVisibleCount);
+    const countText =
+      visibleCount === allEntries.length
+        ? `${allEntries.length} entries`
+        : `${visibleCount} of ${allEntries.length}`;
+    countEl.textContent = usedVisibleCount
+      ? `${countText} · ${usedVisibleCount} used`
+      : countText;
+  }
+
+  function buildUsedChip() {
+    const state = el("span", "reference-panel__entry-state", "used");
+    state.title = "Appears in the current editor buffer";
+    return state;
   }
 
   function buildEntry(entry) {
@@ -665,11 +710,7 @@ export function createReferencePanel({
     }
     head.appendChild(textWrap);
 
-    if (inUse.has(entry.name)) {
-      const state = el("span", "reference-panel__entry-state", "used");
-      state.title = "Appears in the current editor buffer";
-      head.appendChild(state);
-    }
+    if (inUse.has(entry.name)) head.appendChild(buildUsedChip());
 
     if (entry.source === "mini") {
       const tag = el("span", "reference-panel__entry-tag", "mini");
@@ -701,7 +742,8 @@ export function createReferencePanel({
 
     // Description
     if (entry.doc) {
-      const desc = el("div", "reference-panel__entry-doc", entry.doc);
+      const desc = el("div", "reference-panel__entry-doc");
+      appendInlineDoc(desc, entry.doc);
       overview.appendChild(desc);
     }
     body.appendChild(overview);
@@ -721,7 +763,8 @@ export function createReferencePanel({
         }
         row.appendChild(meta);
         if (p.doc) {
-          const pdoc = el("div", "reference-panel__entry-param-doc", p.doc);
+          const pdoc = el("div", "reference-panel__entry-param-doc");
+          appendInlineDoc(pdoc, p.doc);
           row.appendChild(pdoc);
         }
         params.appendChild(row);
@@ -773,7 +816,7 @@ export function createReferencePanel({
       tryBtn.className =
         "reference-panel__entry-btn reference-panel__entry-btn--primary";
       tryBtn.textContent = "▶ Try in editor";
-      tryBtn.title = "Replace the editor buffer with this example and play it";
+      tryBtn.title = "Open this example in a scratch pattern and play it";
       tryBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         triggerTry(entry);
@@ -832,7 +875,7 @@ export function createReferencePanel({
     for (const p of pillsEl.querySelectorAll(".reference-panel__pill")) {
       const isMe = p.dataset.category === category;
       p.classList.toggle("is-active", isMe);
-      p.setAttribute("aria-selected", isMe ? "true" : "false");
+      p.setAttribute("aria-pressed", isMe ? "true" : "false");
     }
   }
 
@@ -856,15 +899,24 @@ export function createReferencePanel({
 
   // ─── Expand / collapse ─────────────────────────────────────────────────
 
+  // Accordion toggle. Only the entry that closes and the one that opens are
+  // rebuilt, so the list keeps its scroll position.
   function toggleExpanded(name) {
-    if (expandedName === name) {
-      expandedName = null;
-    } else {
-      expandedName = name;
+    const previous = expandedName;
+    expandedName = previous === name ? null : name;
+    for (const changed of new Set([previous, name])) {
+      const entry = changed != null ? entryByName.get(changed) : null;
+      const node = changed != null ? entryNode(changed) : null;
+      if (entry && node) node.replaceWith(buildEntry(entry));
     }
-    render();
     activeIndex = flatVisible.findIndex((e) => e.name === name);
     paintActive();
+  }
+
+  function entryNode(name) {
+    return listEl?.querySelector(
+      `.reference-panel__entry[data-entry-name="${cssEscape(name)}"]`,
+    );
   }
 
   // ─── Try / Insert actions ──────────────────────────────────────────────
@@ -882,18 +934,12 @@ export function createReferencePanel({
       code = `s("piano").${entry.name}()`;
     }
 
-    // If the example doesn't already produce sound, wrap it. Cheap
-    // string sniff: a runnable example references one of the source
-    // primitives `s(`, `note(`, or `sound(` somewhere in its body.
-    if (!/\b(?:s|note|sound)\s*\(/.test(code)) {
-      code = `${code}.s("piano")`;
-    }
+    code = exampleForTry(code);
 
-    try {
-      onTry(code);
-    } catch (err) {
-      console.warn("[reference-panel] try failed:", err);
-    }
+    // onTry is async in the host; a rejection must not vanish.
+    Promise.resolve()
+      .then(() => onTry(code))
+      .catch((err) => console.warn("[reference-panel] try failed:", err));
   }
 
   function triggerInsert(entry) {
@@ -1110,6 +1156,89 @@ function cssEscape(s) {
   return s.replace(/[^a-z0-9_-]/gi, "\\$&");
 }
 
+function sameSet(a, b) {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
+}
+
+// Calls that already give an example a sound (or pitch, which plays through
+// the default synth), so nothing needs adding for "Try" to be audible.
+const SOUNDING_CALL_RE = /\b(?:s|sound|note|n|freq|chord|progression)\s*\(/;
+// Not Strudel patterns at all — a `.s()` call on these throws.
+const NON_PATTERN_RE = /\b(?:osc|shader|initHydra|await)\b/;
+
+/**
+ * Prepare a docs example for "Try". Examples that are a single bare
+ * expression with no sound source get `.s("piano")` appended so there's
+ * something to hear. Anything else is returned untouched: appending to a
+ * multi-statement example, or after a trailing comment or semicolon, would
+ * produce code that doesn't parse or silently drops the suffix.
+ */
+export function exampleForTry(example) {
+  const code = String(example ?? "");
+  if (SOUNDING_CALL_RE.test(code) || NON_PATTERN_RE.test(code)) return code;
+  const trimmed = code.trim();
+  if (!trimmed || /[\n;]|\/\/|\/\*/.test(trimmed)) return code;
+  return `${trimmed}.s("piano")`;
+}
+
+/**
+ * Split a JSDoc description into inline runs. Handles the few Markdown
+ * forms the Strudel docs actually use — `code`, **bold**, [text](url) and
+ * {@link name} — and leaves everything else as literal text.
+ * @returns {Array<{ type: "text"|"code"|"strong"|"link", text: string, href?: string }>}
+ */
+export function parseInlineDoc(source) {
+  const text = String(source ?? "");
+  const out = [];
+  const push = (type, value, href) => {
+    if (!value) return;
+    const last = out[out.length - 1];
+    if (type === "text" && last?.type === "text") last.text += value;
+    else out.push(href ? { type, text: value, href } : { type, text: value });
+  };
+  const re =
+    /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\(([^)\s]+)\)|\{@link\s+([^}\s|]+)(?:[|\s]+([^}]+))?\}/g;
+  let from = 0;
+  for (const m of text.matchAll(re)) {
+    push("text", text.slice(from, m.index));
+    if (m[1] != null) push("code", m[1]);
+    else if (m[2] != null) push("strong", m[2]);
+    else if (m[3] != null) {
+      if (/^https?:\/\//i.test(m[4])) push("link", m[3], m[4]);
+      else push("text", m[3]);
+    } else push("text", (m[6] ?? m[5]).trim());
+    from = m.index + m[0].length;
+  }
+  push("text", text.slice(from));
+  return out;
+}
+
+/** The plain-text reading of a doc string — markup dropped, content kept. */
+export function plainInlineDoc(source) {
+  return parseInlineDoc(source)
+    .map((run) => run.text)
+    .join("");
+}
+
+// Doc strings come from generated JSON; build nodes, never markup.
+function appendInlineDoc(parent, source) {
+  for (const run of parseInlineDoc(source)) {
+    if (run.type === "text") {
+      parent.appendChild(document.createTextNode(run.text));
+    } else if (run.type === "link") {
+      const a = el("a", "reference-panel__doc-link", run.text);
+      a.href = run.href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      parent.appendChild(a);
+    } else {
+      parent.appendChild(el(run.type === "code" ? "code" : "strong", null, run.text));
+    }
+  }
+}
+
 function getCategory(id) {
   return (
     CATEGORIES.find((c) => c.id === id) ?? CATEGORIES[CATEGORIES.length - 1]
@@ -1117,7 +1246,7 @@ function getCategory(id) {
 }
 
 function buildPreview(entry) {
-  const source = entry.doc || entry.signature;
+  const source = entry.doc ? plainInlineDoc(entry.doc) : entry.signature;
   if (!source) return "";
   const compact = source.replace(/\s+/g, " ").trim();
   if (compact.length <= 64) return compact;

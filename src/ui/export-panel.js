@@ -59,6 +59,9 @@ const WAVEFORM_HEIGHT_CSS = 64;
 // The render loop down-samples the buffer to one column per pixel; this
 // guard keeps the loop from doing anything pathological on a 1px canvas.
 const WAVEFORM_MIN_COLS = 16;
+// Resolution the render is reduced to for display. Wider than the rail can
+// get at 2× dpr, and ~16 KB instead of the whole AudioBuffer.
+const WAVEFORM_PEAK_COLS = 2048;
 // Near-silent heuristic — peak below -60 dB is effectively silence even
 // if the buffer has a handful of non-zero samples. Matches the threshold
 // a WAV-export sanity check would care about: if the user won't be able
@@ -74,14 +77,24 @@ export function createExportPanel({
 }) {
   // ─── State ────────────────────────────────────────────────────────────
   // 'idle' — show inputs + Export button; progress/result/error hidden
-  // 'running' — progress bar visible, inputs disabled, button → "Cancel"
+  // 'running' — progress bar visible, inputs + button disabled (a render
+  //             can't be cancelled once started)
   // 'done' — waveform + stats + download-again shown below progress
   // 'error' — error message + try-again shown below progress
   let mode = "idle";
-  /** @type {ExportResult | null} Last successful render — cached so the
-   *  download-again button can redownload without re-rendering. */
+  // Last successful render, reduced to what the UI still needs: the WAV
+  // as a Blob (for "Download again") and a few hundred min/max pairs (to
+  // redraw the waveform at any width). The AudioBuffer itself — hundreds
+  // of MB for a long 96 kHz render — is not kept.
+  /** @type {{ filename: string, blob: Blob | null } | null} */
   let lastResult = null;
-  let lastWavBytes = null; // cached Uint8Array from lastResult for re-download
+  /** @type {Float32Array | null} interleaved [min, max] per peak column */
+  let lastPeaks = null;
+  // Pattern the filename field was last auto-filled for, and whether the
+  // user has typed their own name since. Their name is kept until the
+  // pattern changes; otherwise the field follows the current pattern.
+  let filenamePattern = null;
+  let filenameEdited = false;
 
   // DOM refs (re-bound on create()).
   let root = null;
@@ -143,7 +156,10 @@ export function createExportPanel({
     filenameInput.setAttribute("aria-label", "Filename");
     filenameInput.spellcheck = false;
     filenameInput.autocomplete = "off";
-    filenameInput.value = getPatternName() || "untitled";
+    syncFilename();
+    filenameInput.addEventListener("input", () => {
+      filenameEdited = filenameInput.value.trim() !== "";
+    });
     filenameInput.addEventListener("keydown", onInputKeydown);
     const filenameField = el("div", "export-panel__field");
     filenameField.appendChild(filenameInput);
@@ -220,6 +236,11 @@ export function createExportPanel({
     // ─── Progress row (hidden until a render starts) ──────────────────
     progressRow = el("div", "export-panel__progress");
     progressRow.hidden = true;
+    progressRow.setAttribute("role", "progressbar");
+    progressRow.setAttribute("aria-label", "Render progress");
+    progressRow.setAttribute("aria-valuemin", "0");
+    progressRow.setAttribute("aria-valuemax", "100");
+    progressRow.setAttribute("aria-valuenow", "0");
     const progressBar = el("div", "export-panel__progress-bar");
     progressFill = el("div", "export-panel__progress-fill");
     progressBar.appendChild(progressFill);
@@ -231,15 +252,22 @@ export function createExportPanel({
     // ─── Result section (hidden until a render succeeds) ──────────────
     resultSection = el("div", "export-panel__result");
     resultSection.hidden = true;
+    resultSection.setAttribute("role", "status");
 
     // Waveform canvas. Size is set in CSS; the backing store is scaled
     // to dpr when we draw into it so HiDPI screens stay crisp.
     const waveformWrap = el("div", "export-panel__waveform");
     waveformCanvas = document.createElement("canvas");
     waveformCanvas.className = "export-panel__waveform-canvas";
+    waveformCanvas.setAttribute("role", "img");
     waveformCanvas.setAttribute("aria-label", "Exported waveform");
     waveformWrap.appendChild(waveformCanvas);
     resultSection.appendChild(waveformWrap);
+    // Redraw whenever the canvas gets a (new) width: the rail was resized,
+    // or the result arrived while this tab was hidden and is now shown.
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(() => drawWaveform()).observe(waveformWrap);
+    }
 
     // Stats lines — two rows of dense mono text + a per-line peak read-
     // out. The spec shows peak dB with an "silent!" fallback when the
@@ -251,11 +279,10 @@ export function createExportPanel({
     resultSection.appendChild(statsLine2);
     resultSection.appendChild(statsPeak);
 
-    // Silent-export warning — hidden by default, filled in by showResult
-    // when peak is near zero.
+    // Result warning — hidden by default; showResult fills it in for a
+    // silent or a clipped render.
     warningEl = el("div", "export-panel__warning");
     warningEl.hidden = true;
-    warningEl.textContent = "This export appears silent — check your pattern.";
     resultSection.appendChild(warningEl);
 
     // Download-again button — re-downloads the cached WAV bytes so the
@@ -275,6 +302,7 @@ export function createExportPanel({
     // ─── Error section (hidden until showError is called) ─────────────
     errorSection = el("div", "export-panel__error");
     errorSection.hidden = true;
+    errorSection.setAttribute("role", "alert");
     errorMsgEl = el("div", "export-panel__error-message");
     errorSection.appendChild(errorMsgEl);
     tryAgainBtn = el("button", "export-panel__try-again", "Try again");
@@ -289,21 +317,28 @@ export function createExportPanel({
     mounted = true;
   }
 
-  function activate() {
+  function activate({ focus = true } = {}) {
     if (!mounted) return;
-    // Current pattern name wins — so switching patterns via the left rail
-    // always shows the right filename. Stored filename is a fallback only
-    // when no pattern is loaded. Leave the value alone while a render is
-    // in flight or after a successful render, so the user can still see
-    // what was just exported.
-    if (mode === "idle" && filenameInput) {
-      filenameInput.value =
-        getPatternName() || readStoredFilename() || "untitled";
-    }
-    if (filenameInput) {
+    if (mode !== "running") syncFilename();
+    // A result that arrived while the tab was hidden had no width to draw
+    // into; the rail may also have been resized since.
+    if (mode === "done") drawWaveform();
+    if (focus && filenameInput) {
       filenameInput.focus();
       filenameInput.select();
     }
+  }
+
+  // Keep the filename on the current pattern's name — so switching patterns
+  // always exports under the right name, including from the toolbar button —
+  // unless the user typed a name of their own for this pattern.
+  function syncFilename() {
+    if (!filenameInput) return;
+    const pattern = getPatternName() || "";
+    if (filenameEdited && pattern === filenamePattern) return;
+    filenamePattern = pattern;
+    filenameEdited = false;
+    filenameInput.value = pattern || readStoredFilename() || "untitled";
   }
 
   function deactivate() {
@@ -341,20 +376,25 @@ export function createExportPanel({
     const pct = Math.max(0, Math.min(1, Number(ratio) || 0));
     if (progressFill) progressFill.style.transform = `scaleX(${pct.toFixed(4)})`;
     if (progressLabel) progressLabel.textContent = `${Math.round(pct * 100)}%`;
+    progressRow?.setAttribute("aria-valuenow", String(Math.round(pct * 100)));
   }
 
   function showResult(result) {
     if (!mounted || !result) return;
     mode = "done";
-    lastResult = result;
-    lastWavBytes = result.wavBytes ?? null;
+    lastResult = {
+      filename: result.filename,
+      blob: result.wavBytes
+        ? new Blob([result.wavBytes], { type: "audio/wav" })
+        : null,
+    };
+    lastPeaks = computePeaks(result.buffer);
 
     // Pin the progress bar at 100% so the transition from "rendering" to
     // "done" reads naturally — a jump back to 0% would look broken.
     if (progressFill) progressFill.style.transform = "scaleX(1)";
     if (progressLabel) progressLabel.textContent = "100%";
-
-    renderWaveform(result.buffer);
+    progressRow.setAttribute("aria-valuenow", "100");
 
     const displayName = withWavSuffix(result.filename);
     const duration = Number(result.duration) || 0;
@@ -373,9 +413,15 @@ export function createExportPanel({
     // buffer is all zeros. Any non-zero sample at least earns a proper
     // dB number, but the near-silent warning below still fires if it's
     // below -60 dB.
+    // A peak above full scale can't be stored in a 16-bit WAV: everything
+    // over 0 dB is flattened. Flag it the same way as silence.
+    const isClipped = peak > 1;
     statsPeak.classList.remove("export-panel__stats--silent");
     if (peak <= 0) {
       statsPeak.textContent = "Peak: -∞ dB (silent!)";
+      statsPeak.classList.add("export-panel__stats--silent");
+    } else if (isClipped) {
+      statsPeak.textContent = `Peak: ${fmtDb(peak)} dB — clipped`;
       statsPeak.classList.add("export-panel__stats--silent");
     } else {
       statsPeak.textContent = `Peak: ${fmtDb(peak)} dB`;
@@ -387,12 +433,22 @@ export function createExportPanel({
     // something louder.
     const isSilentish =
       peak <= 0 || pctNonZero < 0.1 || peak < NEAR_SILENT_PEAK;
-    warningEl.hidden = !isSilentish;
+    if (isSilentish) {
+      warningEl.textContent = "This export appears silent — check your pattern.";
+    } else if (isClipped) {
+      warningEl.textContent =
+        "The loudest parts go past 0 dB and are clipped in the file. " +
+        "Lower the layers' .gain() and export again.";
+    }
+    warningEl.hidden = !(isSilentish || isClipped);
 
-    // Make sure the UI structure reflects 'done' mode.
+    // Make sure the UI structure reflects 'done' mode. The result section
+    // has to be laid out before the waveform is drawn — a hidden canvas
+    // has no width to size its backing store from.
     progressRow.hidden = false;
     resultSection.hidden = false;
     errorSection.hidden = true;
+    drawWaveform();
     // Re-enable inputs now that the render is done.
     setInputsDisabled(false);
     setExportButtonState("done");
@@ -414,16 +470,18 @@ export function createExportPanel({
 
   function reset() {
     mode = "idle";
-    // Don't clear lastResult / lastWavBytes — the user may still want
-    // to re-download the previous export. The download-again button is
-    // inside resultSection, which gets hidden here, but we keep the
-    // cached bytes so a future showResult re-shows them.
+    // The download-again button lives in resultSection, which is hidden
+    // from here until the next successful render replaces the result — so
+    // nothing can reach the cached WAV any more. Let it go.
+    lastResult = null;
+    lastPeaks = null;
     if (!mounted) return;
     progressRow.hidden = true;
     resultSection.hidden = true;
     errorSection.hidden = true;
     if (progressFill) progressFill.style.transform = "scaleX(0)";
     if (progressLabel) progressLabel.textContent = "0%";
+    progressRow.setAttribute("aria-valuenow", "0");
     setInputsDisabled(false);
     setExportButtonState("idle");
   }
@@ -464,6 +522,9 @@ export function createExportPanel({
 
   function startExport() {
     if (mode === "running") return;
+    // The toolbar button lands here without the panel being re-activated,
+    // possibly after a pattern switch.
+    syncFilename();
     commitInputs();
 
     const rawFilename = (filenameInput.value || "").trim();
@@ -494,6 +555,10 @@ export function createExportPanel({
     progressRow.hidden = false;
     if (progressFill) progressFill.style.transform = "scaleX(0)";
     if (progressLabel) progressLabel.textContent = "0%";
+    progressRow.setAttribute("aria-valuenow", "0");
+    // The previous render's WAV and waveform are obsolete from here on.
+    lastResult = null;
+    lastPeaks = null;
     setInputsDisabled(true);
     setExportButtonState("running");
 
@@ -553,8 +618,8 @@ export function createExportPanel({
 
   function onDownloadAgain() {
     if (!lastResult) return;
-    if (!lastWavBytes) {
-      // The host always caches the WAV bytes in the result, but guard
+    if (!lastResult.blob) {
+      // The host always includes the WAV bytes in the result, but guard
       // in case a future caller forgets — a missing cache is a bug, not
       // a panic, so log loudly and bail instead of silently no-op-ing.
       console.warn(
@@ -566,20 +631,16 @@ export function createExportPanel({
     // path. Same Blob → <a> click shape as downloadWav() in main.js,
     // duplicated here so the panel stays standalone.
     try {
-      const bytes = lastWavBytes;
-      // Wrap the cached Uint8Array in a fresh Blob — some browsers
-      // revoke the URL associated with the original blob after the
-      // first click, and we want each "download again" to be a clean
-      // download.
-      const blob = new Blob([bytes], { type: "audio/wav" });
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(lastResult.blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = withWavSuffix(lastResult.filename);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Not synchronously: some browsers abort a download whose URL is
+      // revoked before they've started reading it.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       console.warn("[export-panel] download again failed:", err);
     }
@@ -587,8 +648,11 @@ export function createExportPanel({
 
   // ─── Internal: waveform rendering ─────────────────────────────────────
 
-  function renderWaveform(buffer) {
-    if (!waveformCanvas || !buffer) return;
+  // Draw the cached peaks at the canvas's current width. Safe to call any
+  // time; a no-op while the canvas has no layout (tab hidden) — activate()
+  // calls it again once the panel is on screen.
+  function drawWaveform() {
+    if (!waveformCanvas || !lastPeaks) return;
     const ctx = waveformCanvas.getContext("2d");
     if (!ctx) return;
 
@@ -597,8 +661,8 @@ export function createExportPanel({
     // fixed constant; the CSS width comes from the flex layout and may
     // change if the rail is resized.
     const dpr = window.devicePixelRatio || 1;
-    const cssRect = waveformCanvas.getBoundingClientRect();
-    const cssWidth = Math.max(1, Math.floor(cssRect.width));
+    const cssWidth = Math.floor(waveformCanvas.getBoundingClientRect().width);
+    if (cssWidth < WAVEFORM_MIN_COLS) return;
     const cssHeight = WAVEFORM_HEIGHT_CSS;
     waveformCanvas.width = Math.max(1, Math.floor(cssWidth * dpr));
     waveformCanvas.height = Math.max(1, Math.floor(cssHeight * dpr));
@@ -617,21 +681,8 @@ export function createExportPanel({
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
 
-    if (width < WAVEFORM_MIN_COLS) return;
-
-    // Sum both channels to mono for display. Mono gives a single
-    // envelope line that's easier to read at panel width; the stereo
-    // decorrelation isn't visually meaningful at ~300px wide.
-    const ch0 = buffer.getChannelData(0);
-    const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
-    const total = ch0.length;
-    if (total === 0) return;
-
-    // One column per device pixel — at high dpr this is a lot of
-    // columns, but still cheap compared to the actual render we just
-    // finished. The inner loop scans min/max across each column's
-    // sample window, which is the standard DAW waveform grammar.
-    const samplesPerCol = Math.max(1, Math.floor(total / width));
+    const cols = lastPeaks.length / 2;
+    if (cols === 0) return;
 
     // A 50%-opacity overlay gets us the "soft fill" look without having
     // to manage an extra color token. The core lines are drawn at full
@@ -641,18 +692,20 @@ export function createExportPanel({
     ctx.lineWidth = Math.max(1, Math.floor(dpr));
     ctx.beginPath();
 
+    // One line per device pixel, each spanning the min/max of the peak
+    // columns it covers — the standard DAW waveform grammar. Samples past
+    // full scale are pinned to the edge rather than drawn off-canvas.
     for (let x = 0; x < width; x++) {
-      const start = x * samplesPerCol;
-      const end = Math.min(total, start + samplesPerCol);
+      const from = Math.floor((x * cols) / width);
+      const to = Math.max(from + 1, Math.floor(((x + 1) * cols) / width));
       let min = 0;
       let max = 0;
-      for (let i = start; i < end; i++) {
-        const sample = ch1 ? (ch0[i] + ch1[i]) * 0.5 : ch0[i];
-        if (sample > max) max = sample;
-        if (sample < min) min = sample;
+      for (let c = from; c < to && c < cols; c++) {
+        if (lastPeaks[c * 2] < min) min = lastPeaks[c * 2];
+        if (lastPeaks[c * 2 + 1] > max) max = lastPeaks[c * 2 + 1];
       }
-      const y1 = midY - max * (midY - 1);
-      const y2 = midY - min * (midY - 1);
+      const y1 = midY - Math.min(1, max) * (midY - 1);
+      const y2 = midY - Math.max(-1, min) * (midY - 1);
       ctx.moveTo(x + 0.5, y1);
       ctx.lineTo(x + 0.5, y2);
     }
@@ -674,7 +727,7 @@ export function createExportPanel({
       // The sample-rate <select> also forwards Enter here so the user
       // can tab-then-enter through the row without reaching for the
       // mouse.
-      if (mode === "idle") {
+      if (mode !== "running") {
         e.preventDefault();
         startExport();
       }
@@ -752,8 +805,11 @@ function writeStoredFilename(s) {
   }
 }
 
-function parseCycles(raw) {
-  const n = parseInt(String(raw ?? ""), 10);
+export function parseCycles(raw) {
+  // Whole numbers only — parseInt alone would read "4.7" as 4 and "1e2" as 1.
+  const text = String(raw ?? "").trim();
+  if (!/^\d+$/.test(text)) return null;
+  const n = parseInt(text, 10);
   if (!Number.isFinite(n)) return null;
   if (n < MIN_CYCLES || n > MAX_CYCLES) return null;
   return n;
@@ -787,12 +843,47 @@ function fmtFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fmtDb(peak) {
+export function fmtDb(peak) {
   if (!Number.isFinite(peak) || peak <= 0) return "-∞";
   const db = 20 * Math.log10(peak);
   // One decimal place — matches the "Peak: -2.1 dB" example in the
-  // spec. Negative values are the common case (peaks below 0 dBFS).
-  return db.toFixed(1);
+  // spec. Negative values are the common case (peaks below 0 dBFS); a
+  // level above full scale gets an explicit plus sign so it can't be
+  // misread as headroom.
+  const text = db.toFixed(1);
+  return db > 0 && text !== "0.0" ? `+${text}` : text.replace(/^-0\.0$/, "0.0");
+}
+
+/**
+ * Reduce an AudioBuffer to WAVEFORM_PEAK_COLS [min, max] pairs of its mono
+ * sum — enough to draw the waveform at any panel width without holding on
+ * to the samples.
+ * @returns {Float32Array | null}
+ */
+export function computePeaks(buffer, cols = WAVEFORM_PEAK_COLS) {
+  if (!buffer || !buffer.length) return null;
+  // Sum both channels to mono for display. Mono gives a single envelope
+  // line that's easier to read at panel width; the stereo decorrelation
+  // isn't visually meaningful at ~300px wide.
+  const ch0 = buffer.getChannelData(0);
+  const ch1 = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
+  const total = ch0.length;
+  const n = Math.min(cols, total);
+  const peaks = new Float32Array(n * 2);
+  for (let c = 0; c < n; c++) {
+    const start = Math.floor((c * total) / n);
+    const end = Math.floor(((c + 1) * total) / n);
+    let min = 0;
+    let max = 0;
+    for (let i = start; i < end; i++) {
+      const sample = ch1 ? (ch0[i] + ch1[i]) * 0.5 : ch0[i];
+      if (sample > max) max = sample;
+      if (sample < min) min = sample;
+    }
+    peaks[c * 2] = min;
+    peaks[c * 2 + 1] = max;
+  }
+  return peaks;
 }
 
 function el(tag, className, text) {

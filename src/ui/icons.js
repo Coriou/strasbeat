@@ -41,6 +41,8 @@ import {
   FolderPlus,
   Headphones,
   Repeat,
+  Timer,
+  Trash2,
 } from "lucide";
 
 const ICONS = {
@@ -74,6 +76,8 @@ const ICONS = {
   "folder-plus": FolderPlus,
   headphones: Headphones,
   repeat: Repeat,
+  timer: Timer,
+  "trash-2": Trash2,
 };
 
 /**

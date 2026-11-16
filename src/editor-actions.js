@@ -30,8 +30,14 @@ export async function previewSoundName(name, ctx, opts = {}) {
     setStatus("click the page once to enable audio, then preview again");
     return;
   }
-  if (!getSound(name)) {
-    console.warn(`[strasbeat/sound-browser] sound "${name}" is not loaded`);
+  // With a bank, superdough plays `${bank}_${name}` — that is the name that
+  // has to be registered, not the bare suffix (`bd` under RolandTR909 is
+  // RolandTR909_bd; many bank sounds have no standalone counterpart).
+  const resolvedName = opts.bank ? `${opts.bank}_${name}` : name;
+  if (!getSound(resolvedName)) {
+    console.warn(
+      `[strasbeat/sound-browser] sound "${resolvedName}" is not loaded`,
+    );
     return;
   }
   const value = {
@@ -106,33 +112,97 @@ export function insertSoundName(name, view) {
   view.focus();
 }
 
+// The user pattern "Try" opens examples in. Examples never land in whatever
+// pattern happens to be open: every buffer autosaves, so replacing it would
+// overwrite the user's work a second later.
+export const SCRATCH_PATTERN_NAME = "try-example";
+const LAST_EXAMPLE_KEY = "strasbeat:try-example-code";
+
+function readLastExample() {
+  try {
+    return localStorage.getItem(LAST_EXAMPLE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastExample(code) {
+  try {
+    localStorage.setItem(LAST_EXAMPLE_KEY, code);
+  } catch {
+    /* storage unavailable — the next Try just asks before replacing */
+  }
+}
+
 /**
- * Try a reference panel example: replace the editor buffer with the
- * given code and evaluate it. If the buffer differs from the loaded
- * pattern (i.e. has unsaved edits), confirm via the modal system before
- * destroying the user's work.
+ * Try a Learn / Reference example: put it in the scratch pattern, bring
+ * that pattern to the front and play it. The pattern the user was working
+ * on is left exactly as it was.
+ *
+ * The scratch pattern is reused from one Try to the next. If the user
+ * edited it in between (its code is no longer the last example loaded),
+ * they're asked before those edits are replaced.
+ *
+ * `ctx.scratch` is the host's access to that pattern:
+ *   - name:               pattern name (defaults to SCRATCH_PATTERN_NAME)
+ *   - read(name):         stored code, or null when the pattern doesn't exist
+ *   - write(name, code):  replace the stored code of an existing pattern
+ *   - create(name, code): create the pattern and open it; resolves { ok }
+ *   - open(name):         open or focus the pattern's tab
+ *
+ * Resolves true when the example was loaded, false when the user declined.
  */
 export async function tryReferenceExample(code, ctx) {
-  const { editor, patterns, getCurrentName, confirm } = ctx;
-  const currentName = getCurrentName();
-  const loaded = patterns[currentName];
-  const isDirty = loaded == null || editor.code !== loaded;
-  if (isDirty) {
+  const { editor, getCurrentName, confirm, scratch } = ctx;
+  const name = scratch.name ?? SCRATCH_PATTERN_NAME;
+  const isActive = getCurrentName() === name;
+  const existing = isActive ? (editor.code ?? "") : scratch.read(name);
+
+  const hasUserEdits =
+    existing != null &&
+    existing.trim() !== "" &&
+    existing !== code &&
+    existing !== readLastExample();
+  if (hasUserEdits) {
     const ok = await confirm({
-      title: "Replace current buffer with example?",
-      message: "Unsaved changes will be lost.",
+      title: `Replace the contents of "${name}"?`,
+      message:
+        `Examples open in the scratch pattern "${name}", and it has changed ` +
+        "since the last example was loaded. Replacing it discards those " +
+        "edits. Your other patterns aren't touched.",
       confirmLabel: "Replace",
-      cancelLabel: "Keep editing",
+      cancelLabel: "Keep my edits",
       destructive: true,
     });
-    if (!ok) return;
+    if (!ok) return false;
   }
-  editor.setCode(code);
-  try {
-    await editor.evaluate();
-  } catch (err) {
+
+  if (isActive) {
+    editor.setCode(code);
+  } else if (existing != null) {
+    scratch.write(name, code);
+    scratch.open(name);
+  } else {
+    const result = await scratch.create(name, code);
+    if (!result?.ok) {
+      throw new Error(
+        `couldn't create "${name}": ${result?.error ?? "unknown error"}`,
+      );
+    }
+  }
+  writeLastExample(code);
+
+  // Start playback, but don't make the caller wait for it: the example is
+  // loaded at this point, and a first evaluate can sit on sample loading
+  // for seconds.
+  const onEvalError = (err) =>
     console.warn("[strasbeat/reference-panel] try evaluate failed:", err);
+  try {
+    Promise.resolve(editor.evaluate()).catch(onEvalError);
+  } catch (err) {
+    onEvalError(err);
   }
+  return true;
 }
 
 /**

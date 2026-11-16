@@ -1474,6 +1474,7 @@ const {
   flushToStore,
   handleNewPatternClick,
   openPattern: (name) => tabs.openOrFocus(name),
+  refreshOpenTab: (name) => tabs.refresh(name),
   focusEditorLocation,
   refreshRail,
   getEvalFeedback: () => evalFeedback,

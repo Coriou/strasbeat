@@ -38,7 +38,7 @@
 //   });
 //   rightRail.registerPanel(panel);
 
-import { categorizeSounds } from "./sound-browser.js";
+import { categorizeSounds, userSoundNames } from "./sound-browser.js";
 import { makeIcon } from "./icons.js";
 import { getUserSamples } from "../user-setup.js";
 import {
@@ -141,7 +141,7 @@ export function createSettingsPanel({
   appVersion = "",
   strudelVersion = "",
   onReloadRequired = () => {},
-  confirm: confirmFn = window.confirm,
+  confirm: confirmFn,
   onKeymapChange = () => {},
   onExportLibrary = () => {},
   onImportLibrary = () => {},
@@ -168,6 +168,9 @@ export function createSettingsPanel({
   let reloadBannerEl = null;
   let scriptEditor = null;
   let banksEl = null;
+  // Bumped on every refreshBanks() so a slow IndexedDB read can't append
+  // its rows after a newer refresh already rendered.
+  let banksRequest = 0;
 
   /** @type {Record<string, HTMLButtonElement>} key → editor toggle button */
   const toggleButtons = {};
@@ -206,17 +209,16 @@ export function createSettingsPanel({
     root.appendChild(buildAboutSection());
 
     mounted = true;
-    refreshBanks();
   }
 
-  function activate() {
+  function activate({ focus = true } = {}) {
     if (!mounted) return;
     settings = { ...getSettings() };
     syncAppearanceControls();
     syncEditorToggles();
     syncAboutInfo();
     refreshBanks();
-    if (themeSelect) themeSelect.focus();
+    if (focus && themeSelect) themeSelect.focus();
   }
 
   function deactivate() {}
@@ -230,7 +232,7 @@ export function createSettingsPanel({
       el(
         "span",
         "settings-panel__reload-banner-text",
-        "Reload to apply package changes.",
+        "Reload to apply changes.",
       ),
     );
     const btn = document.createElement("button");
@@ -295,7 +297,9 @@ export function createSettingsPanel({
     const startHue = stored?.hue ?? DEFAULT_HUE;
     const startLight = stored?.lightness ?? DEFAULT_LIGHTNESS;
 
-    const accentRow = buildRow("Accent");
+    // Not a <label>: the row holds a button, and a label would forward
+    // clicks on its text and swatch to that button (resetting the accent).
+    const accentRow = buildRow("Accent", "div");
     const accentTools = el("div", "settings-panel__accent-row");
     const accentPreview = el("div", "settings-panel__accent-preview");
     const accentSwatch = el("span", "settings-panel__swatch");
@@ -462,14 +466,8 @@ export function createSettingsPanel({
         e.stopPropagation();
         onToggleClick(key);
       });
-      btn.addEventListener("keydown", (e) => {
-        if (e.key === " " || e.key === "Enter") {
-          e.preventDefault();
-          onToggleClick(key);
-        } else {
-          onControlKeydown(e);
-        }
-      });
+      // Space / Enter already fire `click` on a native button.
+      btn.addEventListener("keydown", onControlKeydown);
       row.classList.toggle("is-on", on);
       row.appendChild(btn);
       toggleButtons[key] = btn;
@@ -521,14 +519,7 @@ export function createSettingsPanel({
         e.stopPropagation();
         onPkgToggleClick(pkg.id);
       });
-      btn.addEventListener("keydown", (e) => {
-        if (e.key === " " || e.key === "Enter") {
-          e.preventDefault();
-          onPkgToggleClick(pkg.id);
-        } else {
-          onControlKeydown(e);
-        }
-      });
+      btn.addEventListener("keydown", onControlKeydown);
       row.classList.toggle("is-on", on);
       row.appendChild(btn);
       pkgToggles[pkg.id] = btn;
@@ -562,29 +553,71 @@ export function createSettingsPanel({
     importBtn.type = "button";
     importBtn.className = "settings-panel__btn";
     importBtn.textContent = "Import";
-    importBtn.addEventListener("click", async () => {
+    const importStatus = el("div", "settings-panel__import-status");
+    importStatus.setAttribute("role", "status");
+    importStatus.hidden = true;
+    const setImportStatus = (text, isError = false) => {
+      importStatus.textContent = text;
+      importStatus.hidden = !text;
+      importStatus.classList.toggle("is-error", isError);
+    };
+    const runImport = async () => {
       const url = urlInput.value.trim();
-      if (!url) return;
+      if (!url || importBtn.disabled) return;
+      importBtn.disabled = true;
+      setImportStatus("Importing\u2026");
       try {
         const resp = await fetch(url);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const sampleMap = await resp.json();
-        const name =
-          new URL(url).pathname
-            .split("/")
-            .pop()
-            ?.replace(/\.json$/i, "") || "user-import";
+        if (!sampleMap || typeof sampleMap !== "object" || Array.isArray(sampleMap)) {
+          throw new Error("not a sample map (expected a JSON object)");
+        }
+        // Relative sample paths resolve against the manifest's folder, the
+        // way Strudel's own samples(url) does. The URL isn't stored, so pin
+        // the base into the map before it goes to IndexedDB.
+        if (!sampleMap._base) sampleMap._base = manifestBaseUrl(url);
+        const name = deriveBankName(url);
+        const existing = await getUserSamples();
+        if (existing.some((b) => b.name === name)) {
+          const replace = await confirmFn({
+            title: `Replace sample bank "${name}"?`,
+            message:
+              "A bank with this name is already imported. Importing again replaces it.",
+            confirmLabel: "Replace",
+            destructive: true,
+          });
+          if (!replace) {
+            setImportStatus("");
+            return;
+          }
+        }
         await importUserSamples(name, sampleMap);
         urlInput.value = "";
         refreshBanks();
+        const count = userSoundNames([{ sampleMap }]).size;
+        setImportStatus(
+          `Imported "${name}" (${count} sound${count === 1 ? "" : "s"}). Reload to load it.`,
+        );
+        showReloadBanner();
         console.log(`[settings] imported sample bank "${name}" from URL`);
       } catch (err) {
         console.error("[settings] import failed:", err);
-        alert(`Import failed: ${err.message}`);
+        setImportStatus(`Import failed: ${err?.message ?? err}`, true);
+      } finally {
+        importBtn.disabled = false;
+      }
+    };
+    importBtn.addEventListener("click", runImport);
+    urlInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        runImport();
       }
     });
     importRow.appendChild(importBtn);
     section.body.appendChild(importRow);
+    section.body.appendChild(importStatus);
 
     // Bank list
     banksEl = el("div", "settings-panel__banks");
@@ -596,12 +629,16 @@ export function createSettingsPanel({
     deleteAllBtn.className = "settings-panel__btn settings-panel__btn--danger";
     deleteAllBtn.textContent = "Delete all user samples";
     deleteAllBtn.addEventListener("click", async () => {
-      const yes = await confirmFn(
-        "Delete all user samples? This cannot be undone.",
-      );
+      const yes = await confirmFn({
+        title: "Delete all user samples?",
+        message: "Every imported sample bank is removed. This cannot be undone.",
+        confirmLabel: "Delete all",
+        destructive: true,
+      });
       if (!yes) return;
       await deleteAllUserSamples();
       refreshBanks();
+      showReloadBanner();
     });
     section.body.appendChild(deleteAllBtn);
 
@@ -643,8 +680,11 @@ export function createSettingsPanel({
     clearScriptBtn.className = "settings-panel__btn";
     clearScriptBtn.textContent = "Clear";
     clearScriptBtn.addEventListener("click", () => {
+      const hadScript = getSetupScript() !== "";
       scriptEditor.value = "";
       setSetupScript("");
+      // The cleared script already ran this session; it stops at next boot.
+      if (hadScript) showReloadBanner();
     });
     actions.appendChild(clearScriptBtn);
     section.body.appendChild(actions);
@@ -722,7 +762,11 @@ export function createSettingsPanel({
             if (dot.dataset.status === "connecting")
               reject(new Error("Connection closed"));
           });
-          setTimeout(() => reject(new Error("Timeout")), 3000);
+          setTimeout(() => {
+            reject(new Error("Timeout"));
+            // Still connecting after 3s — don't leave the socket dangling.
+            if (ws.readyState === WebSocket.CONNECTING) ws.close();
+          }, 3000);
         });
       } catch (err) {
         dot.dataset.status = "error";
@@ -864,8 +908,7 @@ export function createSettingsPanel({
       const mapObj = getSoundMap();
       getUserSamples()
         .then((banks) => {
-          const bankNames = new Set(banks.map((b) => b.name));
-          const cats = categorizeSounds(mapObj, bankNames);
+          const cats = categorizeSounds(mapObj, userSoundNames(banks));
           _renderBreakdown(cats);
         })
         .catch(() => {
@@ -891,9 +934,11 @@ export function createSettingsPanel({
 
   async function refreshBanks() {
     if (!banksEl) return;
-    banksEl.replaceChildren();
+    const request = ++banksRequest;
     try {
       const banks = await getUserSamples();
+      if (request !== banksRequest) return;
+      banksEl.replaceChildren();
       if (banks.length === 0) {
         banksEl.appendChild(
           el("div", "settings-panel__empty", "No user samples imported yet."),
@@ -907,18 +952,27 @@ export function createSettingsPanel({
         delBtn.type = "button";
         delBtn.className = "settings-panel__bank-del";
         delBtn.title = `Delete "${bank.name}"`;
+        delBtn.setAttribute("aria-label", `Delete sample bank "${bank.name}"`);
         delBtn.appendChild(makeIcon("trash-2", { size: 12 }));
         delBtn.addEventListener("click", async () => {
-          const yes = await confirmFn(`Delete sample bank "${bank.name}"?`);
+          const yes = await confirmFn({
+            title: `Delete sample bank "${bank.name}"?`,
+            message: "Its sounds stop loading at the next reload. This cannot be undone.",
+            confirmLabel: "Delete",
+            destructive: true,
+          });
           if (!yes) return;
           await deleteUserSampleBank(bank.name);
           refreshBanks();
+          showReloadBanner();
         });
         row.appendChild(delBtn);
         banksEl.appendChild(row);
       }
-    } catch {
-      banksEl.appendChild(
+    } catch (err) {
+      if (request !== banksRequest) return;
+      console.warn("[settings] failed to load user samples:", err);
+      banksEl.replaceChildren(
         el("div", "settings-panel__empty", "Failed to load user samples."),
       );
     }
@@ -992,8 +1046,8 @@ export function createSettingsPanel({
     return { root, body };
   }
 
-  function buildRow(labelText) {
-    const row = el("label", "settings-panel__row");
+  function buildRow(labelText, tag = "label") {
+    const row = el(tag, "settings-panel__row");
     row.appendChild(el("span", "settings-panel__row-label", labelText));
     const control = el("span", "settings-panel__row-control");
     row.appendChild(control);
@@ -1032,6 +1086,37 @@ function el(tag, className, text) {
   if (className) e.className = className;
   if (text != null) e.textContent = text;
   return e;
+}
+
+// Generic manifest file names say nothing about what the bank is.
+const GENERIC_MANIFEST_NAMES = new Set(["strudel", "samples", "index"]);
+const BRANCH_LIKE_SEGMENTS = new Set(["main", "master", "head", "refs", "heads"]);
+
+/**
+ * Name a sample bank after its manifest URL. `.../my-kit.json` → `my-kit`.
+ * Most sample repos call the manifest `strudel.json`, which would make every
+ * import collide on one name, so for those the nearest meaningful folder
+ * (skipping branch names) is used instead, falling back to the host.
+ */
+export function deriveBankName(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "user-import";
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const stem = (segments.pop() ?? "").replace(/\.json$/i, "");
+  if (stem && !GENERIC_MANIFEST_NAMES.has(stem.toLowerCase())) return stem;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    if (!BRANCH_LIKE_SEGMENTS.has(segments[i].toLowerCase())) return segments[i];
+  }
+  return parsed.hostname || stem || "user-import";
+}
+
+/** Folder of a manifest URL, with a trailing slash — the base for relative sample paths. */
+export function manifestBaseUrl(url) {
+  return url.split(/[?#]/)[0].replace(/[^/]*$/, "");
 }
 
 function formatHue(hue) {

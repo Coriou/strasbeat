@@ -8,10 +8,9 @@
 // Public surface (factory pattern, same shape as reference-panel.js):
 //
 //   const panel = createLearnPanel({
-//     onTry,               // (code: string) => Promise<void>
-//     onCopyToNewPattern,  // (code: string, title: string) => Promise<void>
+//     onTry,               // (code: string) => Promise<boolean> — false = declined
+//     onCopyToNewPattern,  // (code: string, title: string) => Promise<boolean>
 //     onFocusEditor,       // () => void
-//     onOpenReference,     // (name: string) => void — deep-link into Reference
 //   });
 //   rightRail.registerPanel(panel);
 
@@ -36,7 +35,6 @@ export function createLearnPanel({
   onTry = () => {},
   onCopyToNewPattern = () => {},
   onFocusEditor = () => {},
-  onOpenReference = () => {},
 }) {
   // ─── State ────────────────────────────────────────────────────────────
   let allEntries = learnIndex;
@@ -120,7 +118,8 @@ export function createLearnPanel({
 
     // Category pills
     pillsEl = el("div", "learn-panel__pills");
-    pillsEl.setAttribute("role", "tablist");
+    // Filter toggles, not tabs: there's one list and no tabpanel per pill.
+    pillsEl.setAttribute("role", "group");
     pillsEl.setAttribute("aria-label", "Content type");
     for (const c of [
       { id: "all", label: "All" },
@@ -133,16 +132,11 @@ export function createLearnPanel({
       pill.className = "learn-panel__pill";
       pill.dataset.category = c.id;
       pill.textContent = c.label;
-      pill.setAttribute("role", "tab");
-      pill.setAttribute("aria-selected", c.id === category ? "true" : "false");
+      pill.setAttribute("aria-pressed", c.id === category ? "true" : "false");
       if (c.id === category) pill.classList.add("is-active");
       pill.addEventListener("click", () => {
         category = c.id;
-        for (const p of pillsEl.querySelectorAll(".learn-panel__pill")) {
-          const isMe = p.dataset.category === category;
-          p.classList.toggle("is-active", isMe);
-          p.setAttribute("aria-selected", isMe ? "true" : "false");
-        }
+        syncPills();
         render();
       });
       pillsEl.appendChild(pill);
@@ -172,9 +166,9 @@ export function createLearnPanel({
     render();
   }
 
-  function activate() {
+  function activate({ focus = true } = {}) {
     if (!mounted) return;
-    searchInput?.focus();
+    if (focus) searchInput?.focus();
   }
 
   function deactivate() {
@@ -214,6 +208,13 @@ export function createLearnPanel({
     }
     if (e.key === "Enter") {
       e.preventDefault();
+      // Flush the debounce so the first item is from the query as typed.
+      clearTimeout(searchTimer);
+      const typed = searchInput.value.trim().toLowerCase();
+      if (typed !== query) {
+        query = typed;
+        render();
+      }
       if (flatVisible.length > 0) {
         expandedId =
           expandedId === flatVisible[0].id ? null : flatVisible[0].id;
@@ -353,6 +354,7 @@ export function createLearnPanel({
     const wrap = el("div", "learn-panel__entry");
     wrap.setAttribute("role", "option");
     wrap.setAttribute("tabindex", "-1");
+    wrap.setAttribute("aria-expanded", expandedId === entry.id ? "true" : "false");
     wrap.dataset.entryId = entry.id;
 
     // Header row
@@ -389,12 +391,7 @@ export function createLearnPanel({
     textCol.appendChild(nameEl);
 
     // Tried indicator
-    if (triedSet.has(entry.id)) {
-      const check = el("span", "learn-panel__tried");
-      check.appendChild(makeIcon("check", { size: 10 }));
-      check.title = "Already tried";
-      textCol.appendChild(check);
-    }
+    if (triedSet.has(entry.id)) textCol.appendChild(buildTriedMark());
 
     const badge = el("span", "learn-panel__entry-badge");
     badge.textContent = TYPE_LABELS[entry.type] ?? entry.type;
@@ -458,7 +455,7 @@ export function createLearnPanel({
     const tryBtn = document.createElement("button");
     tryBtn.type = "button";
     tryBtn.className = "learn-panel__btn learn-panel__btn--primary";
-    tryBtn.title = "Load into editor and play";
+    tryBtn.title = "Open in a scratch pattern and play";
     tryBtn.appendChild(makeIcon("play", { size: 12 }));
     tryBtn.appendChild(document.createTextNode(" Try"));
     tryBtn.addEventListener("click", (e) => {
@@ -470,7 +467,7 @@ export function createLearnPanel({
     const copyBtn = document.createElement("button");
     copyBtn.type = "button";
     copyBtn.className = "learn-panel__btn";
-    copyBtn.title = "Save as a new pattern file";
+    copyBtn.title = "Create a new pattern from this example";
     copyBtn.appendChild(makeIcon("copy", { size: 12 }));
     copyBtn.appendChild(document.createTextNode(" Copy to new pattern"));
     copyBtn.addEventListener("click", (e) => {
@@ -507,11 +504,17 @@ export function createLearnPanel({
 
   // ─── Actions ──────────────────────────────────────────────────────────
 
-  function triggerTry(entry, btn) {
+  // Both host callbacks are async and may be declined (a confirm or the
+  // New-pattern form cancelled) — they resolve to `false` then. Feedback
+  // waits for the outcome: nothing is flashed or marked for a cancelled
+  // action, and a rejection shows as an error instead of a tick.
+  async function triggerTry(entry, btn) {
     if (!entry.code) return;
     try {
-      onTry(entry.code);
+      const done = await onTry(entry.code);
+      if (done === false) return;
       markTried(entry.id);
+      markEntryTried(entry.id);
       flashBtn(btn, " Loaded \u2713");
     } catch (err) {
       console.warn("[learn-panel] try failed:", err);
@@ -519,15 +522,36 @@ export function createLearnPanel({
     }
   }
 
-  function triggerCopy(entry, btn) {
+  async function triggerCopy(entry, btn) {
     if (!entry.code) return;
     try {
-      onCopyToNewPattern(entry.code, entry.title);
+      const done = await onCopyToNewPattern(entry.code, entry.title);
+      if (done === false) return;
       flashBtn(btn, " Copied \u2713");
     } catch (err) {
       console.warn("[learn-panel] copy to new pattern failed:", err);
       flashBtn(btn, " Error", true);
     }
+  }
+
+  // Show the tried tick on an entry that's already on screen, without a
+  // re-render (which would drop the button the flash is about to use).
+  function markEntryTried(id) {
+    if (hintEl) hintEl.hidden = true;
+    const wrap = listEl?.querySelector(
+      `.learn-panel__entry[data-entry-id="${cssEscape(id)}"]`,
+    );
+    if (!wrap || wrap.querySelector(".learn-panel__tried")) return;
+    wrap
+      .querySelector(".learn-panel__entry-name")
+      ?.after(buildTriedMark());
+  }
+
+  function buildTriedMark() {
+    const check = el("span", "learn-panel__tried");
+    check.appendChild(makeIcon("check", { size: 10 }));
+    check.title = "Already tried";
+    return check;
   }
 
   function flashBtn(btn, label, isError) {
@@ -579,7 +603,7 @@ export function createLearnPanel({
     for (const p of pillsEl?.querySelectorAll(".learn-panel__pill") ?? []) {
       const isMe = p.dataset.category === category;
       p.classList.toggle("is-active", isMe);
-      p.setAttribute("aria-selected", isMe ? "true" : "false");
+      p.setAttribute("aria-pressed", isMe ? "true" : "false");
     }
   }
 

@@ -5,13 +5,14 @@ import { createConsolePanel } from "./ui/console-panel.js";
 import { createExportPanel } from "./ui/export-panel.js";
 import { createSettingsPanel } from "./ui/settings-panel.js";
 import { createLearnPanel } from "./ui/learn-panel.js";
-import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate } from "./editor-actions.js"; // prettier-ignore
+import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate, SCRATCH_PATTERN_NAME } from "./editor-actions.js"; // prettier-ignore
+import { saveNewPattern } from "./patterns.js";
 import { runExport } from "./export.js";
 import { applyAccent, resetAccent, readStoredAccent, saveStoredAccent, clearStoredAccent } from "./ui/settings-drawer.js"; // prettier-ignore
 import { THEME_OPTIONS, applyPanelSetting } from "./editor-setup.js";
 import { applyKeymapProfile } from "./editor/keymap-apply.js";
 import { buildExport, parseImportJson, previewImport, applyImport } from "./library-io.js";
-import { choiceModal, confirm as modalConfirm } from "./ui/modal.js";
+import { choiceModal, formModal, confirm as modalConfirm } from "./ui/modal.js";
 
 /**
  * Creates and registers all right-rail panels. Call after `mountRightRail`.
@@ -33,6 +34,7 @@ export function registerPanels({
   flushToStore,
   handleNewPatternClick,
   openPattern,
+  refreshOpenTab,
   focusEditorLocation,
   refreshRail,
   getEvalFeedback,
@@ -56,16 +58,53 @@ export function registerPanels({
   isDev,
   bootPromise,
 }) {
+  // "Try" (Learn + Reference) opens the example in a scratch user pattern
+  // rather than over the open one — see tryReferenceExample. A shipped
+  // pattern can't be the scratch target, so step aside if one has the name.
+  const tryContext = {
+    editor,
+    getCurrentName,
+    confirm,
+    scratch: {
+      name:
+        SCRATCH_PATTERN_NAME in patterns
+          ? `${SCRATCH_PATTERN_NAME}-scratch`
+          : SCRATCH_PATTERN_NAME,
+      read: (name) => {
+        const rec = store.get(name);
+        const listed = (store.getIndex().userPatterns ?? []).includes(name);
+        return rec?.isUserPattern && listed ? (rec.code ?? "") : null;
+      },
+      write: (name, code) => {
+        store.set(name, {
+          ...store.get(name),
+          code,
+          modified: new Date().toISOString(),
+        });
+        // Drop any cached editor state for the tab so it reopens on the
+        // code just written, not on what it showed last time.
+        refreshOpenTab(name);
+      },
+      create: (name, code) =>
+        saveNewPattern({
+          name,
+          code,
+          store,
+          leftRail,
+          setCurrentName,
+          editor,
+          transport,
+          openPattern,
+        }),
+      open: openPattern,
+    },
+  };
+
   const learnPanel = createLearnPanel({
-    onTry: (code) =>
-      tryReferenceExample(code, {
-        editor,
-        patterns,
-        getCurrentName,
-        confirm,
-      }),
-    onCopyToNewPattern: async (code, title) => {
+    onTry: (code) => tryReferenceExample(code, tryContext),
+    onCopyToNewPattern: async (code) => {
       const before = getCurrentName();
+      const index = store.getIndex();
       await handleNewPatternClick({
         store,
         patterns,
@@ -74,24 +113,27 @@ export function registerPanels({
         transport,
         setCurrentName,
         flushToStore,
-        prompt,
-        isDev,
+        formModal,
+        folders: index.folders ?? [],
+        lastNewPatternFolder: index.uiState?.lastNewPatternFolder ?? null,
+        onLastNewPatternFolderChange(folder) {
+          const idx = store.getIndex();
+          idx.uiState = { ...(idx.uiState ?? {}), lastNewPatternFolder: folder };
+          store.setIndex(idx);
+        },
         openPattern,
       });
-      // If a new pattern was created, seed it with the learn content.
-      // `openPattern` routed it through the tab controller (so it's a managed
-      // tab — no currentName/controller desync); setCode then replaces THAT
-      // tab's buffer with the snippet, which the disk save / autosave persists.
-      if (getCurrentName() !== before) {
-        editor.setCode(code);
-        saveBtn?.click();
-      }
+      // Cancelled (or failed) — nothing was created, nothing to seed.
+      if (getCurrentName() === before) return false;
+      // `openPattern` routed the new pattern through the tab controller (so
+      // it's a managed tab — no currentName/controller desync); setCode then
+      // replaces THAT tab's starter buffer with the snippet, and the flush
+      // persists it to the store right away.
+      editor.setCode(code);
+      flushToStore();
+      return true;
     },
     onFocusEditor: () => editor.editor.focus(),
-    onOpenReference: (name) => {
-      rightRail.activate("reference");
-      referencePanel?.focusEntry?.(name);
-    },
   });
   rightRail.registerPanel(learnPanel);
 
@@ -111,13 +153,7 @@ export function registerPanels({
 
   const referencePanel = createReferencePanel({
     docs: strudelDocs,
-    onTry: (exampleCode) =>
-      tryReferenceExample(exampleCode, {
-        editor,
-        patterns,
-        getCurrentName,
-        confirm,
-      }),
+    onTry: (exampleCode) => tryReferenceExample(exampleCode, tryContext),
     onInsert: (name, template) =>
       insertFunctionTemplate(name, template, editor.editor),
     onFocusEditor: () => editor.editor.focus(),
@@ -202,7 +238,7 @@ export function registerPanels({
           title: "Couldn't read file",
           message: String(err?.message ?? err),
           confirmLabel: "OK",
-          cancelLabel: "",
+          cancelLabel: null,
         });
         return;
       }
@@ -212,7 +248,7 @@ export function registerPanels({
           title: "Couldn't read library",
           message: parsed.error,
           confirmLabel: "OK",
-          cancelLabel: "",
+          cancelLabel: null,
         });
         return;
       }
@@ -257,12 +293,27 @@ export function registerPanels({
         });
         if (!ok) return;
       }
+      // Persist the open buffer first (this also cancels the pending
+      // autosave), then note what every incoming name holds now: a tab
+      // whose record the import rewrites has to be rebuilt from the store,
+      // or its stale buffer is flushed straight back over the import on
+      // the next tab switch.
+      flushToStore();
+      const incoming = Object.keys(parsed.data.patterns ?? {});
+      const codeBefore = new Map(
+        incoming.map((name) => [name, store.get(name)?.code]),
+      );
       const result = applyImport(parsed.data, store, {
         conflictStrategy: strategy,
         shippedDemos,
       });
+      // Also after a partial (storage-full) import: whatever was written
+      // must show, in the open tabs and in the library.
+      for (const name of result.written ?? []) {
+        if (store.get(name)?.code !== codeBefore.get(name)) refreshOpenTab(name);
+      }
+      if (result.imported > 0) refreshRail?.();
       if (result.ok) {
-        if (result.imported > 0) refreshRail?.();
         transport.setStatus(
           `Imported ${result.imported} patterns into ${pv.newFolders.length} new folder(s)`,
         );
@@ -283,7 +334,9 @@ export function registerPanels({
     const FIRST_RUN_KEY = "strasbeat:first-run-done";
     if (!localStorage.getItem(FIRST_RUN_KEY)) {
       localStorage.setItem(FIRST_RUN_KEY, "1");
-      rightRail.activate("learn");
+      // Shown, not focused: the user hasn't asked for it, and the page's
+      // first keystrokes shouldn't land in a search field.
+      rightRail.activate("learn", { focus: false });
     }
   }
 
@@ -296,7 +349,8 @@ export function registerPanels({
     } else {
       console.warn(
         "[strasbeat/sound-browser] soundMap still empty after boot — " +
-          "the panel will stay empty until reload",
+          "the panel stays empty until sounds register (it re-reads each " +
+          "time it's opened)",
       );
     }
   });

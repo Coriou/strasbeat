@@ -814,3 +814,24 @@
   font: var(--text-xs) / 1 var(--font-sans);
   color: var(--text-dim);
 }
+
+/* Inline result of a sample import (progress, success, failure). */
+.settings-panel__import-status {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+}
+
+.settings-panel__import-status.is-error {
+  color: color-mix(in oklch, var(--text), var(--rec) 55%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel *,
+  .settings-panel *::before,
+  .settings-panel *::after {
+    transition: none;
+    animation: none;
+  }
+}

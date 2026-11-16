@@ -541,3 +541,41 @@
     width: 100%;
   }
 }
+
+/* Inline runs inside doc text (rendered from the JSDoc's light Markdown). */
+.reference-panel__entry-doc code,
+.reference-panel__entry-param-doc code {
+  font-family: var(--font-mono);
+  font-size: inherit;
+  color: var(--text);
+}
+
+.reference-panel__entry-doc strong,
+.reference-panel__entry-param-doc strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.reference-panel__doc-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.reference-panel__doc-link:hover {
+  color: var(--text);
+}
+
+.reference-panel__doc-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reference-panel *,
+  .reference-panel *::before,
+  .reference-panel *::after {
+    transition: none;
+    animation: none;
+  }
+}

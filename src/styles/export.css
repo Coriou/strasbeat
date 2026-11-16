@@ -461,3 +461,12 @@
     height: 24px;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .export-panel *,
+  .export-panel *::before,
+  .export-panel *::after {
+    transition: none;
+    animation: none;
+  }
+}
