@@ -1,3 +1,5 @@
+import { isExportRunning } from "./export.js";
+
 /**
  * Fire a one-shot audition of a sound through the live audio context.
  * Mirrors the MIDI bridge's superdough call shape (src/midi-bridge.js)
@@ -13,6 +15,12 @@
  */
 export async function previewSoundName(name, ctx, opts = {}) {
   const { getAudioContext, getSound, superdough, setStatus } = ctx;
+  // While an export renders, the audio context is the offline one being
+  // rendered: an audition would be written into the WAV.
+  if (isExportRunning()) {
+    setStatus("Export in progress — preview again when it finishes");
+    return;
+  }
   const audioCtx = getAudioContext();
   if (!audioCtx) {
     setStatus("no audio context — try reloading the page");

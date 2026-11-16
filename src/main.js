@@ -1825,6 +1825,8 @@ beatGrid = mountBeatGrid({
   isPlaying: () => !!editor.repl?.scheduler?.started && tabs?.getPlayingItem() === tabs?.getActiveItem(),
 });
 async function previewDrumCell(name, { bank, variant } = {}) {
+  // (the context is the offline one while an export renders)
+  if (isExportRunning()) return;
   const audioCtx = getAudioContext();
   if (!audioCtx) return;
   if (audioCtx.state === "suspended") {
