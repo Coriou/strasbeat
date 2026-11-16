@@ -881,7 +881,10 @@ function buildMelodicBarEvents(barNotes, slotsPerBar) {
 
     const notes = slots.get(notePos);
     // Use the longest duration among simultaneous notes
-    const maxDur = Math.max(...notes.map((n) => n.gridDuration));
+    // (a loop, not Math.max(...): a slot can hold more notes than a call
+    // can take arguments)
+    let maxDur = 0;
+    for (const n of notes) if (n.gridDuration > maxDur) maxDur = n.gridDuration;
 
     if (notes.length === 1) {
       events.push({

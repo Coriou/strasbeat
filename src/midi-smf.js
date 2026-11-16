@@ -140,6 +140,10 @@ export function readSmf(buffer) {
   };
 }
 
+// Limits on what a tempo or time-signature event may say (see readTrack).
+export const MAX_TEMPO_BPM = 1000;
+const MAX_TIME_SIG_EXPONENT = 6;
+
 function readTrack(bytes, start, end, tempos, timeSignatures) {
   /** @type {Map<number, { program: number | null, notes: SmfNote[], open: Map<number, {ticks: number, velocity: number}[]> }>} */
   const channels = new Map();
@@ -207,12 +211,24 @@ function readTrack(bytes, start, end, tempos, timeSignatures) {
           (bytes[dataStart] << 16) |
           (bytes[dataStart + 1] << 8) |
           bytes[dataStart + 2];
-        if (usPerBeat > 0) tempos.push({ ticks, bpm: 60000000 / usPerBeat });
+        // Faster than MAX_TEMPO_BPM is not music, it is a damaged or hostile
+        // file — and the tempo ends up in the pattern's `setcpm`, where it
+        // would make the scheduler spin. Such an event is ignored.
+        if (usPerBeat >= 60000000 / MAX_TEMPO_BPM) {
+          tempos.push({ ticks, bpm: 60000000 / usPerBeat });
+        }
       } else if (type === 0x58 && length >= 2) {
-        timeSignatures.push({
-          ticks,
-          timeSignature: [bytes[dataStart], 1 << bytes[dataStart + 1]],
-        });
+        // The denominator is stored as a power of two. Anything past 2^6
+        // (64th notes) or a zero numerator is not a usable meter: `1 << n`
+        // wraps for large n, and both end up as a division in the bar math.
+        const numerator = bytes[dataStart];
+        const exponent = bytes[dataStart + 1];
+        if (numerator >= 1 && exponent <= MAX_TIME_SIG_EXPONENT) {
+          timeSignatures.push({
+            ticks,
+            timeSignature: [numerator, 1 << exponent],
+          });
+        }
       }
       continue;
     }

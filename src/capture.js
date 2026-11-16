@@ -1,4 +1,5 @@
 import { track } from "./analytics.js";
+import { isExportRunning as defaultIsExportRunning } from "./export.js";
 
 // ─── Capture preview modal ───────────────────────────────────────────────
 // Shows generated pattern code with Play/Save/Discard buttons and a
@@ -142,6 +143,7 @@ export async function handleCaptureClick({
   showPreview = showCapturePreviewModal,
   isProd = import.meta.env?.PROD ?? false,
   fetchImpl = (...args) => fetch(...args),
+  isExportRunning = defaultIsExportRunning,
 }) {
   if (!midi.isCaptureEnabled()) {
     midi.setCaptureEnabled(true);
@@ -166,10 +168,22 @@ export async function handleCaptureClick({
     ? midi.getMetronomeBpm()
     : undefined;
   let selectedGrid = undefined;
-  let code = midi.buildPatternFromCapture({
-    bpmHint,
-    gridSubdivision: selectedGrid,
-  });
+  let code;
+  try {
+    code = midi.buildPatternFromCapture({
+      bpmHint,
+      gridSubdivision: selectedGrid,
+    });
+  } catch (err) {
+    // The translator refuses takes it cannot turn into one pattern (a note
+    // played long after the others makes it thousands of bars long). Say so
+    // instead of leaving the capture button to fail without a word.
+    console.warn("[strasbeat] couldn't build a pattern from the capture:", err);
+    transport.setStatus(
+      `\u26a0 capture couldn\u2019t be turned into a pattern: ${err?.message ?? err}`,
+    );
+    return;
+  }
   if (!code) {
     transport.setStatus("capture stopped — no notes recorded");
     return;
@@ -183,6 +197,12 @@ export async function handleCaptureClick({
   // how the dialog is left.
   let previewed = false;
   const playPreview = async (previewCode) => {
+    // Playing now would start the scheduler against the offline context of
+    // the export that is rendering, and bake the take into its WAV.
+    if (isExportRunning()) {
+      transport.setStatus("Export in progress — play the take when it finishes");
+      return;
+    }
     previewed = true;
     try {
       await editor.repl.evaluate(previewCode);

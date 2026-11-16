@@ -217,8 +217,12 @@ export const GM_FAMILY_FALLBACK = {
 
 // GM drum map: MIDI note number → Strudel sample name.
 // Channel 10 drums, standard GM percussion key map.
+// Every name here has to be one the default sample maps register
+// (dirt-samples and uzu-drumkit, see src/default-samples.js) — an unknown
+// name is a silent slot in the imported pattern. The ride is `rd` and the
+// tambourine `tb`, as in uzu-drumkit; there is no `ride`, `tamb` or `hq`.
 export const GM_DRUM_MAP = {
-  27: "hq", // High Q (electronic perc)
+  27: "perc", // High Q (electronic perc)
   35: "bd",
   36: "bd", // Acoustic / Electric Bass Drum
   37: "rim",
@@ -235,14 +239,14 @@ export const GM_DRUM_MAP = {
   48: "mt", // Hi-Mid Tom
   49: "cr", // Crash Cymbal 1
   50: "ht", // High Tom
-  51: "ride", // Ride Cymbal 1
+  51: "rd", // Ride Cymbal 1
   52: "cr", // Chinese Cymbal
-  53: "ride", // Ride Bell
-  54: "tamb", // Tambourine
+  53: "rd", // Ride Bell
+  54: "tb", // Tambourine
   55: "cr", // Splash Cymbal
   56: "cb", // Cowbell
   57: "cr", // Crash Cymbal 2
-  59: "ride", // Ride Cymbal 2
+  59: "rd", // Ride Cymbal 2
   60: "ht", // Hi Bongo
   61: "lt", // Low Bongo
   62: "ht", // Mute Hi Conga

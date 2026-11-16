@@ -216,3 +216,44 @@ describe("capture save errors are surfaced", () => {
     assert.equal(h.recs.get("my-song").code, ORIGINAL);
   });
 });
+
+describe("a take the translator refuses", () => {
+  test("is reported in the status line instead of throwing out of the click", async () => {
+    const h = makeHarness();
+    let previewShown = false;
+    await assert.doesNotReject(
+      handleCaptureClick({
+        ...h.deps,
+        midi: {
+          ...h.deps.midi,
+          buildPatternFromCapture: () => {
+            throw new Error("this MIDI spans 2084 bars");
+          },
+        },
+        showPreview: async () => {
+          previewShown = true;
+        },
+      }),
+    );
+    assert.equal(previewShown, false);
+    assert.match(h.log.statuses.at(-1), /capture couldn.t be turned into a pattern: this MIDI spans 2084 bars/);
+    assert.equal(h.editor.code, ORIGINAL);
+  });
+});
+
+describe("capture preview during a WAV export", () => {
+  test("Play does not start the scheduler while an export renders", async () => {
+    const h = makeHarness();
+    await handleCaptureClick({
+      ...h.deps,
+      isProd: true,
+      isExportRunning: () => true,
+      showPreview: async ({ initialCode, onPlay }) => {
+        await onPlay(initialCode);
+      },
+    });
+    assert.deepEqual(h.log.replEvaluated, []);
+    assert.equal(h.log.stops, 0, "nothing was started, so nothing is stopped");
+    assert.ok(h.log.statuses.some((s) => /Export in progress/.test(s)));
+  });
+});

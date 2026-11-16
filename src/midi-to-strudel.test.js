@@ -24,7 +24,12 @@ import {
   midiToName,
   MAX_IMPORT_BARS,
 } from "./midi-to-strudel.js";
-import { readSmf, makeTicksToSeconds, dominantTempo } from "./midi-smf.js";
+import {
+  readSmf,
+  makeTicksToSeconds,
+  dominantTempo,
+  MAX_TEMPO_BPM,
+} from "./midi-smf.js";
 import { transpiler } from "./transpiler-patch.js";
 import "@strudel/mini"; // register the minilang so the mini() rewrite resolves
 
@@ -152,13 +157,25 @@ describe("midi-gm.js", () => {
     assert.equal(resolveGmInstrument(-1), "gm_piano");
   });
 
+  test("every GM drum name is a sample the default maps register", () => {
+    // The names dirt-samples and uzu-drumkit define between them that the
+    // map may use. An unregistered name (`ride`, `tamb`) is a silent slot.
+    const registered = new Set([
+      "bd", "sd", "hh", "oh", "cp", "cr", "rd", "rim", "sh", "tb",
+      "ht", "mt", "lt", "cb", "perc",
+    ]); // prettier-ignore
+    for (const [key, name] of Object.entries(GM_DRUM_MAP)) {
+      assert.ok(registered.has(name), `GM key ${key} → "${name}"`);
+    }
+  });
+
   test("resolveGmDrum maps standard kit pieces", () => {
     assert.equal(resolveGmDrum(36), "bd");
     assert.equal(resolveGmDrum(38), "sd");
     assert.equal(resolveGmDrum(42), "hh");
     assert.equal(resolveGmDrum(46), "oh");
     assert.equal(resolveGmDrum(49), "cr");
-    assert.equal(resolveGmDrum(51), "ride");
+    assert.equal(resolveGmDrum(51), "rd");
     assert.equal(resolveGmDrum(39), "cp");
     assert.equal(resolveGmDrum(56), "cb");
   });
@@ -2645,7 +2662,7 @@ describe("capture from a drum preset", () => {
     });
     assert.match(code, /const drums = s\(/);
     assert.match(code, /bd hh sd hh/);
-    // the preset maps key 51 to "rd"; the GM table would have said "ride"
+    // key 51 comes out as the preset's own "rd"
     assert.match(code, /\brd\b/);
     assert.doesNotMatch(code, /note\(|sawtooth|ride/);
   });
@@ -2656,6 +2673,87 @@ describe("capture from a drum preset", () => {
     assert.match(
       generatePatternDraft(analyzeTranslationInput(input)),
       /const epiano = note\(/,
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Meta events that say something no music could
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("implausible tempo and time-signature events are ignored", () => {
+  const notes = simpleTrack({ notes: beatNotes([60, 62, 64, 65]) });
+
+  test("a time signature with a wrapping denominator or a zero numerator", () => {
+    for (const data of [
+      [4, 255, 24, 8], // 1 << 255 wraps to a negative denominator
+      [4, 31, 24, 8],
+      [0, 2, 24, 8], // zero beats per bar
+    ]) {
+      const smf = readSmf(
+        buildSmf({ tracks: [[metaEvent(0, 0x58, data)], notes] }),
+      );
+      assert.deepEqual(smf.timeSignatures, [], `kept ${data}`);
+    }
+    const input = parseMidiFile(
+      buildSmf({ tracks: [[metaEvent(0, 0x58, [4, 255, 24, 8])], notes] }),
+      "odd.mid",
+    );
+    assert.deepEqual(input.timeSignature, [4, 4]);
+    const analysis = analyzeTranslationInput(input);
+    assert.equal(analysis.totalBars, 1);
+    assert.match(generatePatternDraft(analysis), /setcpm\(120\/4\)/);
+  });
+
+  test("an ordinary time signature is still read", () => {
+    const smf = readSmf(buildSmf({ tracks: [[timeSigEvent(0, 7, 8)], notes] }));
+    assert.deepEqual(smf.timeSignatures[0].timeSignature, [7, 8]);
+  });
+
+  test("a tempo faster than MAX_TEMPO_BPM never reaches setcpm", () => {
+    // 1 µs per beat: sixty million beats a minute.
+    const smf = readSmf(
+      buildSmf({ tracks: [[metaEvent(0, 0x51, [0, 0, 1])], notes] }),
+    );
+    assert.deepEqual(smf.tempos, []);
+    const { code } = midiFileToPattern(
+      buildSmf({ tracks: [[metaEvent(0, 0x51, [0, 0, 1])], notes] }),
+      "fast.mid",
+    );
+    assert.match(code, /setcpm\(120\/4\)/);
+    // The limit itself is still a tempo.
+    const atLimit = readSmf(
+      buildSmf({ tracks: [[tempoEvent(0, MAX_TEMPO_BPM)], notes] }),
+    );
+    assert.equal(atLimit.tempos[0].bpm, MAX_TEMPO_BPM);
+  });
+});
+
+describe("a slot holding a very large chord", () => {
+  test("is generated without overflowing the call stack", () => {
+    // More notes in one slot than a function call can take arguments.
+    const count = 200_000;
+    const input = {
+      sourceName: "pile",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [
+        {
+          name: "pile",
+          channel: 0,
+          isDrum: false,
+          notes: Array.from({ length: count }, (_, i) => ({
+            midi: 60 + (i % 12),
+            name: midiToName(60 + (i % 12)),
+            time: 0,
+            duration: 0.5,
+            velocity: 0.8,
+          })),
+        },
+      ],
+    };
+    assert.doesNotThrow(() =>
+      generatePatternDraft(analyzeTranslationInput(input)),
     );
   });
 });
