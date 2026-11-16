@@ -224,25 +224,50 @@ function umamiPlugin() {
 // Every import of the package has to land on the same copy (it holds the
 // slider value store, the settings atom and the editor compartments), which
 // is why this is an alias for the bare specifier rather than a different
-// import path in some files: `@strudel/codemirror/slider.mjs` (boot.js) is
-// one of the source modules already, so it is the very module the aliased
-// entry re-exports.
-function slimStrudelCodemirrorPlugin() {
+// import path in some files. (A deep import such as
+// `@strudel/codemirror/slider.mjs` is one of the source modules already, so
+// it would be the very module the aliased entry re-exports.)
+//
+// All of this leans on how one release of the package is written. If a later
+// release moves those imports, the redirects would simply stop matching and
+// the build would succeed with the 540 kB and the two keymaps back in the
+// entry chunk. So a production build fails instead: when a redirect never
+// fired, and when anything it was meant to keep out is found in a chunk the
+// page loads up front. (src/strudel-codemirror-shape.test.js checks the
+// package's sources for the same assumptions without building.)
+export function slimStrudelCodemirrorPlugin() {
   const EMPTY_DOCS = "\0strasbeat:upstream-doc-json";
-  const lazyKeymaps = path.join(__dirname, "src/editor/lazy-keymaps.js");
+  // Normalised so this is the same module id as the app's own import of the
+  // shim — two copies would each have their own loaded-keymap state.
+  const lazyKeymaps = normalizePath(
+    path.join(__dirname, "src/editor/lazy-keymaps.js"),
+  );
   const fromStrudelCodemirror = (importer) =>
     typeof importer === "string" &&
     /[\\/]@strudel[\\/]codemirror[\\/]/.test(importer);
+  const redirected = { "doc.json": 0, vim: 0, emacs: 0 };
+  let isBuild = false;
   return {
     name: "strasbeat:slim-strudel-codemirror",
     enforce: "pre",
+    config(_, { command }) {
+      isBuild = command === "build";
+    },
+    buildStart() {
+      for (const key of Object.keys(redirected)) redirected[key] = 0;
+    },
     resolveId(source, importer) {
       if (!fromStrudelCodemirror(importer)) return null;
-      if (source === "../../doc.json") return EMPTY_DOCS;
-      if (
-        source === "@replit/codemirror-vim" ||
-        source === "@replit/codemirror-emacs"
-      ) {
+      if (source === "../../doc.json") {
+        redirected["doc.json"]++;
+        return EMPTY_DOCS;
+      }
+      if (source === "@replit/codemirror-vim") {
+        redirected.vim++;
+        return lazyKeymaps;
+      }
+      if (source === "@replit/codemirror-emacs") {
+        redirected.emacs++;
         return lazyKeymaps;
       }
       return null;
@@ -251,7 +276,59 @@ function slimStrudelCodemirrorPlugin() {
       if (id === EMPTY_DOCS) return "export default { docs: [] };";
       return null;
     },
+    buildEnd(error) {
+      if (!isBuild || error) return;
+      const missed = Object.keys(redirected).filter((k) => redirected[k] === 0);
+      if (missed.length > 0) {
+        this.error(
+          `@strudel/codemirror no longer imports ${missed.join(", ")} the way ` +
+            `slimStrudelCodemirrorPlugin expects (vite.config.js) — the ` +
+            `installed version has changed shape. Update the redirects.`,
+        );
+      }
+    },
+    generateBundle(_options, bundle) {
+      if (!isBuild) return;
+      const eager = eagerModuleIds(bundle);
+      const leaked = eager.filter(isKeptOutOfEntry);
+      if (leaked.length > 0) {
+        this.error(
+          `these modules are meant to load on demand (or not at all) but ` +
+            `are in the chunks the page loads up front: ${leaked.join(", ")} ` +
+            `— see slimStrudelCodemirrorPlugin in vite.config.js.`,
+        );
+      }
+    },
   };
+}
+
+// What the plugin above exists to keep out of the first load: the two modal
+// keymap packages and upstream's documentation dump.
+export function isKeptOutOfEntry(moduleId) {
+  return (
+    /[\\/]@replit[\\/]codemirror-(vim|emacs)[\\/]/.test(moduleId) ||
+    /[\\/]doc\.json(\?|$)/.test(moduleId)
+  );
+}
+
+// Ids of every module in the entry chunks and the chunks they import
+// statically — what the browser has to fetch before the app runs.
+export function eagerModuleIds(bundle) {
+  const seen = new Set();
+  const queue = Object.values(bundle)
+    .filter((chunk) => chunk.type === "chunk" && chunk.isEntry)
+    .map((chunk) => chunk.fileName);
+  const ids = [];
+  while (queue.length > 0) {
+    const fileName = queue.pop();
+    if (seen.has(fileName)) continue;
+    seen.add(fileName);
+    const chunk = bundle[fileName];
+    if (!chunk || chunk.type !== "chunk") continue;
+    ids.push(...Object.keys(chunk.modules ?? {}));
+    queue.push(...(chunk.imports ?? []));
+  }
+  return ids;
 }
 
 // escodegen (the code generator behind Strudel's transpiler) `require`s the
