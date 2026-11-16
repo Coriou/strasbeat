@@ -288,7 +288,8 @@ export async function main(args, exec = command) {
         ["run", "download", String(run.databaseId), "--dir", dest],
         { allowFailure: true },
       );
-      if (download.code)
+      // A run without artifacts (plain CI) is not worth a line.
+      if (download.code && !/no valid artifacts/i.test(download.stderr))
         console.log(`Artifacts ${run.databaseId}: ${download.stderr}`);
     }
     async function summaries(dir) {

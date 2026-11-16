@@ -123,6 +123,7 @@ export async function run(ctx) {
   if (ctx.counting)
     Object.assign(c, {
       callsPerFrame: c.calls / FRAMES,
+      callsPerSecond: c.calls / SECONDS,
       groupsPerFrame: Object.fromEntries(
         Object.entries(c.groups).map(([k, n]) => [k, n / FRAMES]),
       ),

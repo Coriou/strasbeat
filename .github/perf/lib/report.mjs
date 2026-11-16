@@ -129,7 +129,7 @@ export function summary(results) {
     "",
     "## Correlation evidence",
     "",
-    "Each point pairs an uninstrumented timing pass with the count pass for the same target, variant and repeat. Dose, mode and A/B variation are observational evidence, not causal attribution. Invalid pacing is excluded.",
+    'Each point pairs an uninstrumented timing pass with the count pass for the same build, variant and repeat. r is Pearson\'s, computed within each build: a change that removes cheap calls moves the count much further than the time, so points from two builds do not lie on one line (the pooled value is given for information). A count is "proven" when every build with four or more points has r ≥ 0.8. Windows that did not hold pace are excluded, and per-frame counts are only compared between variants stepped at the same rate.',
     "",
   );
   const pointsByMetric = new Map();
@@ -154,6 +154,8 @@ export function summary(results) {
         /heap|listeners|nodes|unused|server/i.test(metric)
       )
         continue;
+      // A per-frame count at 30 Hz is not the same quantity as one at 120.
+      if (/PerFrame/.test(metric) && (r.info?.hz ?? 120) !== 120) continue;
       let partner = r.scenario === "playing" ? "scriptMsPerSecond" : "scriptMs";
       if (/network|requests/i.test(metric))
         partner = metric.startsWith("interactive.")
@@ -170,13 +172,13 @@ export function summary(results) {
       if (!Number.isFinite(time)) continue;
       // Opening a tab and switching to one are the same kind of operation
       // at two sizes: together they are four points, apart two each.
-      const family =
+      const key =
         r.scenario === "tabs"
           ? `tabs.${metric.replace(/^(firstOpen|switch)\./, "*.")} ↔ *.scriptMs`
           : `${r.scenario}.${metric} ↔ ${partner}`;
-      const key = family,
-        points = pointsByMetric.get(key) ?? [];
+      const points = pointsByMetric.get(key) ?? [];
       points.push({
+        target: r.target,
         label: `${r.target}/${r.variant}/${r.repeat}`,
         count: value,
         ms: time,
@@ -186,11 +188,24 @@ export function summary(results) {
   }
   results.correlations = [];
   for (const [metric, points] of pointsByMetric) {
-    const r = pearson(points.map((p) => [p.count, p.ms])),
-      proven = points.length >= 4 && r != null && r >= 0.8;
-    results.correlations.push({ metric, points, r, proven });
+    const pooled = pearson(points.map((p) => [p.count, p.ms]));
+    const byTarget = {};
+    for (const target of new Set(points.map((p) => p.target))) {
+      const own = points.filter((p) => p.target === target);
+      byTarget[target] = {
+        n: own.length,
+        r: pearson(own.map((p) => [p.count, p.ms])),
+      };
+    }
+    const judged = Object.values(byTarget).filter((t) => t.n >= 4);
+    const proven =
+      judged.length > 0 && judged.every((t) => t.r != null && t.r >= 0.8);
+    results.correlations.push({ metric, points, r: pooled, byTarget, proven });
+    const within = Object.entries(byTarget)
+      .map(([target, t]) => `${target} r=${fmt(t.r)} (n=${t.n})`)
+      .join(", ");
     lines.push(
-      `- **${cell(metric)}**: r=${fmt(r)}, ${proven ? "correlated in this run" : "not proven"}; ${points.map((p) => `${p.label} (${fmt(p.count)}, ${fmt(p.ms)})`).join("; ")}`,
+      `- **${cell(metric)}**: ${within}; pooled r=${fmt(pooled)}; ${proven ? "proven in this run" : "not proven"}. ${points.map((p) => `${p.label} (${fmt(p.count)}, ${fmt(p.ms)})`).join("; ")}`,
     );
   }
   if (!pointsByMetric.size)

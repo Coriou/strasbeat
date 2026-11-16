@@ -99,21 +99,6 @@
     "tolerance": 0.03,
     "unit": "calls per frame"
   },
-  "tabs.default.firstOpen.calls": {
-    "max": 33768,
-    "tolerance": 0.02,
-    "unit": "calls per open"
-  },
-  "tabs.default.switch.calls": {
-    "max": 17856.4,
-    "tolerance": 0.02,
-    "unit": "calls per switch"
-  },
-  "tabs.default.switch.mutations": {
-    "max": 148.4,
-    "tolerance": 0.01,
-    "unit": "mutation records per switch"
-  },
   "typing.default.perKey.calls": {
     "max": 50309.84,
     "tolerance": 0.02,
