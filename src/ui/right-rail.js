@@ -25,11 +25,14 @@
 //     icon:      'music',  // lucide name (must exist in src/ui/icons.js)
 //     label:     'Sounds',
 //     create:    (container) => { /* build DOM into container */ },
-//     activate:  () => {},  // optional — called when tab is selected
+//     activate:  ({ focus }) => {},  // optional — called when tab is selected;
+//                                    // `focus` is false when the rail is only
+//                                    // restoring last session's tab at boot
 //     deactivate:() => {},  // optional — called when tab is deselected
 //   });
 //
-//   rail.activate('sounds');     // open the panel by id
+//   rail.activate('sounds');     // open the panel by id (and focus it;
+//                                // pass { focus: false } not to)
 //   rail.toggle();               // collapse <-> expand
 //   rail.expand();
 //   rail.collapse();
@@ -37,7 +40,9 @@
 //
 // Persistence — the active tab id, expanded/collapsed flag, and panel
 // width are written to localStorage under `storageKey`. Restored on
-// mount. Stale ids (tab no longer registered) silently fall back.
+// mount: the stored tab is activated when its panel registers, without
+// taking keyboard focus. A stored id that no panel claims falls back to the
+// first registered panel once the registration pass is over.
 //
 // Pure DOM, no framework. Tab buttons are rebuilt on every register
 // call so the order matches registration order.
@@ -71,6 +76,10 @@ export function mountRightRail({
   /** @type {Map<string, {id, icon, label, create, activate, deactivate, tabBtn, mounted}>} */
   const panels = new Map();
   const panelOrder = []; // insertion order — drives tab strip layout
+  let fallbackScheduled = false;
+
+  // The tabpanel is named by whichever tab currently owns it.
+  if (!panelContainer.id) panelContainer.id = 'right-rail-panel';
 
   // Apply initial width to the shell so the grid column is correct on
   // first paint. The grid var lives on .shell (the parent), so write to
@@ -125,11 +134,28 @@ export function mountRightRail({
   }
 
   // ─── Keyboard: Escape returns focus to the editor ─────────────────────
+  // A panel that consumed the key itself (first Escape clears its search
+  // field) calls preventDefault(); only an unclaimed Escape leaves the rail.
   panelContainer.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !e.defaultPrevented) {
       e.preventDefault();
       onFocusEditor();
     }
+  });
+
+  // ─── Keyboard: arrow keys move between tabs (vertical tablist) ────────
+  tabsContainer.addEventListener('keydown', (e) => {
+    const tabs = panelOrder.map((id) => panels.get(id).tabBtn);
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    let next = -1;
+    if (e.key === 'ArrowDown') next = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowUp') next = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = tabs.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    tabs[next].focus();
   });
 
   // ─── Public API ───────────────────────────────────────────────────────
@@ -161,32 +187,51 @@ export function mountRightRail({
     // tab. Three cases:
     //   - no active tab yet → adopt this one
     //   - persisted active tab points at *this* panel → activate it
-    //   - persisted active tab points at a panel that hasn't been
-    //     registered (could be an old build or a renamed panel) → fall
-    //     back to this one rather than leave the rail empty
-    if (activeId == null || !panels.has(activeId)) {
+    //   - persisted active tab points at a panel that isn't registered
+    //     yet → wait. It usually registers later in the same pass; if it
+    //     never does (old build, renamed panel) the deferred check below
+    //     falls back to the first panel rather than leave the rail empty.
+    // Restoring never takes keyboard focus: the page has only just loaded
+    // and the user didn't ask for the panel.
+    if (activeId == null) {
       activeId = panel.id;
-      if (expanded) doActivate(panel.id);
-    } else if (activeId === panel.id && expanded) {
-      doActivate(panel.id);
+      if (expanded) doActivate(panel.id, { focus: false });
+    } else if (activeId === panel.id) {
+      if (expanded) doActivate(panel.id, { focus: false });
+    } else if (!panels.has(activeId) && !fallbackScheduled) {
+      fallbackScheduled = true;
+      queueMicrotask(resolveUnknownActive);
     }
     return panel;
   }
 
-  function activate(id) {
+  function resolveUnknownActive() {
+    fallbackScheduled = false;
+    if (activeId != null && panels.has(activeId)) return;
+    if (panelOrder.length === 0) return;
+    activeId = panelOrder[0];
+    if (expanded) doActivate(activeId, { focus: false });
+  }
+
+  // `focus: false` opens the panel without moving keyboard focus into it —
+  // for opens the user didn't ask for (the first-run Learn panel).
+  function activate(id, { focus = true } = {}) {
     if (!panels.has(id)) {
       console.warn(`[right-rail] activate: unknown panel "${id}"`);
       return;
     }
-    if (!expanded) expand();
-    if (activeId === id) {
+    if (!expanded) {
+      expanded = true;
+      syncCollapsedAttr();
+      applyShellWidth();
+    } else if (activeId === id) {
       // Already active — make sure focus moves into the panel for
       // keyboard nav (matches VSCode's "Cmd+B then arrow keys" flow).
       const slot = panels.get(id).slot;
-      if (slot) focusFirstFocusable(slot);
+      if (slot && focus) focusFirstFocusable(slot);
       return;
     }
-    doActivate(id);
+    doActivate(id, { focus });
   }
 
   function toggle() {
@@ -199,7 +244,9 @@ export function mountRightRail({
     expanded = true;
     syncCollapsedAttr();
     applyShellWidth();
-    if (activeId == null && panelOrder.length > 0) activeId = panelOrder[0];
+    if ((activeId == null || !panels.has(activeId)) && panelOrder.length > 0) {
+      activeId = panelOrder[0];
+    }
     if (activeId) doActivate(activeId);
     saveState();
   }
@@ -210,12 +257,22 @@ export function mountRightRail({
     // Deactivate the current panel so it can stop any work (timers,
     // listeners) until reopened.
     if (activeId && panels.has(activeId)) {
-      try { panels.get(activeId).deactivate(); }
+      const panel = panels.get(activeId);
+      try { panel.deactivate(); }
       catch (err) { console.warn('[right-rail] deactivate failed:', err); }
+      // A collapsed rail has no selected tab — the strip is just launchers.
+      if (panel.tabBtn) {
+        panel.tabBtn.classList.remove('is-active');
+        panel.tabBtn.setAttribute('aria-selected', 'false');
+      }
     }
+    // The panel is about to become invisible; don't strand keyboard focus
+    // on an element inside it.
+    const hadFocus = panelContainer.contains(document.activeElement);
     syncCollapsedAttr();
     applyShellWidth();
     saveState();
+    if (hadFocus) onFocusEditor();
   }
 
   function isExpanded() {
@@ -237,8 +294,9 @@ export function mountRightRail({
       btn.className = 'right-rail__tab';
       btn.dataset.panelId = id;
       btn.dataset.tooltip = panel.label;
+      btn.id = `right-rail-tab-${id}`;
       btn.setAttribute('role', 'tab');
-      btn.setAttribute('aria-controls', 'right-rail-panel');
+      btn.setAttribute('aria-controls', panelContainer.id);
       btn.setAttribute('aria-label', panel.label);
       btn.setAttribute('aria-selected', expanded && id === activeId ? 'true' : 'false');
       btn.appendChild(makeIcon(panel.icon));
@@ -260,7 +318,7 @@ export function mountRightRail({
     activate(id);
   }
 
-  function doActivate(id) {
+  function doActivate(id, { focus = true } = {}) {
     const panel = panels.get(id);
     if (!panel) return;
 
@@ -301,9 +359,10 @@ export function mountRightRail({
     if (panel.tabBtn) {
       panel.tabBtn.classList.add('is-active');
       panel.tabBtn.setAttribute('aria-selected', 'true');
+      panelContainer.setAttribute('aria-labelledby', panel.tabBtn.id);
     }
 
-    try { panel.activate(); }
+    try { panel.activate({ focus }); }
     catch (err) { console.warn(`[right-rail] panel "${id}" activate() failed:`, err); }
 
     saveState();

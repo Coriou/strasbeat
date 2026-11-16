@@ -177,3 +177,12 @@
 .right-rail[data-collapsed="true"] .right-rail__tab[data-tooltip]:hover::after {
   opacity: 1;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .right-rail__tab,
+  .right-rail__tab::before,
+  .right-rail__tab::after,
+  .right-rail__resize {
+    transition: none;
+  }
+}
