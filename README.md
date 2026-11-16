@@ -72,8 +72,8 @@ it.
   pad, …), plus a *capture phrase → save as pattern file* flow.
 - **Offline WAV exporter**: a custom `renderPatternToBuffer` that works
   around an upstream bug where the eager controller construction leaks
-  live audio nodes into the offline graph (see CLAUDE.md for the long
-  story). 48 kHz, 16-bit stereo.
+  live audio nodes into the offline graph (see `docs/architecture.md`,
+  "WAV export", for the long story). 48 kHz, 16-bit stereo.
 - **Pattern files on disk** with Vite-side `POST /api/save` middleware,
   auto-discovery via `import.meta.glob`, and HMR-on-write.
 - **In-app modal** (`src/ui/modal.js`) and **settings popover with
@@ -106,54 +106,15 @@ inside the editor).
 
 ## What's where
 
-```
-strasbeat/
-├── index.html              # shell: top bar, left rail, editor, transport, piano roll
-├── src/
-│   ├── main.js             # boot, toolbar, prebake, WAV export, pattern auto-discovery
-│   ├── midi-bridge.js      # Web MIDI → superdough trigger-and-decay
-│   ├── editor/             # CodeMirror 6 extensions
-│   │   ├── format.js              # Prettier + quote-restoration
-│   │   ├── keymap.js              # VSCode-style keybindings
-│   │   ├── numeric-scrubber.js    # drag-to-scrub on numeric literals
-│   │   ├── hover-docs.js          # hoverTooltip for Strudel functions
-│   │   ├── signature-hint.js      # signature pill above cursor
-│   │   ├── strudel-docs.json      # generated JSDoc index
-│   │   └── completions/           # sounds, banks, chords, scales, modes, functions, mini-notation
-│   ├── ui/
-│   │   ├── left-rail.js           # patterns library (search, keyboard nav)
-│   │   ├── transport.js           # BPM, cycle, playhead, status, MIDI pill
-│   │   ├── piano-roll.js          # custom Canvas2D renderer
-│   │   ├── modal.js               # in-app prompt replacement
-│   │   ├── settings-drawer.js     # accent color picker, persisted to localStorage
-│   │   └── icons.js               # Lucide icon hydration
-│   ├── strudel-ext/        # runtime helpers wired into Strudel's evalScope()
-│   │   ├── index.js               # barrel — anything exported here becomes global in patterns
-│   │   ├── progression.js         # progression() helper
-│   │   ├── styles.js              # style presets (jazz-comp, pop-pad, lo-fi, …)
-│   │   └── roman.js               # Roman-numeral → absolute chord parser
-│   └── styles/             # design-system CSS (tokens, base, editor, shell, …)
-├── patterns/               # *.js — each one default-exports a Strudel string
-│   ├── 01-hello.js
-│   ├── 02-house.js
-│   ├── 03-breakbeat.js
-│   ├── 04-melody.js
-│   ├── 05-chords.js
-│   └── 06-progression-demo.js
-├── scripts/
-│   ├── build-strudel-docs.mjs     # extracts JSDoc → strudel-docs.json
-│   └── test-format.mjs            # asserts every pattern formats cleanly
-├── design/
-│   ├── README.md           # how to use the design specs
-│   ├── SYSTEM.md           # design system (type, color, spacing, layout)
-│   ├── PATTERN-STYLE.md    # modern Strudel pattern idioms
-│   └── work/               # task specs (01-shell through 07-chord-progression)
-├── vite.config.js          # /api/save middleware + strudel.cc proxy
-├── vercel.json             # production deployment config
-├── STRUDEL.md              # mini-notation + functions cheatsheet (incl. progression())
-├── strudel-source/         # full upstream repo, READ-ONLY reference, gitignored
-└── CLAUDE.md               # repo guide for AI collaborators
-```
+`index.html` → `src/main.js` wires everything together. `src/editor/` holds
+the CodeMirror extensions, `src/ui/` the panels and chrome, and
+`src/strudel-ext/` the pattern functions strasbeat adds. `patterns/*.js` are
+the compositions, `design/` the design system and work specs, and
+`STRUDEL.md` a Strudel cheatsheet.
+
+For contributors and coding agents: [`AGENTS.md`](AGENTS.md) has the rules
+and the traps, and [`docs/architecture.md`](docs/architecture.md) the
+invariants of each subsystem.
 
 ## Workflow
 
