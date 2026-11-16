@@ -1743,16 +1743,42 @@ if (import.meta.env.DEV) {
         /^[a-z0-9_-]+$/i.test(v) ? null : "use only letters, numbers, - and _",
     });
     if (!name) return;
-    const res = await fetch("/api/save", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, code: editor.code }),
-    });
+    // Saving over a DIFFERENT existing pattern file replaces it for good.
+    // So does saving under the name of a stored pattern: the record is
+    // dropped below once disk becomes canonical.
+    const replacesOther =
+      name !== currentName && (name in patterns || store.get(name) != null);
+    if (replacesOther) {
+      const ok = await confirm({
+        title: `Overwrite "${name}"?`,
+        message: `A pattern named "${name}" already exists and will be replaced with the current buffer.`,
+        confirmLabel: "Overwrite",
+        destructive: true,
+      });
+      if (!ok) return;
+    }
+    let res;
+    try {
+      res = await fetch("/api/save", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          code: editor.code,
+          overwrite: name in patterns,
+        }),
+      });
+    } catch (err) {
+      status.textContent = `save failed: ${err?.message ?? err} — is the dev server running?`;
+      return;
+    }
     if (!res.ok) {
       status.textContent = `save failed: ${await res.text()}`;
       return;
     }
     const { path } = await res.json();
+    // Pending edits belong to the pattern that was open, not to the new name.
+    flushToStore();
     setCurrentName(name);
     // Disk is now canonical — promote to Demo: drop the store record, and
     // drop the user-pattern tracking too (otherwise the rail keeps a ghost

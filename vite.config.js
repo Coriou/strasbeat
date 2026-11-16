@@ -26,6 +26,42 @@ const strudelCorePkg = JSON.parse(
   ),
 );
 
+function sendJson(res, statusCode, payload) {
+  res.statusCode = statusCode;
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify(payload));
+}
+
+// Reason to refuse a save request, or null. The dev server listens on
+// localhost, where any web page open in the same browser can reach it: a
+// cross-site `fetch(..., { mode: "no-cors" })` with a text/plain body needs no
+// preflight and would otherwise overwrite pattern files on disk. Requiring
+// JSON forces a preflight for cross-origin callers (which fails — no CORS
+// headers are ever sent), and the Origin / Sec-Fetch-Site checks reject
+// anything not issued by the app's own page.
+export function rejectSaveRequest(headers) {
+  const origin = headers.origin;
+  if (origin) {
+    let originHost = null;
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      // "null" and other opaque origins fall through as a mismatch.
+    }
+    if (originHost !== headers.host) {
+      return { status: 403, error: "cross-origin save refused" };
+    }
+  }
+  const site = headers["sec-fetch-site"];
+  if (site && site !== "same-origin" && site !== "none") {
+    return { status: 403, error: "cross-origin save refused" };
+  }
+  if (!/^application\/json\b/i.test(headers["content-type"] ?? "")) {
+    return { status: 415, error: "content-type must be application/json" };
+  }
+  return null;
+}
+
 // Vite middleware: write the editor's current code to patterns/<name>.js
 // so the dev workflow is: iterate in the browser → save → commit.
 function patternSavePlugin() {
@@ -34,40 +70,37 @@ function patternSavePlugin() {
     configureServer(server) {
       server.middlewares.use("/api/save", async (req, res, next) => {
         if (req.method !== "POST") return next();
+        const rejection = rejectSaveRequest(req.headers);
+        if (rejection) {
+          return sendJson(res, rejection.status, {
+            ok: false,
+            error: rejection.error,
+          });
+        }
         // Cap request body at 1MB to prevent accidental memory exhaustion.
         const MAX_BODY = 1024 * 1024;
         let body = "";
         for await (const chunk of req) {
           body += chunk;
           if (body.length > MAX_BODY) {
-            res.statusCode = 413;
-            return res.end(
-              JSON.stringify({ ok: false, error: "payload too large" }),
-            );
+            return sendJson(res, 413, { ok: false, error: "payload too large" });
           }
         }
         let payload;
         try {
           payload = JSON.parse(body);
         } catch {
-          res.statusCode = 400;
-          return res.end(JSON.stringify({ ok: false, error: "invalid json" }));
+          return sendJson(res, 400, { ok: false, error: "invalid json" });
         }
-        const { name, code } = payload;
+        const { name, code, overwrite } = payload ?? {};
         if (typeof name !== "string" || !/^[a-z0-9_-]+$/i.test(name)) {
-          res.statusCode = 400;
-          return res.end(
-            JSON.stringify({
-              ok: false,
-              error: "name must match /^[a-z0-9_-]+$/i",
-            }),
-          );
+          return sendJson(res, 400, {
+            ok: false,
+            error: "name must match /^[a-z0-9_-]+$/i",
+          });
         }
         if (typeof code !== "string") {
-          res.statusCode = 400;
-          return res.end(
-            JSON.stringify({ ok: false, error: "code must be a string" }),
-          );
+          return sendJson(res, 400, { ok: false, error: "code must be a string" });
         }
         const escaped = code
           .replace(/\\/g, "\\\\")
@@ -75,23 +108,29 @@ function patternSavePlugin() {
           .replace(/\$\{/g, "\\${");
         const file = `export default \`${escaped}\`;\n`;
         const target = path.join(PATTERNS_DIR, `${name}.js`);
+        // Replacing a file that is already there has to be asked for: a typed
+        // name that happens to match another pattern must not silently destroy
+        // it (and any uncommitted work in it).
+        if (overwrite !== true && fs.existsSync(target)) {
+          return sendJson(res, 409, {
+            ok: false,
+            error: `patterns/${name}.js already exists`,
+          });
+        }
         try {
           fs.mkdirSync(PATTERNS_DIR, { recursive: true });
           fs.writeFileSync(target, file, "utf8");
         } catch (err) {
           console.error("[strasbeat/api/save] write failed:", err);
-          res.statusCode = 500;
-          return res.end(
-            JSON.stringify({
-              ok: false,
-              error: `write failed: ${err.message}`,
-            }),
-          );
+          return sendJson(res, 500, {
+            ok: false,
+            error: `write failed: ${err.message}`,
+          });
         }
-        res.setHeader("content-type", "application/json");
-        res.end(
-          JSON.stringify({ ok: true, path: path.relative(__dirname, target) }),
-        );
+        sendJson(res, 200, {
+          ok: true,
+          path: path.relative(__dirname, target),
+        });
       });
     },
   };
