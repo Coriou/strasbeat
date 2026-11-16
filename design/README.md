@@ -2,8 +2,8 @@
 
 This directory holds the design system and the work specs that came out of
 the first UI/UX design session for strasbeat. It exists so that work on
-different features can be picked up by **separate Claude Code agents in
-fresh contexts**, without needing to relive the conversation that produced
+different features can be picked up by **separate agents in fresh
+contexts**, without needing to relive the conversation that produced
 these decisions.
 
 ## How to use this directory
@@ -51,5 +51,5 @@ Things deliberately _not_ in scope for this design pass:
 - Server-side or build-pipeline changes beyond what a feature explicitly
   needs.
 - Anything in `strudel-source/` — that's a read-only upstream reference.
-- A full vim mode, an in-app theme editor, multi-user collaboration —
-  none of these are on the roadmap today, no spec for them here.
+- An in-app theme editor, multi-user collaboration — neither is on the
+  roadmap today, no spec for them here.

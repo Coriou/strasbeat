@@ -65,10 +65,9 @@ The maintainer's machine must stay lightly loaded.
   `ci/**` branches never deploy. Delete every one you push; `origin` should
   end with only `main`.
 - A new `*.test.js` does not run until it is added to the `test` script in
-  `package.json`. A fix with a browser-visible effect gets a check in the
-  smoke script.
-- You cannot hear audio or see the app. Anything that needs ears or eyes
-  (sound, layout, focus, visuals) goes in your report as a short list for the
+  `package.json`. A browser-visible fix gets a check in the smoke script.
+- You cannot hear audio or see the app. What needs ears or eyes (sound,
+  layout, focus, visuals) goes in your report as a short list for the
   maintainer to check. Do not claim it works.
 
 ## Four traps that fail silently
@@ -94,22 +93,20 @@ The maintainer's machine must stay lightly loaded.
 ## Where things are
 
 `index.html` → `src/main.js` (wiring only). List `src/` for the rest; file
-names say what they hold. The parts that are not obvious:
+names say what they hold: `src/editor/` is CodeMirror extensions, `src/ui/`
+panels and chrome. The parts that are not obvious:
 
 - `src/boot.js` loads Strudel and the default sounds; `src/eval-feedback.js`
   and `src/eval-state.js` own evaluate and stop.
-- `src/editor/` holds CodeMirror extensions; `src/ui/` holds panels and chrome.
 - `src/strudel-ext/` holds strasbeat's own pattern functions. Anything exported
   from its `index.js` is a global in pattern code.
 - `patterns/*.js` are compositions. Each default-exports a template string of
   Strudel code; it is a string because the transpiler needs the source text.
-- `vite.config.js` holds the dev-only `POST /api/save`, the strudel.cc proxy
-  and the bundle-shaping plugins.
 
 ## Read before you touch
 
-Subsystem invariants are in `docs/architecture.md`, one section each. Read the
-named section first; most were learned from bugs that produced no error.
+`docs/architecture.md` holds each subsystem's invariants. Read the named
+section first; most were learned from bugs that produced no error.
 
 | If you touch | Read section |
 |---|---|
@@ -126,13 +123,14 @@ named section first; most were learned from bugs that produced no error.
 
 Other references:
 
-- `STRUDEL.md`: Strudel syntax cheatsheet. Read it before writing Strudel code.
+- `STRUDEL.md`: Strudel syntax cheatsheet. Read it before writing Strudel code;
+  for anything it lacks, <https://strudel.cc/learn/> is the reference.
 - `design/SYSTEM.md`: tokens, type, spacing, motion. Read it before adding or
   changing a visual element. `PRODUCT.md`: who the tool is for and how it
   should feel.
 - `design/work/README.md`: index of specs with their status. Read the index,
   then only the spec you were pointed to. `design/work/OPEN.md` lists what is
   deferred, undecided or waiting for a person to check.
-- `design/work/archive/` holds finished implementation plans and the
-  November 2026 audit record. Their code listings are out of date; do not read
-  or search it unless asked, and never read the audit record whole.
+- `design/work/archive/` holds finished plans and the November 2026 audit
+  record, with out-of-date code listings. Do not read or search it unless
+  asked, and never read the audit record whole.
