@@ -229,7 +229,7 @@ function scanLane(code, lineStart, lineEnd, lineAt) {
   // else verbatim under `otherChain`. The chain may span multiple lines
   // (per design/PATTERN-STYLE.md §7) so we read past EOL until the next
   // label or end of buffer.
-  const blockEnd = findBlockEnd(code, lineEnd);
+  const blockEnd = findBlockEnd(code, lineEnd, openParen);
   const chain = parseTrailingChain(code, closeParen + 1, blockEnd);
 
   // Detect a struct() in the chain — it wraps the step string with a
@@ -498,14 +498,24 @@ function stripBankFromChain(code, chain, chainStart) {
 // We look at the start of each subsequent line and stop when we hit
 // either a top-level label OR a line that doesn't start with whitespace
 // AND doesn't begin with `.` — i.e. a statement-level boundary.
-function findBlockEnd(code, lineEnd) {
+// A line that would otherwise end the block does not while a bracket or a
+// block comment opened earlier in the lane is still open — a callback
+// argument written over several lines, say. Ending the block there would
+// make every lane-level edit (add, delete, duplicate, reorder) cut the
+// expression in half.
+function findBlockEnd(code, lineEnd, laneStart = lineEnd) {
   let i = lineEnd; // points at '\n' or code.length
   if (i >= code.length) return code.length;
+  const open = createOpenTracker(code, laneStart);
   // Move past current EOL.
   i++;
   while (i <= code.length) {
     const nextEol = indexOfEolOrEnd(code, i);
     const lineText = code.slice(i, nextEol);
+    if (open.at(i)) {
+      i = nextEol + 1;
+      continue;
+    }
     if (!lineText.trim()) {
       // Blank line: tentatively continue (chains often have blank gaps,
       // but very rarely — most patterns are dense). Stop at second blank.
@@ -538,6 +548,47 @@ function findBlockEnd(code, lineEnd) {
     return Math.max(0, i - 1);
   }
   return code.length;
+}
+
+// Scans forward from `from`, on demand, and answers "is a bracket or a block
+// comment that was opened since then still open at this offset?". Strings
+// and comments are skipped, so a bracket inside either does not count.
+// Offsets must be asked for in increasing order.
+function createOpenTracker(code, from) {
+  let pos = from;
+  let depth = 0;
+  let inBlockComment = false;
+  return {
+    at(offset) {
+      while (pos < offset && pos < code.length) {
+        if (inBlockComment) {
+          const close = code.indexOf("*/", pos);
+          if (close < 0 || close >= offset) {
+            pos = offset;
+            break;
+          }
+          inBlockComment = false;
+          pos = close + 2;
+          continue;
+        }
+        const ch = code[pos];
+        if (ch === '"' || ch === "'" || ch === "`") {
+          const close = scanString(code, pos);
+          pos = close < 0 ? code.length : close + 1;
+        } else if (ch === "/" && code[pos + 1] === "/") {
+          pos = indexOfEolOrEnd(code, pos);
+        } else if (ch === "/" && code[pos + 1] === "*") {
+          inBlockComment = true;
+          pos += 2;
+        } else {
+          if (ch === "(" || ch === "[" || ch === "{") depth++;
+          else if (ch === ")" || ch === "]" || ch === "}") depth--;
+          pos++;
+        }
+      }
+      return inBlockComment || depth > 0;
+    },
+  };
 }
 
 function indexOfEolOrEnd(code, from) {

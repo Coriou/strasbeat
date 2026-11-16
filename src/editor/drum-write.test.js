@@ -806,3 +806,74 @@ describe("changeForUpgradeResolution()", () => {
     assert.equal(changeForUpgradeResolution(lane, 32), null);
   });
 });
+
+describe("lane-level edits around a lane that spans an open bracket", () => {
+  const apply = (code, change) =>
+    code.slice(0, change.from) + change.insert + code.slice(change.to);
+  const balanced = (code) => {
+    let depth = 0;
+    for (const ch of code.replace(/"[^"]*"/g, "")) {
+      if (ch === "(") depth++;
+      if (ch === ")") depth--;
+      assert.ok(depth >= 0, `unbalanced:\n${code}`);
+    }
+    assert.equal(depth, 0, `unbalanced:\n${code}`);
+  };
+  // A callback argument written over several lines: its body lines start
+  // with neither `.` nor a comment.
+  const CALLBACK = [
+    '$: s("bd ~ ~ ~").sometimesBy(0.3, (x) =>',
+    "  x.speed(2),",
+    ")",
+    "",
+    'note("c e g")',
+  ].join("\n");
+
+  test("the lane's block reaches the end of its expression", () => {
+    const [lane] = parseDrumLanes(CALLBACK);
+    // (a single blank line after a lane belongs to its block, as always)
+    assert.equal(
+      CALLBACK.slice(lane.lineStart, lane.lineEnd).trimEnd(),
+      CALLBACK.split("\n\n")[0],
+    );
+  });
+
+  test("add, delete and duplicate keep the expression whole", () => {
+    const lanes = parseDrumLanes(CALLBACK);
+    const added = apply(CALLBACK, changeForAddLane(CALLBACK, lanes, buildAddLaneText("hh", null)));
+    balanced(added);
+    assert.match(added, /x\.speed\(2\),\n\)\n\n\$: s\("hh/);
+
+    const deleted = apply(CALLBACK, changeForDeleteLane(CALLBACK, lanes[0]));
+    assert.doesNotMatch(deleted, /speed/);
+    assert.match(deleted, /note\("c e g"\)/);
+
+    const duplicated = apply(CALLBACK, changeForDuplicateLane(CALLBACK, lanes[0]));
+    balanced(duplicated);
+    assert.equal(duplicated.match(/x\.speed\(2\),\n\)/g).length, 2);
+  });
+
+  test("a block comment after a lane is not cut in half", () => {
+    const code = [
+      '$: s("bd ~ ~ ~")',
+      "/* notes:",
+      "   try a 909 here",
+      "*/",
+      '$: s("hh hh hh hh")',
+    ].join("\n");
+    const lanes = parseDrumLanes(code);
+    assert.equal(lanes.length, 2);
+    const deleted = apply(code, changeForDeleteLane(code, lanes[0]));
+    assert.doesNotMatch(deleted, /try a 909|\*\//);
+    assert.match(deleted, /^\$: s\("hh hh hh hh"\)/);
+  });
+
+  test("brackets inside strings and comments do not hold a block open", () => {
+    const code = [
+      '$: s("bd ~ ~ ~").gain("<1 [0.5 0.8]>") // louder (later',
+      "setcpm(120)",
+    ].join("\n");
+    const [lane] = parseDrumLanes(code);
+    assert.equal(code.slice(lane.lineStart, lane.lineEnd), code.split("\n")[0]);
+  });
+});
