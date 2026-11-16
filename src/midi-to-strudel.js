@@ -1,88 +1,140 @@
 // Shared inbound MIDI → Strudel translation core.
 //
 // Three-layer pipeline:
-//   1. Adapter (parseMidiFile) — @tonejs/midi → TranslationInput
+//   1. Adapter (parseMidiFile) — Standard MIDI File → TranslationInput
 //   2. Analyzer (analyzeTranslationInput) — quantize, map instruments, build metadata
 //   3. Code generator (generatePatternDraft) — emit readable Strudel pattern code
 //
 // Pure functions, no DOM, no Strudel runtime dependency. Testable with `node --test`.
 
-// @tonejs/midi is CJS. In Node ESM the namespace lands on the default
-// export; Vite's esbuild pre-bundle exposes named exports instead.
-// Using `import *` and falling back covers both paths.
-import * as _toneMidiNs from "@tonejs/midi";
-const Midi = _toneMidiNs.Midi ?? _toneMidiNs.default?.Midi;
-import { resolveGmInstrument, resolveGmDrum, GM_DRUM_MAP } from "./midi-gm.js";
+import { readSmf, makeTicksToSeconds, dominantTempo } from "./midi-smf.js";
+import {
+  resolveGmInstrument,
+  resolveGmDrum,
+  GM_DRUM_MAP,
+  GM_FAMILY_NAMES,
+} from "./midi-gm.js";
+
+// A pattern is one editor buffer: past this many bars the generated source is
+// too large to be a useful draft (and a single stray event hours into a file
+// would otherwise emit thousands of rest bars).
+export const MAX_IMPORT_BARS = 2000;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Drum-track heuristic
+// Drum-track detection
 // ─────────────────────────────────────────────────────────────────────────────
-// Many DAWs export drum patterns on channel 0 with program 0 ("acoustic grand
-// piano") rather than the GM-standard channel 10.  Detect this by checking
-// whether the overwhelming majority of note pitches land on known GM drum
-// keys — if they do, it's almost certainly a drum track regardless of channel.
+// GM reserves channel 10 for percussion, and that is the signal we trust.
+//
+// Some DAWs export a drum part on another channel, so there is a fallback —
+// but it has to be conservative: GM drum keys cover B1–A3 and C4–F#4
+// contiguously, so "every pitch is a drum key" is true of most bass lines and
+// plenty of melodies. The fallback therefore needs all of:
+//   - no melodic instrument assigned (no program change, or program 0), and
+//   - every pitch is a GM drum key, and
+//   - positive evidence: a drum-ish track name, or a kick + snare + hi-hat
+//     together (which an actual melody essentially never spells).
+// Anything it gets wrong can be flipped per track in the import dialog.
 
 const GM_DRUM_PITCHES = new Set(Object.keys(GM_DRUM_MAP).map(Number));
+const DRUM_NAME_RE =
+  /drum|perc|\bkit\b|beat|kick|snare|hi-?hat|\bhats?\b|cymbal|\btoms?\b|clap/i;
+const KICK_PITCHES = [35, 36];
+const SNARE_PITCHES = [38, 40];
+const HAT_PITCHES = [42, 44, 46];
 
-function looksLikeDrumTrack(notes) {
-  if (notes.length < 2) return false;
-  const distinct = new Set(notes.map((n) => n.midi));
-  const matchCount = [...distinct].filter((m) => GM_DRUM_PITCHES.has(m)).length;
-  // All distinct pitches must be known GM drum notes.
-  return matchCount === distinct.size;
+/**
+ * @param {{ name?: string, channel?: number, program?: number, notes: { midi: number }[] }} track
+ * @returns {boolean}
+ */
+export function detectDrumTrack(track) {
+  if (track.channel === 9) return true;
+  if (track.notes.length < 2) return false;
+  if ((track.program ?? 0) !== 0) return false;
+
+  const distinct = new Set();
+  for (const note of track.notes) distinct.add(note.midi);
+  for (const midi of distinct) {
+    if (!GM_DRUM_PITCHES.has(midi)) return false;
+  }
+
+  if (DRUM_NAME_RE.test(track.name ?? "")) return true;
+  const has = (pitches) => pitches.some((p) => distinct.has(p));
+  return has(KICK_PITCHES) && has(SNARE_PITCHES) && has(HAT_PITCHES);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. File adapter: @tonejs/midi → TranslationInput
+// 1. File adapter: Standard MIDI File → TranslationInput
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Parse a MIDI file ArrayBuffer and normalize it into the shared
  * TranslationInput model.
  *
+ * Notes carry both seconds (`time`/`duration`, through the file's tempo map)
+ * and ticks (`ticks`/`durationTicks`). The analyzer quantises from ticks, so
+ * the rhythm does not depend on the tempo map; `bpm` is the single tempo the
+ * generated pattern plays at (see dominantTempo in midi-smf.js).
+ *
  * @param {ArrayBuffer} buffer - Raw .mid file bytes
  * @returns {TranslationInput}
  */
 export function parseMidiFile(buffer) {
-  const midi = new Midi(buffer);
+  const smf = readSmf(buffer);
+  const toSeconds = makeTicksToSeconds(smf.tempos, smf.ppq);
 
-  const tempos = midi.header.tempos;
-  const bpm = tempos.length > 0 ? tempos[0].bpm : 120;
+  let endTicks = 0;
+  for (const track of smf.tracks) {
+    for (const n of track.notes) {
+      const end = n.ticks + n.durationTicks;
+      if (end > endTicks) endTicks = end;
+    }
+  }
 
-  const timeSigs = midi.header.timeSignatures;
+  const bpm = dominantTempo(smf.tempos, endTicks);
+  const distinctTempos = new Set(smf.tempos.map((t) => t.bpm));
+
+  const timeSigs = smf.timeSignatures;
   const timeSignature =
     timeSigs.length > 0
       ? /** @type {[number, number]} */ (timeSigs[0].timeSignature)
       : [4, 4];
+  const distinctTimeSigs = new Set(
+    timeSigs.map((t) => t.timeSignature.join("/")),
+  );
 
-  const tracks = midi.tracks.map((track, i) => {
-    const isDrum =
-      track.instrument.percussion ||
-      track.channel === 9 ||
-      looksLikeDrumTrack(track.notes);
+  const tracks = smf.tracks.map((track, i) => {
+    const isDrum = detectDrumTrack(track);
     return {
       name: track.name || `Track ${i + 1}`,
       channel: track.channel,
       isDrum,
-      gmInstrument: track.instrument.name || "acoustic grand piano",
-      gmProgram: track.instrument.number,
-      notes: track.notes.map((n) => ({
-        name: n.name.toLowerCase(),
-        midi: n.midi,
-        time: n.time,
-        duration: n.duration,
-        velocity: n.velocity,
-      })),
+      gmInstrument: isDrum
+        ? "percussion"
+        : (GM_FAMILY_NAMES[Math.floor(track.program / 8)] ?? "piano"),
+      gmProgram: track.program,
+      notes: track.notes.map((n) => {
+        const time = toSeconds(n.ticks);
+        return {
+          name: midiToName(n.midi),
+          midi: n.midi,
+          time,
+          duration: toSeconds(n.ticks + n.durationTicks) - time,
+          velocity: n.velocity,
+          ticks: n.ticks,
+          durationTicks: n.durationTicks,
+        };
+      }),
     };
   });
 
   return {
-    sourceName: midi.name || "untitled",
+    sourceName: smf.name || "untitled",
     bpm: Math.round(bpm * 100) / 100,
     timeSignature,
-    ppq: midi.header.ppq,
-    hasTempoChanges: tempos.length > 1,
-    hasTimeSigChanges: timeSigs.length > 1,
+    ppq: smf.ppq,
+    hasTempoChanges: distinctTempos.size > 1,
+    truncated: smf.truncated,
+    hasTimeSigChanges: distinctTimeSigs.size > 1,
     tracks,
   };
 }
@@ -104,28 +156,54 @@ export function analyzeTranslationInput(input, options = {}) {
   const [tsNum, tsDenom] = timeSignature;
 
   const beatsPerBar = tsNum * (4 / tsDenom);
-  const barDuration = beatsPerBar * (60 / bpm);
+  const ppq = input.ppq ?? 480;
+
+  // Musical position in quarter-note beats. File notes carry ticks, which
+  // place a note on the beat grid whatever the tempo map does; quantising
+  // their wall-clock seconds against one tempo would smear every note after
+  // a tempo change across the grid. Live-capture notes only have seconds,
+  // and a single tempo, so the conversion is exact for them.
+  const onsetBeats = (note) =>
+    note.ticks != null ? note.ticks / ppq : (note.time * bpm) / 60;
+  const lengthBeats = (note) =>
+    note.durationTicks != null
+      ? note.durationTicks / ppq
+      : (note.duration * bpm) / 60;
 
   // Find the total duration across all tracks
   let maxTime = 0;
+  let maxBeats = 0;
   for (const track of input.tracks) {
     for (const note of track.notes) {
       const end = note.time + note.duration;
       if (end > maxTime) maxTime = end;
+      const endBeats = onsetBeats(note) + lengthBeats(note);
+      if (endBeats > maxBeats) maxBeats = endBeats;
     }
   }
 
-  const totalBars = Math.max(1, Math.ceil(maxTime / barDuration));
+  // The epsilon keeps float fuzz on an exact bar boundary from adding a bar.
+  const totalBars = Math.max(1, Math.ceil(maxBeats / beatsPerBar - 1e-9));
+  if (totalBars > MAX_IMPORT_BARS) {
+    throw new Error(
+      `this MIDI spans ${totalBars} bars — too long to import as one pattern (limit ${MAX_IMPORT_BARS}). Trim it to a section first.`,
+    );
+  }
   const warnings = [];
 
+  if (input.truncated) {
+    warnings.push(
+      "This file ends mid-track — it looks cut off. Everything up to that point was imported; the ending may be missing.",
+    );
+  }
   if (input.hasTempoChanges) {
     warnings.push(
-      `Tempo changes detected — using first tempo (${input.bpm} BPM). Multi-tempo support is planned for Phase 2.`,
+      `Tempo changes detected — a pattern has one tempo, so this plays at ${input.bpm} BPM throughout (the tempo most of the file uses). Notes keep their positions on the beat; speed-ups and slow-downs are flattened.`,
     );
   }
   if (input.hasTimeSigChanges) {
     warnings.push(
-      `Time signature changes detected — using first (${tsNum}/${tsDenom}). Multi-time-sig support is planned for Phase 2.`,
+      `Time signature changes detected — bars are laid out in the first one (${tsNum}/${tsDenom}), so bar lines after a change will not match the original.`,
     );
   }
   if (totalBars > 200) {
@@ -137,10 +215,10 @@ export function analyzeTranslationInput(input, options = {}) {
   // Choose quantization grid
   const gridSubdivision =
     options.gridSubdivision ??
-    autoDetectGrid(input.tracks, barDuration, timeSignature);
+    autoDetectGrid(input.tracks, onsetBeats, beatsPerBar, timeSignature);
 
   const slotsPerBar = gridSubdivision;
-  const gridUnit = barDuration / slotsPerBar;
+  const gridUnit = beatsPerBar / slotsPerBar;
 
   // Filter tracks by trackIndices if specified
   const trackIndices = options.trackIndices;
@@ -160,7 +238,10 @@ export function analyzeTranslationInput(input, options = {}) {
     const identifier = sanitizeIdentifier(track.name, usedIdentifiers);
     usedIdentifiers.add(identifier);
 
-    const strudelSound = track.isDrum
+    // The per-track choice from the import dialog wins over detection.
+    const isDrum = options.drumOverrides?.[originalIndex] ?? track.isDrum;
+
+    const strudelSound = isDrum
       ? null
       : resolveGmInstrument(track.gmProgram ?? 0);
 
@@ -168,9 +249,11 @@ export function analyzeTranslationInput(input, options = {}) {
       dropOverlappingSamePitchNotes(track.notes);
     const polyphonicOverlapCount = countPolyphonicOverlaps(normalizedNotes);
 
-    const unmappedDrums = track.isDrum
+    const drumName = (midi) =>
+      track.drumMap ? (track.drumMap[midi] ?? null) : resolveGmDrum(midi);
+    const unmappedDrums = isDrum
       ? [...new Set(normalizedNotes.map((note) => note.midi))].filter(
-          (midi) => resolveGmDrum(midi) == null,
+          (midi) => drumName(midi) == null,
         )
       : [];
 
@@ -198,11 +281,15 @@ export function analyzeTranslationInput(input, options = {}) {
     let truncatedCount = 0;
     const tolerance = gridUnit * 0.1;
 
+    // slot key (bar, gridPosition) → simultaneous melodic notes
+    const chordSizes = new Map();
+
     for (const note of normalizedNotes) {
-      let bar = Math.floor(note.time / barDuration);
+      const onset = onsetBeats(note);
+      let bar = Math.floor(onset / beatsPerBar);
       if (bar >= totalBars) continue;
 
-      const timeInBar = clampToZero(note.time - bar * barDuration);
+      const timeInBar = clampToZero(onset - bar * beatsPerBar);
       const rawGridPos = timeInBar / gridUnit;
       let gridPosition = Math.round(rawGridPos);
 
@@ -219,7 +306,7 @@ export function analyzeTranslationInput(input, options = {}) {
       if (snapError <= tolerance) snappedCount++;
 
       // Duration in grid units (minimum 1)
-      const rawGridDur = note.duration / gridUnit;
+      const rawGridDur = lengthBeats(note) / gridUnit;
       let gridDuration = Math.max(1, Math.round(rawGridDur));
 
       // Clamp to bar boundary
@@ -237,6 +324,21 @@ export function analyzeTranslationInput(input, options = {}) {
         gridDuration,
         velocity: note.velocity,
       });
+
+      const slotKey = bar * slotsPerBar + gridPosition;
+      chordSizes.set(slotKey, (chordSizes.get(slotKey) ?? 0) + 1);
+    }
+
+    if (!isDrum) {
+      let clippedChords = 0;
+      for (const size of chordSizes.values()) {
+        if (size > MAX_CHORD_NOTES) clippedChords++;
+      }
+      if (clippedChords > 0) {
+        warnings.push(
+          `Track "${track.name}" has ${clippedChords} chord${clippedChords === 1 ? "" : "s"} with more than ${MAX_CHORD_NOTES} notes; only the lowest ${MAX_CHORD_NOTES} of each are kept.`,
+        );
+      }
     }
 
     const accuracy =
@@ -269,15 +371,25 @@ export function analyzeTranslationInput(input, options = {}) {
         : "";
 
     // Velocity variation
-    const vels = quantized.length >= 2 ? quantized.map((n) => n.velocity) : [];
-    const velMin = vels.length ? Math.min(...vels) : 0;
-    const velMax = vels.length ? Math.max(...vels) : 0;
+    // (a loop, not Math.min(...array): spreading a very large track
+    // overflows the argument limit)
+    let velMin = 0;
+    let velMax = 0;
+    if (quantized.length >= 2) {
+      velMin = Infinity;
+      velMax = -Infinity;
+      for (const n of quantized) {
+        if (n.velocity < velMin) velMin = n.velocity;
+        if (n.velocity > velMax) velMax = n.velocity;
+      }
+    }
     const hasVelocityVariation = velMax - velMin > 0.2;
 
     return {
       name: track.name,
       channel: track.channel,
-      isDrum: track.isDrum,
+      isDrum,
+      drumMap: track.drumMap ?? null,
       gmInstrument: track.gmInstrument,
       strudelSound,
       noteCount: track.notes.length,
@@ -336,7 +448,7 @@ export function generatePatternDraft(analysis, options = {}) {
   const preserveVelocity = options.preserveVelocity !== false;
 
   const lines = [];
-  const usedVarNames = new Set();
+  const usedVarNames = makeVarNamer();
   const trackVelocityBars = new Map(); // identifier → velocityBars[]
 
   // Tempo
@@ -398,7 +510,18 @@ export function generatePatternDraft(analysis, options = {}) {
  * @returns {{ name: string, code: string, warnings: string[] }}
  */
 export function midiFileToPattern(buffer, options = {}) {
-  const input = parseMidiFile(buffer);
+  return translationInputToPattern(parseMidiFile(buffer), options);
+}
+
+/**
+ * Analyze + generate from an already-parsed file, so a caller that parsed
+ * once to show the track list (the import dialog) does not parse again.
+ *
+ * @param {TranslationInput} input
+ * @param {ImportOptions} [options]
+ * @returns {{ name: string, code: string, patternBody: string, warnings: string[], analysis: MidiAnalysis }}
+ */
+export function translationInputToPattern(input, options = {}) {
   const analysis = analyzeTranslationInput(input, options);
 
   const patternName = sanitizePatternName(
@@ -407,7 +530,10 @@ export function midiFileToPattern(buffer, options = {}) {
 
   // Build header comment
   const trackSummary = analysis.tracks
-    .map((t) => `${t.name} (${t.isDrum ? "drums" : t.strudelSound})`)
+    .map(
+      (t) =>
+        `${t.name} (${t.isDrum ? "drums" : (options.soundOverrides?.[t.originalIndex] ?? t.strudelSound)})`,
+    )
     .join(", ");
   const gridLabel = gridSubdivisionLabel(
     analysis.gridSubdivision,
@@ -493,8 +619,12 @@ export function estimateBpmFromCapture(events) {
  * The capture buffer has no noteoff events (the bridge uses trigger-and-decay),
  * so duration is inferred from the gap to the next onset, with a minimum floor.
  *
+ * A capture made on a drum-pad preset is a drum track: pass `drumMap` (the
+ * preset's MIDI note → sound name table) so the pattern is written with the
+ * sounds that were actually heard, not as a melody.
+ *
  * @param {Array<{ midi: number, velocity: number, time: number }>} events
- * @param {{ presetName?: string }} [options]
+ * @param {{ presetName?: string, drumMap?: Record<number, string> }} [options]
  * @returns {TranslationInput}
  */
 export function captureBufferToTranslationInput(events, options = {}) {
@@ -559,8 +689,9 @@ export function captureBufferToTranslationInput(events, options = {}) {
       {
         name: options.presetName ?? "capture",
         channel: 0,
-        isDrum: false,
-        gmInstrument: "acoustic grand piano",
+        isDrum: !!options.drumMap,
+        ...(options.drumMap && { drumMap: options.drumMap }),
+        gmInstrument: options.drumMap ? "percussion" : "acoustic grand piano",
         gmProgram: 0,
         notes,
       },
@@ -577,10 +708,12 @@ function generateMelodicTrack(track, totalBars, usedVarNames) {
   const velocityBars = [];
   const slotsPerBar = track.slotsPerBar;
 
-  for (let bar = 0; bar < totalBars; bar++) {
-    const barNotes = track.notes.filter((n) => n.bar === bar);
+  const notesByBar = groupNotesByBar(track.notes);
 
-    if (barNotes.length === 0) {
+  for (let bar = 0; bar < totalBars; bar++) {
+    const barNotes = notesByBar.get(bar);
+
+    if (!barNotes) {
       noteBars.push(buildRestBar(slotsPerBar));
       velocityBars.push(buildRestBar(slotsPerBar));
       continue;
@@ -647,16 +780,23 @@ function generateDrumTrack(track, totalBars, usedVarNames) {
   const noteBars = [];
   const velocityBars = [];
 
-  for (let bar = 0; bar < totalBars; bar++) {
-    const barNotes = track.notes.filter((n) => n.bar === bar);
+  const notesByBar = groupNotesByBar(track.notes);
 
-    if (barNotes.length === 0) {
+  for (let bar = 0; bar < totalBars; bar++) {
+    const barNotes = notesByBar.get(bar);
+
+    if (!barNotes) {
       noteBars.push(buildRestBar(slotsPerBar));
       velocityBars.push(buildRestBar(slotsPerBar));
       continue;
     }
 
-    const events = buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings);
+    const events = buildDrumBarEvents(
+      barNotes,
+      slotsPerBar,
+      drumWarnings,
+      track.drumMap,
+    );
     noteBars.push(eventsToMiniNotation(events));
     velocityBars.push(eventsToVelocityNotation(events));
   }
@@ -751,11 +891,11 @@ function buildMelodicBarEvents(barNotes, slotsPerBar) {
         velocity: notes[0].velocity,
       });
     } else {
-      // Chord: sort low to high, max 6 notes
+      // Chord: sort low to high, capped (the analyzer warns when it clips)
       const sorted = notes
         .slice()
         .sort((a, b) => a.midi - b.midi)
-        .slice(0, 6);
+        .slice(0, MAX_CHORD_NOTES);
       events.push({
         type: "chord",
         names: sorted.map((n) => n.name),
@@ -775,7 +915,7 @@ function buildMelodicBarEvents(barNotes, slotsPerBar) {
   return events;
 }
 
-function buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings) {
+function buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings, drumMap) {
   // Group notes by grid position
   const slots = new Map();
   for (const note of barNotes) {
@@ -799,7 +939,9 @@ function buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings) {
     const drumNames = [];
     const drumVelocities = [];
     for (const n of notes) {
-      const name = resolveGmDrum(n.midi);
+      // A live-capture track brings the drum map of the preset it was played
+      // on; a file track uses the GM kit.
+      const name = drumMap ? (drumMap[n.midi] ?? null) : resolveGmDrum(n.midi);
       if (name) {
         // Deduplicate: don't repeat the same drum name in a chord
         if (!drumNames.includes(name)) {
@@ -839,6 +981,18 @@ function buildDrumBarEvents(barNotes, slotsPerBar, drumWarnings) {
   }
 
   return events;
+}
+
+const MAX_CHORD_NOTES = 6;
+
+function groupNotesByBar(notes) {
+  const byBar = new Map();
+  for (const note of notes) {
+    const list = byBar.get(note.bar);
+    if (list) list.push(note);
+    else byBar.set(note.bar, [note]);
+  }
+  return byBar;
 }
 
 function eventsToMiniNotation(events) {
@@ -895,8 +1049,7 @@ function detectBarRepetitions(bars, usedVarNames) {
     if (uniqueContents.has(bar)) {
       sequence.push({ type: "var", name: uniqueContents.get(bar) });
     } else {
-      const name = nextVarName(usedVarNames);
-      usedVarNames.add(name);
+      const name = usedVarNames.next();
       uniqueContents.set(bar, name);
       consts.push({ name, content: bar });
       sequence.push({ type: "var", name });
@@ -906,18 +1059,21 @@ function detectBarRepetitions(bars, usedVarNames) {
   return { consts, sequence };
 }
 
-function nextVarName(usedNames) {
-  for (let i = 0; i < 26; i++) {
-    const name = String.fromCharCode(65 + i);
-    if (!usedNames.has(name)) return name;
-  }
-  for (let i = 0; i < 26; i++) {
-    for (let j = 0; j < 26; j++) {
-      const name = String.fromCharCode(65 + i) + String.fromCharCode(65 + j);
-      if (!usedNames.has(name)) return name;
-    }
-  }
-  return "_section";
+// Names for repeated-bar consts: A … Z, AA … ZZ, AAA … — never runs out and
+// never repeats, however many distinct bars a long import has.
+function makeVarNamer() {
+  let count = 0;
+  return {
+    next() {
+      let n = count++;
+      let name = "";
+      do {
+        name = String.fromCharCode(65 + (n % 26)) + name;
+        n = Math.floor(n / 26) - 1;
+      } while (n >= 0);
+      return name;
+    },
+  };
 }
 
 // ─── Velocity notation ──────────────────────────────────────────────────
@@ -958,7 +1114,7 @@ function formatVelocityCat(velocityBars) {
 // Start from the coarsest candidate and use it if it meets the threshold. Only
 // step to a finer grid when coarser ones lose too many notes. This keeps the
 // output readable (8th notes instead of 32nd notes for typical MIDI).
-function autoDetectGrid(tracks, barDuration, timeSignature) {
+function autoDetectGrid(tracks, onsetBeats, beatsPerBar, timeSignature) {
   const [tsNum, tsDenom] = timeSignature;
 
   // Build candidate grids based on time signature, coarsest to finest
@@ -978,7 +1134,7 @@ function autoDetectGrid(tracks, barDuration, timeSignature) {
   const onsets = [];
   for (const track of tracks) {
     for (const note of track.notes) {
-      onsets.push(note.time);
+      onsets.push(onsetBeats(note));
     }
   }
 
@@ -989,13 +1145,13 @@ function autoDetectGrid(tracks, barDuration, timeSignature) {
   let bestScore = 0;
 
   for (const gridSlots of candidates) {
-    const gridUnit = barDuration / gridSlots;
+    const gridUnit = beatsPerBar / gridSlots;
     const tolerance = gridUnit * 0.1;
     let snapped = 0;
 
     for (const onset of onsets) {
-      const bar = Math.floor(onset / barDuration);
-      const timeInBar = onset - bar * barDuration;
+      const bar = Math.floor(onset / beatsPerBar);
+      const timeInBar = onset - bar * beatsPerBar;
       const rawGridPos = timeInBar / gridUnit;
       const snapError =
         Math.abs(rawGridPos - Math.round(rawGridPos)) * gridUnit;
@@ -1041,9 +1197,38 @@ export function midiToName(midi) {
   return `${note}${octave}`.toLowerCase();
 }
 
+// Names a generated `const <id> = …` / `<id>: …` must not take.
+//
+// JS reserved words are syntax errors ("Default" → `const default`). The
+// Strudel globals are worse because they parse: `const note = note(…)` reads
+// its own binding before initialisation and throws at evaluation, and a
+// track called "S" or "Stack" would shadow the function for the rest of the
+// buffer. The list covers what the generated code calls plus the globals a
+// user is most likely to type next into an imported pattern.
+const RESERVED_IDENTIFIERS = new Set([
+  // JavaScript
+  "await", "break", "case", "catch", "class", "const", "continue",
+  "debugger", "default", "delete", "do", "else", "enum", "export", "extends",
+  "false", "finally", "for", "function", "if", "implements", "import", "in",
+  "instanceof", "interface", "let", "new", "null", "package", "private",
+  "protected", "public", "return", "static", "super", "switch", "this",
+  "throw", "true", "try", "typeof", "var", "void", "while", "with", "yield",
+  "arguments", "eval", "undefined", "NaN", "Infinity", "async", "of",
+  // Strudel
+  "note", "n", "s", "sound", "cat", "seq", "stack", "silence", "setcpm",
+  "setcps", "mini", "m", "chord", "scale", "voicing", "arrange", "all",
+  "hush", "samples", "sine", "saw", "square", "tri", "cosine", "rand",
+  "perlin", "irand", "choose", "pure", "reify", "slowcat", "fastcat",
+  "sequence", "polymeter", "polyrhythm", "timecat", "stepcat", "run",
+  "progression", "gain", "room", "delay", "lpf", "hpf", "pan", "bank",
+  "velocity", "struct", "mask", "euclid", "fast", "slow", "rev", "jux",
+  "superimpose", "layer", "off", "every", "sometimes", "ref", "register",
+  "controls", "time", "id",
+]); // prettier-ignore
+
 function sanitizeIdentifier(name, usedIdentifiers) {
   // Convert to camelCase-friendly identifier
-  let id = name
+  let id = String(name ?? "")
     .replace(/[^a-zA-Z0-9\s_-]/g, "")
     .trim()
     .replace(/[-_\s]+(.)/g, (_, c) => c.toUpperCase())
@@ -1056,6 +1241,11 @@ function sanitizeIdentifier(name, usedIdentifiers) {
 
   // Make first char lowercase
   id = id[0].toLowerCase() + id.slice(1);
+
+  // Reserved word or Strudel global → make it unmistakably a track name.
+  if (RESERVED_IDENTIFIERS.has(id)) {
+    id = id + "Track";
+  }
 
   // Deduplicate
   if (usedIdentifiers.has(id)) {
