@@ -1,5 +1,7 @@
 # 16 — MIDI in: file import on a shared translation core
 
+> Status: shipped. Phase 1 (a5a7aad, 2026-04-11); from Phase 2, the live-capture migration (75a1534) and repetition detection are in, harmonic uplift is not.
+
 > Read `../README.md`, `../SYSTEM.md`, `../../CLAUDE.md`, and
 > `../../STRUDEL.md` before starting. Then read this whole file. This is
 > a **runtime + UI feature set** that establishes strasbeat's inbound

@@ -1,5 +1,7 @@
 # 14 — Strudel learning and extensibility
 
+> Status: shipped, all five phases (9c114bc, 76f479f, 1284c9f, a0271a0, 2026-04-11 to 04-15).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. Phases are ordered — each one
 > ships on its own and the next phase assumes the previous is landed.

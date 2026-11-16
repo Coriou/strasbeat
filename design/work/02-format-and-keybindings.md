@@ -1,5 +1,7 @@
 # 02 — Prettier formatting + VSCode keybindings
 
+> Status: shipped (3db0e46, 2026-04-09). The fixed VSCode keymap described here became one of five profiles in `21-keybindings.md`.
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. This task is editor-side only; you'll be extending the
 > CodeMirror configuration in `src/main.js`. The

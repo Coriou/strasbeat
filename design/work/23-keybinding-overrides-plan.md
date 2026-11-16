@@ -1,8 +1,10 @@
 # Keybinding Overrides Implementation Plan
 
+> Status: not started.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Spec: `design/work/23-keybinding-overrides.md`. Read it before starting. Adjacent spec to coordinate with: `design/work/22-intellisense-v2.md` — see Task 17.
 >
-> **Commits:** This project's convention is that **agents do not commit or push** ([per user preferences](../../CLAUDE.md)). Each task ends with a "Stop and report" step. The user reviews and commits manually. Suggested commit messages are included for the user's reference; don't run `git commit` from inside the agent.
+> **Commits:** follow [`AGENTS.md`](../../AGENTS.md): commit as you go, conventional messages, no AI attribution. The "Stop and report" steps below were written under an older rule; treat each as the point to commit the task.
 
 **Goal:** Add a per-binding override system on top of the 5-profile keybinding system landed in `21-keybindings.md`, so users can rebind any strasbeat-owned action without leaving their chosen profile. Strudel-parity is preserved by default; overrides opt-in action-by-action.
 

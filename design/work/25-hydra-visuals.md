@@ -1,5 +1,7 @@
 # 25 — Hydra visuals (`initHydra()` + event-driven shader uniforms)
 
+> Status: shipped, phases 1, 1.5 and 2 (676fbea, 6f2a4ab, 2026-06; lifecycle reworked in 7e42564). How it looks on a real GPU is still to be checked — see `OPEN.md`. Plan: `archive/25-hydra-visuals-plan.md`.
+
 > Read `../README.md`, `../SYSTEM.md`, `../PATTERN-STYLE.md`, and
 > `../../CLAUDE.md` before starting. This is a **runtime feature**, not a
 > design-pass feature — the same category as `07-chord-progression.md`.
@@ -647,7 +649,7 @@ branch**:
   legibility plates; (4) full-window increment (1.5); (5) shader node +
   context-loss; (6) uniform derivation (auto) + `.uniform()` override +
   guard; (7) demo patterns + tests. Each is independently testable.
-- **Plan file:** `design/work/25-hydra-visuals-plan.md` (written by
+- **Plan file:** `design/work/archive/25-hydra-visuals-plan.md` (written by
   `superpowers:writing-plans` against this spec).
 
 ## Out of scope (across all phases)

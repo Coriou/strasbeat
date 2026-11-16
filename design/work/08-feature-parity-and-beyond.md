@@ -1,5 +1,7 @@
 # 08 — Feature parity (and beyond)
 
+> Status: shipped, all five panels (072ba93, 6a83d91, 32804ac, 97483c3, 2026-04-09/10). Learn was added by spec 14; the panels now load lazily.
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. Phases are ordered — each one
 > ships on its own and the next phase assumes the previous is landed.

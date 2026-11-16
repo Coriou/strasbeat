@@ -1,5 +1,7 @@
 # 12 — Track mute / solo controls
 
+> Status: shipped (73b5038, 2026-04-10). Mute/solo semantics were corrected by `27-track-and-listener-bugfix.md`.
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. This adds **interactive track
 > control** — mute, solo, and keyboard shortcuts — without introducing

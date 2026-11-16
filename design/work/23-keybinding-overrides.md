@@ -1,6 +1,7 @@
 # 23 — Per-binding overrides (rebindable strasbeat actions)
 
-> Status: design — 2026-05-01. Read `21-keybindings.md` first — that spec
+> Status: not started. No override code exists in `src/`; the plan is
+> `23-keybinding-overrides-plan.md`. Designed 2026-05-01. Read `21-keybindings.md` first — that spec
 > ships the 5-profile picker and the layered keymap model this spec
 > extends. Read `22-intellisense-v2.md` next — it lands new universal
 > keybindings (`Tab`-accept, `Alt+↑/↓` audition, `Cmd+Shift+B` reveal,

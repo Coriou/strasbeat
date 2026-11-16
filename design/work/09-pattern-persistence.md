@@ -1,5 +1,7 @@
 # 09 — Pattern persistence
 
+> Status: partly shipped. Phases 1 and 2 (bd01a9d, d9aa422, 2026-04-10); Phase 3, accounts and cloud storage, is not started.
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. Phases are ordered — each one
 > ships on its own and the next phase assumes the previous is landed.

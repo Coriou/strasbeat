@@ -1,5 +1,7 @@
 # 18 — Arrangement timeline & song-form UX
 
+> Status: partly shipped. V0 strip and V1 runtime wrapper (90a4dfe, 75a93ab, 2026-04-15), and from V2 the section solo/loop; seek, rename, reorder and duplicate are not started.
+
 > Read `../README.md`, `../SYSTEM.md`, `../PATTERN-STYLE.md`, and
 > `../../CLAUDE.md` before starting. This task spans **three layers**:
 > the design-system strip (landed), a runtime pivot that shadows Strudel's

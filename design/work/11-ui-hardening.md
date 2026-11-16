@@ -1,5 +1,7 @@
 # 11 — UI Hardening (v2)
 
+> Status: shipped (ebe1777, 26594fc, 2026-04-10/11).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. This is a **bug-fix + robustness
 > pass** — no new features, no new panels, no visual redesign. Every

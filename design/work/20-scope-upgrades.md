@@ -1,5 +1,7 @@
 # 20 — Scope upgrades
 
+> Status: shipped (6105c1a, 2026-04-16).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. This task is scoped to the bottom panel's **Scope** mode
 > (`src/ui/scope.js`) and a new small control strip. The Roll renderer,

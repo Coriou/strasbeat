@@ -1,5 +1,7 @@
 # Research: How strudel.cc implements live visuals (Hydra + draw)
 
+> Status: reference. Research notes on strudel.cc's visuals stack; nothing to build.
+
 Inspiration-only reverse-engineering of strudel.cc's visuals stack to inform
 strasbeat's offline Hydra integration + `shader()` node. Techniques and
 rationale only — no code copied. Primary evidence is the upstream source

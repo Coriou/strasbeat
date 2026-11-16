@@ -1,7 +1,9 @@
 # 27 — Track mute/solo correctness + the missing-updateListener class of bug
 
-Status: **investigated, root-caused, not yet fixed.** No code has been
-changed. This doc is the complete handoff from the debugging session that
+> Status: shipped — fixed (b45bf66, bcdac0a, ee42479, 87c6b88, 3c1ff37, 2026-08-24).
+> The text below is the handoff written before the fix, kept as it was.
+
+This doc is the complete handoff from the debugging session that
 found these — everything below was verified against a running app and the
 installed `@strudel/core` source, not inferred.
 

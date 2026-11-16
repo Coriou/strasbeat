@@ -1,5 +1,7 @@
 # 10 — Refactor `src/main.js`
 
+> Status: shipped (d8bbb08, 2026-04-11).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. This is a **pure refactor** — no
 > features, no API changes, no visual changes. Every behavior the user

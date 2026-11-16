@@ -1,5 +1,7 @@
 # 06 — Future (not actionable yet)
 
+> Status: reference. Long-term direction; nothing here is a task.
+
 > Read `../README.md` and `../SYSTEM.md` before starting any of the
 > actionable specs in this directory. **This file is not a work spec.**
 > It's a sketch of the long-term direction so today's work can be aimed

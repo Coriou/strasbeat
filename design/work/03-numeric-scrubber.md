@@ -1,5 +1,7 @@
 # 03 — Inline numeric scrubber
 
+> Status: shipped (3db0e46, 2026-04-09).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. This task is editor-side: a CodeMirror 6 decoration that
 > attaches a drag affordance to numeric literals in the editor. The

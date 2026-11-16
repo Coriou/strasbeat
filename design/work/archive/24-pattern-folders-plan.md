@@ -1,8 +1,6 @@
 # Pattern Folders Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Spec: `design/work/24-pattern-folders.md`. Read it before starting. Spec 09 (`09-pattern-persistence.md`) is the prior layer — read that too.
->
-> **Commits:** This project's convention is that **agents do not commit or push** ([per user preferences](../../CLAUDE.md)). Each task ends with a "Stop and report" step. The user reviews and commits manually. Suggested commit messages are included for the user's reference; don't run `git commit` from inside the agent.
 
 **Goal:** Add flat single-level folders to the pattern library. Demos become a fixed read-only top section; user patterns live in user-created folders or "Unfiled". Drag-and-drop, multi-select, inline rename, duplicate, fuzzy search with accent folding, and JSON library export/import are all first-class.
 

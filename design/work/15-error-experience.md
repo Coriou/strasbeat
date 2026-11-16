@@ -1,5 +1,7 @@
 # 15 — Error Experience
 
+> Status: shipped, all three phases (2545a36, 063aeac, 2026-04-11).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. Phases are ordered — each one
 > ships on its own and the next phase assumes the previous is landed.

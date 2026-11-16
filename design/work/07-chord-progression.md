@@ -1,5 +1,7 @@
 # 07 — Chord progression helper (`progression()`)
 
+> Status: shipped, all three phases (30291b3, 5eda064, 1426666, 2026-04-09).
+
 > Read `../README.md`, `../SYSTEM.md`, `../PATTERN-STYLE.md`, and
 > `../../CLAUDE.md` before starting. This task is a **runtime feature**,
 > not a design-pass feature: it adds a new function to the Strudel eval

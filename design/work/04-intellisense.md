@@ -1,6 +1,6 @@
 # 04 — Intellisense (smart autocomplete + hover docs)
 
-> **Status: superseded.** Phase 1 of this spec shipped; Phase 2
+> Status: superseded by `22-intellisense-v2.md`. Phase 1 of this spec shipped; Phase 2
 > (signature hints, hover docs) shipped and survives unchanged. The
 > autocomplete ranking and surface design described below was replaced
 > in 2026-05 by `22-intellisense-v2.md`. References to

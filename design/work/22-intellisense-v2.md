@@ -1,6 +1,7 @@
 # 22 — Intellisense v2 (ranking · ergonomics · sample/bank coherence)
 
-> Status: design — 2026-05-01. Read `../README.md`, `../SYSTEM.md`,
+> Status: shipped, all four phases (1098d86 … 44e1cb4, 2026-05-01). Plan:
+> `archive/22-intellisense-v2-plan.md`. Designed 2026-05-01. Read `../README.md`, `../SYSTEM.md`,
 > `../../CLAUDE.md`, `04-intellisense.md` (the v1 it supersedes), and
 > `21-keybindings.md` (this spec composes with the keymap-profile
 > system shipped there) before starting.

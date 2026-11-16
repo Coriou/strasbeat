@@ -1,6 +1,7 @@
 # 21 — Keybinding profiles (Strudel default · VSCode · Vim · Emacs · Helix)
 
-> Status: design — 2026-04-30. Read `../README.md`, `../SYSTEM.md`,
+> Status: shipped (800ef81 … 12b9e2d, 2026-04-30). Plan:
+> `archive/21-keybindings-plan.md`. Designed 2026-04-30. Read `../README.md`, `../SYSTEM.md`,
 > `../../CLAUDE.md`, and the existing `02-format-and-keybindings.md`
 > before starting. This task touches the editor (a CodeMirror compartment
 > for the strasbeat overlay), the transport bar (a new keymap chip), the

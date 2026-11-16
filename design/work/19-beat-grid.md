@@ -1,5 +1,7 @@
 # 19 — Beat grid (step-sequencer view for drum lines)
 
+> Status: shipped, phases 1–4 (fb35d5d, 2026-04-15; reworked in 1f34df6). The v1.5 items are not started.
+
 > Read `../README.md`, `../SYSTEM.md`, `../PATTERN-STYLE.md`, and
 > `../../CLAUDE.md` before starting. This task touches three layers:
 > a new parser (`src/editor/drum-parse.js`), a new bottom-panel mode in

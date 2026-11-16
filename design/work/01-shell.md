@@ -1,5 +1,7 @@
 # 01 — New shell
 
+> Status: shipped (26a07d6, 2026-04-09).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. This task assumes you've internalised the design system,
 > especially §3 (layout grammar), §4 (type), §5 (color), §6 (spacing),

@@ -1,5 +1,7 @@
 # 05 — Real piano roll
 
+> Status: shipped (7fd2af5, 2026-04-09). The canvas is now shared with the scope and Strudel's painters; see `docs/architecture.md`, "Bottom canvas and docSync".
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. This task replaces the **renderer** of the existing
 > 180px canvas in the bottom panel of the shell with one that fits the

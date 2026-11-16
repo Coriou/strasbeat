@@ -1,5 +1,7 @@
 # 26 — Pattern tabs
 
+> Status: shipped (630ca9f, 2026-06-03). Plan: `archive/26-pattern-tabs-plan.md`.
+
 > Read `../README.md`, `../SYSTEM.md`, `../../CLAUDE.md`,
 > `09-pattern-persistence.md`, `24-pattern-folders.md`, and `06-future.md`
 > before starting. This spec extends specs 09 and 24 — autosave, working

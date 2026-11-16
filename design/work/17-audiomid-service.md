@@ -1,6 +1,6 @@
 # audiomid — Docker-first Audio-to-MIDI Toolkit
 
-**Status:** Plan approved, not yet started  
+**Status:** reference. The service is a separate repository; nothing in strasbeat calls it yet.  
 **Role in strasbeat:** Sidecar service. Strasbeat consumes its API to power a future "Import from audio" feature. audiomid is a standalone repo — it does not live inside this workspace.
 
 ---

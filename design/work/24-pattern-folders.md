@@ -1,5 +1,7 @@
 # 24 — Pattern folders
 
+> Status: shipped (ae7cf7c, 2026-05-11). Plan: `archive/24-pattern-folders-plan.md`.
+
 > Read `../README.md`, `../SYSTEM.md`, `../../CLAUDE.md`, and
 > `09-pattern-persistence.md` before starting. This spec extends spec 09
 > — autosave, working copies, and user patterns are assumed to be in

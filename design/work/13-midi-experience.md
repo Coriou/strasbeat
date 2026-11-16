@@ -1,5 +1,7 @@
 # 13 — MIDI experience overhaul
 
+> Status: shipped, including the "future" phases 2 and 3 (ebf7ff4, 3e8e496, 01e5eea, 2026-04-10/11).
+
 > Read `../README.md`, `../SYSTEM.md`, and `../../CLAUDE.md` before
 > starting. Then read this whole file. This elevates strasbeat's MIDI
 > input stack from a functional prototype to a polished, DAW-grade
