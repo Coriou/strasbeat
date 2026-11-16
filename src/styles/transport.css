@@ -232,7 +232,7 @@
   gap: 3px;
   margin-left: auto;
   padding: 2px 5px;
-  font: 550 10px / 1 var(--font-mono);
+  font: 550 var(--text-xs) / 1 var(--font-mono);
   color: color-mix(in oklch, var(--text) 62%, var(--accent));
   background: color-mix(in oklch, var(--accent) 9%, var(--surface-1));
   border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border));
@@ -299,7 +299,7 @@
 
 .transport__readout-label {
   color: var(--text-dim);
-  font-size: 9px;
+  font-size: var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -331,20 +331,37 @@
 
 .transport__playhead-progress {
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
-  background: color-mix(in oklch, var(--accent) 24%, var(--surface-2));
+  inset: 0;
+  overflow: hidden;
   border-radius: inherit;
   opacity: 0.72;
-  transition:
-    width 80ms linear,
-    opacity var(--t-hover);
+  transition: opacity var(--t-hover);
+}
+
+/* The fill and the dot's carrier are both as wide as the track and slide in
+   from the left by transform (set per frame in transport.js), so the
+   playhead never triggers layout and never trails its own transition. */
+.transport__playhead-fill {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklch, var(--accent) 24%, var(--surface-2));
+  border-radius: inherit;
+  transform: translateX(-100%);
+  will-change: transform;
+}
+
+.transport__playhead-carrier {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: translateX(-100%);
+  will-change: transform;
 }
 
 .transport__playhead-dot {
   position: absolute;
   top: 50%;
-  left: 0;
+  left: 100%;
   width: 10px;
   height: 10px;
   margin-top: -5px;
@@ -353,7 +370,6 @@
   border: 2px solid var(--surface-1);
   border-radius: 50%;
   box-shadow: var(--shadow-low);
-  transform: translateX(0);
   transition:
     opacity var(--t-hover),
     box-shadow var(--t-hover);
@@ -456,6 +472,21 @@
   display: inline-flex;
 }
 
+/* The profile's keymap is still being fetched, or the fetch failed: the same
+   slot says so (for Emacs too, which has no mode of its own to show). */
+.keymap-chip[data-keymap-state="loading"] .keymap-chip__mode,
+.keymap-chip[data-keymap-state="failed"] .keymap-chip__mode {
+  display: inline-flex;
+}
+
+.keymap-chip[data-keymap-state="loading"] .keymap-chip__mode-text {
+  color: var(--text-dim);
+}
+
+.keymap-chip[data-keymap-state="failed"] .keymap-chip__mode-text {
+  color: color-mix(in oklch, var(--rec) 72%, var(--text));
+}
+
 .keymap-chip__mode::before {
   content: "";
   display: block;
@@ -466,7 +497,7 @@
 
 .keymap-chip__mode-text {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 500;
   letter-spacing: 0.04em;
   /* Modal modes are NORMAL/INSERT/VISUAL/REPLACE/SELECT — REPLACE is the
@@ -508,9 +539,8 @@
 }
 
 .keymap-chip:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-wash);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* Popover — Figma-style picker. Tight padding, deliberate spacing, light
@@ -518,6 +548,7 @@
    handles visual treatment. */
 .keymap-popover {
   width: 312px;
+  max-width: calc(100vw - 2 * var(--space-2));
   padding: 5px;
   display: flex;
   flex-direction: column;
@@ -563,6 +594,13 @@
 .keymap-popover__row:focus-visible {
   background: var(--surface-3);
   outline: none;
+}
+
+/* Hover and keyboard focus share the fill; focus adds the ring so the two
+   can be told apart. */
+.keymap-popover__row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .keymap-popover__row--active {
@@ -630,7 +668,7 @@
 .keymap-popover__tag {
   align-self: center;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-xs);
   font-weight: 500;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -641,22 +679,93 @@
   border-radius: var(--radius-sm);
 }
 
-/* First-load tooltip — quiet hint above the chip. Fades in once, then
-   vanishes at the user's first interaction. pointer-events: none so it
-   never blocks the chip click that dismisses it. */
-.keymap-chip__tooltip {
-  padding: var(--space-1) var(--space-2);
+/* Footer of the popover — where the rest of the shortcuts live. Not a menu
+   item: a caption, in the same mono tag as "default". */
+.keymap-popover__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: 7px 9px 5px;
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-xs);
+  line-height: 15px;
+  color: var(--text-mut);
+}
+
+.keymap-popover__footer .keymap-popover__tag {
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* First-run hint — a quiet card floating just above the Play button, over
+   the canvas rather than over any control. It stays until it is dismissed
+   or playback first starts (src/ui/keymap-chip.js). */
+.transport__hint {
+  position: fixed;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 2 * var(--space-2)));
+  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3);
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   font-weight: 500;
+  line-height: var(--lh-sm);
   color: var(--text);
   background: var(--surface-2);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-low);
-  pointer-events: none;
-  z-index: 60;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  z-index: 40;
   animation: keymap-tooltip-in var(--t-pop-in) both;
+}
+
+.transport__hint[hidden] {
+  display: none;
+}
+
+.transport__hint-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.transport__hint-note {
+  display: block;
+  color: var(--text-mut);
+}
+
+.transport__hint-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: -3px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-mut);
+  cursor: pointer;
+  transition:
+    color var(--t-hover),
+    background var(--t-hover);
+}
+.transport__hint-close:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+.transport__hint-close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+.transport__hint-close svg {
+  width: 12px;
+  height: 12px;
 }
 
 @keyframes keymap-tooltip-in {
@@ -696,22 +805,67 @@
   .transport__kbd {
     display: none;
   }
+
+  /* Without its keycap the button only needs to hold its label. */
+  .transport__toggle {
+    min-width: 0;
+  }
+
+  .transport__pill--midi {
+    max-width: 18ch;
+  }
 }
 
+/* The columns stay `minmax(0, 1fr) auto auto`, so it is the lead group — and
+   the status line inside it, which ellipsises — that gives way. The status
+   is the app's one feedback line; it narrows but is never removed. */
 @media (max-width: 720px) {
-  .transport {
-    grid-template-columns: auto 1fr auto;
-  }
-
-  .transport__group--center {
-    justify-self: start;
-  }
-
-  .transport__status {
+  .transport__readout-label {
     display: none;
   }
 
-  .transport__readout-label {
+  .transport__readout--bpm,
+  .transport__readout--cycle {
+    min-width: 0;
+  }
+}
+
+/* Phone width: a wrapping row. Play, status and tempo share the first line;
+   the pills move to a second line only when they don't fit. The keymap
+   picker is for hardware keyboards and stays reachable in Settings. */
+@media (max-width: 599.98px) {
+  .transport {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    height: auto;
+    min-height: var(--transport-h);
+    padding-top: var(--space-1);
+    padding-bottom: max(var(--space-1), env(safe-area-inset-bottom, 0px));
+  }
+
+  .transport__group--lead {
+    flex: 1 1 160px;
+    gap: var(--space-2);
+  }
+
+  .transport__group--center {
+    flex: 0 0 auto;
+  }
+
+  .transport__group--right {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    margin-left: auto;
+  }
+
+  .transport__status {
+    flex: 1 1 0;
+    max-width: none;
+  }
+
+  .keymap-chip {
     display: none;
   }
 }
@@ -725,19 +879,18 @@
   }
 }
 
-/* Touch devices: expand hit regions to meet 44px minimum. The visual
-   height stays 28px; the padding extends the touchable area. */
+/* Coarse pointers: the bar is taller (tokens.css), Play and the roll toggle
+   become full targets (shell.css) and the chips grow to the compact one. */
 @media (pointer: coarse) {
-  .transport__toggle,
   .transport__roll-toggle {
-    position: relative;
+    min-width: var(--target-min);
   }
 
-  .transport__toggle::after,
-  .transport__roll-toggle::after {
-    content: "";
-    position: absolute;
-    inset: -8px -4px;
+  .transport__error-badge,
+  .transport__bank-chip,
+  .transport__now-playing-chip,
+  .keymap-chip {
+    min-height: var(--target-min-sm);
   }
 }
 
@@ -779,7 +932,6 @@
 }
 
 .transport__bank-chip:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-wash);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }

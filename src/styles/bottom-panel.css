@@ -59,10 +59,7 @@
   height: 7px;
   border-radius: 50%;
   background: var(--text-dim);
-  box-shadow: 0 0 0 0 color-mix(in oklch, currentColor 60%, transparent);
-  transition:
-    background var(--t-hover),
-    box-shadow var(--t-hover);
+  transition: background var(--t-hover);
 }
 
 /* Idle: muted grey dot, dim label. */
@@ -82,16 +79,33 @@
 }
 .bottom-panel__status[data-state="playing"] .bottom-panel__status-dot {
   background: var(--accent);
+}
+/* The pulse is a ring that grows 4px out of the dot while fading. It is a
+   disc over the dot in the dot's own colour (so only the part outside the
+   dot shows), animated by
+   transform and opacity only, so it runs on the compositor instead of
+   repainting a box-shadow on every frame for as long as music plays. */
+.bottom-panel__status[data-state="playing"] .bottom-panel__status-dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
   animation: bottom-panel-pulse 1.6s ease-in-out infinite;
 }
 
+/* 7px dot, 15px ring at full size: 7 / 15 hides the ring exactly behind
+   the dot's edge at rest. */
 @keyframes bottom-panel-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 50%, transparent);
+    transform: scale(0.4667);
+    opacity: 0.5;
   }
   50% {
-    box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent);
+    transform: scale(1);
+    opacity: 0;
   }
 }
 
@@ -107,8 +121,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bottom-panel__status[data-state="playing"] .bottom-panel__status-dot {
+  .bottom-panel__status[data-state="playing"] .bottom-panel__status-dot::after {
     animation: none;
+    display: none;
   }
 }
 

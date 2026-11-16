@@ -84,6 +84,18 @@ export function mountTransport({
   const playheadProgressEl = mustEl("playhead-progress");
   const playheadEl = mustEl("playhead-dot");
   const playheadBar = playheadEl.parentElement;
+  // The playhead moves by transform only, so a frame costs no layout: the
+  // fill is a full-width bar slid in from the left inside the (clipping)
+  // progress element, and the dot rides the right edge of a full-width
+  // carrier slid by the same amount. Percentages in a translate are relative
+  // to the element itself, which is why both are as wide as the track.
+  const playheadFillEl = document.createElement("div");
+  playheadFillEl.className = "transport__playhead-fill";
+  playheadProgressEl.appendChild(playheadFillEl);
+  const playheadCarrierEl = document.createElement("div");
+  playheadCarrierEl.className = "transport__playhead-carrier";
+  playheadBar.insertBefore(playheadCarrierEl, playheadEl);
+  playheadCarrierEl.appendChild(playheadEl);
   const statusEl = mustEl("status");
   const midiPillEl = mustEl("midi-status");
   const rightGroupEl = midiPillEl.parentElement;
@@ -136,23 +148,38 @@ export function mountTransport({
   let lastErrorSignature = "";
 
   let raf = null;
-  // Safety-net poll: catches the case where the scheduler starts via the
-  // editor's Cmd+Enter keymap, which doesn't go through our play button.
-  // 4Hz is plenty — once we detect started, we promote to rAF (60Hz).
-  // Note: when the rAF chain is active, kick() no-ops because raf is
-  // kept non-null through the chain (see tick()). The poll is harmless
-  // while rAF is running.
-  const POLL_INTERVAL_MS = 250;
-  const poll = setInterval(() => {
-    const sched = getScheduler();
-    if (sched && sched.started && raf == null) {
-      kick();
-    } else if (!sched || !sched.started) {
-      // Even when stopped, refresh once so the BPM readout matches the
-      // last `setcps(...)` result and the playhead is parked.
-      tick();
+  // Every play / stop / evaluate path reports here through
+  // setPlaybackState(), which starts the rAF readout loop by itself. The
+  // poll is only a safety net for a scheduler started or stopped behind
+  // that path's back (console, a pattern calling hush()), and it keeps the
+  // BPM readout honest after a stopped evaluate. It runs once a second,
+  // only while the loop is not running and the tab is visible.
+  const IDLE_POLL_MS = 1000;
+  let poll = null;
+  function pollOnce() {
+    if (raf != null) return;
+    if (getScheduler()?.started) kick();
+    else tick();
+  }
+  function startPoll() {
+    if (poll != null || document.hidden) return;
+    poll = setInterval(pollOnce, IDLE_POLL_MS);
+  }
+  function stopPoll() {
+    if (poll == null) return;
+    clearInterval(poll);
+    poll = null;
+  }
+  const onVisibilityChange = () => {
+    if (document.hidden) {
+      stopPoll();
+    } else if (raf == null) {
+      pollOnce();
+      if (raf == null) startPoll();
     }
-  }, POLL_INTERVAL_MS);
+  };
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  startPoll();
 
   // Initial paint, so we don't show "– bpm" forever if the user never plays.
   tick();
@@ -165,21 +192,24 @@ export function mountTransport({
     const sched = getScheduler();
     if (!sched) {
       raf = null;
-      writeReadouts({ cps: 0, cycle: 0, started: false });
+      startPoll();
+      writeReadouts(0, 0, false);
       return;
     }
     const cps = typeof sched.cps === "number" ? sched.cps : 0;
     const cycle = typeof sched.now === "function" ? sched.now() : 0;
     const started = !!sched.started;
-    writeReadouts({ cps, cycle, started });
+    writeReadouts(cps, cycle, started);
     if (started) {
       raf = requestAnimationFrame(tick);
+      stopPoll();
     } else {
       raf = null;
+      startPoll();
     }
   }
 
-  function writeReadouts({ cps, cycle, started }) {
+  function writeReadouts(cps, cycle, started) {
     // BPM
     const bpm = Math.round(cps * 60 * BEATS_PER_CYCLE);
     if (bpm !== lastBpm) {
@@ -197,8 +227,9 @@ export function mountTransport({
     const pct = Math.round(pos * 1000) / 10; // 1-decimal % to keep DOM writes coarse
     if (pct !== lastPct) {
       lastPct = pct;
-      playheadProgressEl.style.width = `${pct}%`;
-      playheadEl.style.left = `${pct}%`;
+      const slide = `translateX(${(pct - 100).toFixed(1)}%)`;
+      playheadFillEl.style.transform = slide;
+      playheadCarrierEl.style.transform = slide;
     }
     const idle = !started;
     if (idle !== lastIdle) {
@@ -236,6 +267,7 @@ export function mountTransport({
 
   function kick() {
     if (raf != null) return;
+    stopPoll();
     raf = requestAnimationFrame(tick);
   }
 
@@ -292,14 +324,20 @@ export function mountTransport({
 
   function setPlaybackState(state) {
     playbackState = PLAYBACK_STATES.has(state) ? state : "idle";
-    syncPlaybackState(!!getScheduler()?.started);
+    const started = !!getScheduler()?.started;
+    syncPlaybackState(started);
+    // This is the event the readouts hang off: start the frame loop when
+    // the scheduler is running, otherwise refresh once (a stopped evaluate
+    // may have changed the tempo, a stop has to park the playhead).
+    if (started) kick();
+    else if (raf == null) tick();
   }
 
   function applyPlaybackState(state) {
-    transportEl.dataset.transportState = state;
-    if (rootEl) rootEl.dataset.playback = state;
     if (state !== lastAppliedState) {
       lastAppliedState = state;
+      transportEl.dataset.transportState = state;
+      if (rootEl) rootEl.dataset.playback = state;
       const pres = TOGGLE_PRESENTATION[state] ?? TOGGLE_PRESENTATION.idle;
       if (playLabel) playLabel.textContent = pres.label;
       playBtn.setAttribute("aria-label", pres.aria);
@@ -342,7 +380,8 @@ export function mountTransport({
   function dispose() {
     if (raf != null) cancelAnimationFrame(raf);
     raf = null;
-    clearInterval(poll);
+    stopPoll();
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     keymapChip.destroy();
   }
 
