@@ -430,10 +430,24 @@ export function mountBeatGrid({
   /** @type {null | { el: HTMLElement, teardown: () => void }} */
   let openMenu = null;
 
+  // The last thing focused inside the grid itself. Menus are appended to
+  // <body> and take focus, so when one closes this is where the keyboard was.
+  let lastGridFocus = null;
+  root.addEventListener("focusin", (e) => {
+    lastGridFocus = e.target;
+  });
+
   function closeMenu() {
     if (!openMenu) return;
+    const hadFocus = openMenu.el.contains(document.activeElement);
     openMenu.teardown();
     openMenu = null;
+    // Removing the focused menu would leave focus on the page; give it back
+    // to the cell or control the menu was opened from. (After a pick that
+    // rebuilds the grid that element is gone and the rebuild restores focus.)
+    if (hadFocus && lastGridFocus?.isConnected && root.contains(lastGridFocus)) {
+      lastGridFocus.focus({ preventScroll: true });
+    }
   }
 
   // ─── Drag-reorder state (pointerdown on lane dot … pointerup) ──────────

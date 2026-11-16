@@ -168,6 +168,7 @@ function beginInlineEdit({ displayEl, initial, validate, onCommit, onCancel }) {
   }
 
   input.addEventListener("keydown", (e) => {
+    if (e.isComposing || e.keyCode === 229) return; // IME composition
     if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
@@ -638,6 +639,8 @@ export function mount({
     renderList();
   });
   searchInput.addEventListener("keydown", (e) => {
+    // The Enter (or Escape) that ends an IME composition is not a command.
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === "Escape") {
       // First Escape clears the field; an empty one leaves the key for the
       // floating rail to close on.

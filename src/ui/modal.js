@@ -381,6 +381,8 @@ function buildModal(opts, onConfirm) {
     if (error.textContent) error.textContent = '';
   });
   input.addEventListener('keydown', (e) => {
+    // The Enter that commits an IME composition is not a confirm.
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       tryConfirm();
@@ -536,6 +538,7 @@ function buildForm(opts, onConfirm) {
   for (const input of Object.values(inputs)) {
     if (input.tagName === 'INPUT') {
       input.addEventListener('keydown', (e) => {
+        if (e.isComposing || e.keyCode === 229) return; // IME composition
         if (e.key === 'Enter') {
           e.preventDefault();
           tryConfirm();

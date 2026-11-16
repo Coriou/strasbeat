@@ -227,6 +227,8 @@ export function mountCommandPalette({ commands }) {
   // Installed on `document` (capture) while open, so the palette keeps
   // working even if focus has slipped out of the input.
   function onKeydown(e) {
+    // Keys that belong to an IME composition (its committing Enter included).
+    if (e.isComposing || e.keyCode === 229) return;
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
@@ -298,6 +300,9 @@ export function mountCommandPalette({ commands }) {
       input.select();
       return;
     }
+    // A dialog is waiting for an answer: opening over it would pull focus
+    // out of its trap, and one Escape would then close both.
+    if (document.querySelector(".modal-overlay")) return;
     isOpen = true;
     // Reopened while the previous close was still fading out: cancel that
     // removal, or it would take the overlay away from under the new session.
