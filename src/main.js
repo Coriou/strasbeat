@@ -178,9 +178,10 @@ resizeCanvas();
 new ResizeObserver(() => resizeCanvas()).observe(canvas);
 const drawCtx = canvas.getContext("2d");
 const drawTime = [-2, 2]; // seconds before / after now to render
-// Phase 2 shader uniforms: previous onDraw timestamp, used to derive the
-// per-frame dt the decay envelope needs. null until the first frame.
-let lastDrawTime = null;
+// Phase 2 shader uniforms: wall-clock timestamp (ms) of the previous onDraw,
+// used to derive the per-frame dt the decay envelope needs. null until the
+// first frame.
+let lastDrawMs = null;
 
 // Bottom panel mode switcher (Roll / Scope / Custom) — the toggle is a
 // floating pill in the top-right of the roll pane; scope taps superdough's
@@ -344,15 +345,18 @@ const editor = new StrudelMirror({
   onUpdateState: syncVisualsToRepl,
   onDraw: (haps, time) => {
     const mode = bottomModes.getMode();
-    // Phase 2: drive the shader node's uniforms from the active haps. dt comes
-    // from successive draw times. This runs every frame regardless of the
-    // bottom-panel mode — the shader paints its own full-window canvas, so the
-    // feed must precede the beats/visuals early-return below. Purely additive.
+    // Phase 2: drive the shader node's uniforms from the haps the playhead
+    // (`time`, in cycles) just reached. dt is wall-clock seconds between
+    // draws, so the pulse decay is the same length at any tempo. This runs
+    // every frame regardless of the bottom-panel mode — the shader paints its
+    // own canvas, so the feed must precede the beats/visuals early-return
+    // below. Purely additive.
     const shaderNode = _getShaderNode?.();
     if (shaderNode?.hasProgram?.()) {
       const _deriver = _getDeriver?.();
-      const dt = lastDrawTime == null ? 0.016 : Math.max(0, time - lastDrawTime);
-      lastDrawTime = time;
+      const nowMs = performance.now();
+      const dt = lastDrawMs == null ? 0.016 : (nowMs - lastDrawMs) / 1000;
+      lastDrawMs = nowMs;
       if (_deriver) shaderNode.setUniformMap(_deriver.frame(haps, time, dt));
     }
     // Beat grid renders DOM over the canvas — no canvas paint to do, and

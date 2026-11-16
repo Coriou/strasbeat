@@ -22,10 +22,10 @@ import {
 } from "./uniforms.js";
 
 // Minimal hap stub matching the real per-step hap shape (value.s for drums,
-// whole.begin for identity). begin is a plain number here; the deriver
-// String()s it so a Fraction works identically in the app.
-function hap(name, begin) {
-  return { value: { s: name }, whole: { begin } };
+// whole.begin/end for timing). begin/end are plain numbers here; the deriver
+// reads them with Number(), so a Fraction works identically in the app.
+function hap(name, begin, end) {
+  return { value: { s: name }, whole: { begin, end } };
 }
 
 describe("lane → uniform mapping", () => {
@@ -74,9 +74,9 @@ describe("onset detection + decay", () => {
   });
   test("the same hap present two frames running does NOT re-pulse", () => {
     const d = createUniformDeriver();
-    const f1 = d.frame([hap("bd", 0)], 0, 0.016);
-    const f2 = d.frame([hap("bd", 0)], 0.016, 0.016); // same identity
-    assert.ok(f2.uKick <= f1.uKick, "no re-pulse without a new onset");
+    const f1 = d.frame([hap("bd", 0)], 0, 0.016).uKick;
+    const f2 = d.frame([hap("bd", 0)], 0.016, 0.016).uKick; // still sounding
+    assert.ok(f2 < f1, "no re-pulse without a new onset");
   });
   test("a re-triggered hap at a new begin DOES pulse again", () => {
     const d = createUniformDeriver();
@@ -84,6 +84,64 @@ describe("onset detection + decay", () => {
     d.frame([], 0.4, 0.4); // long gap → decays toward 0
     const m = d.frame([hap("bd", 1)], 1, 0.016); // new begin = new onset
     assert.ok(m.uKick > 0.9, `expected re-pulse to peak, got ${m.uKick}`);
+  });
+});
+
+describe("onsets follow the playhead, not the draw window", () => {
+  // onDraw passes every hap in the Drawer's ±2-cycle window. A hap that is
+  // merely visible must not pulse — only one whose onset the playhead reached.
+  test("a hap two cycles ahead of the playhead does not pulse yet", () => {
+    const d = createUniformDeriver();
+    const ahead = [hap("bd", 2, 2.25)];
+    assert.equal(d.frame(ahead, 0, 0.016).uKick ?? 0, 0, "not at time 0");
+    assert.equal(d.frame(ahead, 1.99, 0.016).uKick ?? 0, 0, "not at 1.99");
+    assert.ok(d.frame(ahead, 2.01, 0.016).uKick > 0.9, "pulses on arrival");
+  });
+  test("the first frame pulses what is sounding, not what already ended", () => {
+    const d = createUniformDeriver();
+    const m = d.frame([hap("bd", 3, 3.25), hap("sd", 3.5, 4)], 3.75, 0.016);
+    assert.equal(m.uKick ?? 0, 0, "bd ended at 3.25 — no pulse at 3.75");
+    assert.ok(m.uSnare > 0.9, "sd is sounding at 3.75 — pulses");
+  });
+  test("a short hap that starts and ends between two frames still pulses", () => {
+    const d = createUniformDeriver();
+    d.frame([], 0, 0.016);
+    const m = d.frame([hap("hh", 0.1, 0.15)], 0.3, 0.05);
+    assert.ok(m.uHat > 0.9, `expected uHat to pulse, got ${m.uHat}`);
+  });
+  test("a Fraction-like begin/end (valueOf) is read as a number", () => {
+    const frac = (n) => ({ valueOf: () => n, toString: () => `${n}/1` });
+    const d = createUniformDeriver();
+    const haps = [{ value: { s: "bd" }, whole: { begin: frac(1), end: frac(2) } }];
+    assert.equal(d.frame(haps, 0.5, 0.016).uKick ?? 0, 0);
+    assert.ok(d.frame(haps, 1.01, 0.016).uKick > 0.9);
+  });
+  test("a playhead that jumps backwards re-pulses what is sounding there", () => {
+    const d = createUniformDeriver();
+    d.frame([hap("bd", 0, 0.25)], 0.1, 0.016);
+    d.frame([], 5, 1); // far ahead, fully decayed
+    const m = d.frame([hap("bd", 0, 0.25)], 0.1, 0.016); // restarted
+    assert.ok(m.uKick > 0.9, `expected a re-pulse, got ${m.uKick}`);
+  });
+  test("a hap with no whole (continuous signal) never pulses or throws", () => {
+    const d = createUniformDeriver();
+    assert.doesNotThrow(() => d.frame([{ value: { s: "bd" } }], 0, 0.016));
+    assert.equal(d.frame([{ value: { s: "bd" } }], 1, 0.016).uKick ?? 0, 0);
+  });
+});
+
+describe("decay is in wall-clock seconds", () => {
+  test("the same dt decays the same amount whatever the tempo", () => {
+    // Two derivers see the same 50ms frame; one playhead advanced 0.01 cycles
+    // (slow tempo), the other 0.5 (fast). The envelope must not care.
+    const slow = createUniformDeriver();
+    const fast = createUniformDeriver();
+    slow.frame([hap("bd", 0, 1)], 0, 0.016);
+    fast.frame([hap("bd", 0, 1)], 0, 0.016);
+    const a = slow.frame([], 0.01, 0.05).uKick;
+    const b = fast.frame([], 0.5, 0.05).uKick;
+    assert.equal(a, b);
+    assert.ok(Math.abs(a - Math.exp(-0.05 / 0.12)) < 1e-9, `got ${a}`);
   });
 });
 
@@ -149,12 +207,12 @@ describe("shared singleton + teardown reset (_resetDeriver)", () => {
     const b = getDeriver();
     assert.notEqual(b, a, "a fresh deriver is built after reset");
   });
-  test("reset clears the stale prevIds (no swallowed re-pulse after restart)", () => {
+  test("reset clears the stale playhead (no swallowed re-pulse after restart)", () => {
     // Part of the I-1 contract clearShader() relies on: a hap identity that was
     // live before the stop must still pulse on the first frame after restart.
     _resetDeriver();
     const before = getDeriver();
-    before.frame([hap("bd", 0)], 0, 0.016); // seeds prevIds with bd@0
+    before.frame([hap("bd", 0)], 0.5, 0.016); // playhead now past bd@0
 
     _resetDeriver(); // what clearShader() now calls on stop
     const after = getDeriver();
