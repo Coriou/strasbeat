@@ -43,7 +43,8 @@ it.
     matters).
   - **VSCode-style keymap** (Cmd/Ctrl+/, move-line, etc.).
   - **Figma-style numeric scrubber**: drag any number literal to tweak
-    it live, debounced to a re-evaluation.
+    it; while the pattern is playing the sound follows the drag (when
+    stopped it only edits the number).
 - **Custom Canvas2D piano roll** with per-layer color, beat/cycle
   gridlines, click-to-locate, and active-row labels — written from
   scratch (not Strudel's built-in renderer).
@@ -141,7 +142,8 @@ strasbeat/
 2. Edit live; press play to hear it. Errors show inline.
 3. Either:
    - **⤓ save** writes the editor's current code back to
-     `patterns/<name>.js` (prompts for the name), or
+     `patterns/<name>.js` (prompts for the name, and asks before
+     replacing a different existing pattern), or
    - edit `patterns/<name>.js` directly in your IDE — the page
      hot-reloads.
 4. `git add patterns/02-house.js && git commit -m "tighten the bassline"`.
@@ -151,11 +153,14 @@ shows up in the left rail automatically.
 
 ### MIDI capture flow
 
-Plug in a USB MIDI keyboard, pick a preset (Piano / EPiano / Pad / …),
-hit **● capture**, play a phrase, hit capture again. You're prompted for
-a filename; the played notes are written to `patterns/<name>.js` as a
-real Strudel pattern, the page reloads, and you can tweak it in the
-editor before committing.
+Plug in a USB MIDI keyboard and click **Connect MIDI** in the transport
+bar — the browser asks for permission on that click, not on page load,
+and on later visits the keyboard connects by itself. Pick a preset
+(Piano / EPiano / Pad / …), hit **● capture**, play a phrase, hit capture
+again. You can preview the take first; the preview never touches the
+pattern you have open. You're then prompted for a filename; the played
+notes are written to `patterns/<name>.js` as a real Strudel pattern, the
+page reloads, and you can tweak it in the editor before committing.
 
 ### Pattern file format
 

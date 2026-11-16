@@ -45,11 +45,30 @@ the editor).
 `import.meta.glob`, and wires every panel and toolbar button together. The
 heavy lifting is split into focused modules: `boot.js` runs the prebake
 state machine (evalScope, soundfonts, samples), `eval-feedback.js`
-monkey-patches `editor.evaluate`/`editor.stop` with error tracking, sound
-validation, and silence detection, `panels.js` creates and registers all
-seven right-rail panels, `capture.js` owns the MIDI capture preview modal,
-`export.js` handles WAV rendering, `share.js` the URL codec, and
-`command-palette-actions.js` maps keyboard shortcuts to commands.
+monkey-patches `editor.evaluate`/`editor.stop` with request sequencing,
+error tracking, sound validation, and silence detection (the pure rules
+live in `eval-state.js`), `panels.js` creates and registers the six
+right-rail panels (Learn, Sounds, Reference, Console, Export, Settings —
+package and sample setup lives inside Settings), `capture.js` owns the
+MIDI capture preview modal, `export.js` handles WAV rendering, `share.js`
+the URL codec and share-link arrival, and `command-palette-actions.js`
+maps keyboard shortcuts to commands. `storage-guard.js` is imported first
+by `main.js` so a browser with unusable localStorage still boots.
+
+`editor.evaluate()` resolves to `{ status, started, owner }` — `status` is
+`ok`, `error`, `empty`, `blocked` (a WAV export owns the audio context),
+`superseded` or `cancelled` — because the repl swallows eval errors and
+callers must be able to tell "evaluated" from "kept the previous pattern".
+The repl is always called with autostart off; the patched evaluate starts
+the scheduler itself, and only for the request that is still the latest.
+Evaluates run one at a time (two inside the repl at once corrupt its `$:`
+table and the arrange registry), the latest wins, and `editor.stop()`
+cancels whatever is waiting. New code that evaluates should call
+`editor.evaluate()`, not `editor.repl.evaluate()`; the two deliberate
+exceptions are the scrubber's live evaluate (`editor-setup.js`, which
+brackets the arrange state itself and only runs while this tab is
+playing) and the capture preview (`capture.js`, which plays a take without
+touching the buffer).
 
 The shell is a design-system layout (top bar with brand + pattern menu +
 share/settings, left rail patterns library, editor canvas, transport bar
@@ -63,14 +82,20 @@ replaced by an in-app `modal.js`, and a settings popover
 (`settings-drawer.js`) hosts an OKLCH accent picker persisted to
 localStorage.
 
-`vite.config.js` ships a tiny middleware at `POST /api/save` that writes the
-editor buffer to `patterns/<name>.js` so the browser-side ⤓ save button has a
-disk-side counterpart. It also proxies `/strudel-cc/*` → `https://strudel.cc/*`
+`vite.config.js` ships a tiny dev-only middleware at `POST /api/save` that
+writes the editor buffer to `patterns/<name>.js` so the browser-side ⤓ save
+button has a disk-side counterpart. It refuses cross-origin posts (403 on a
+mismatched `Origin` or `Sec-Fetch-Site`), requires
+`content-type: application/json` (415), and answers 409 instead of
+replacing an existing file unless the body says `overwrite: true`. It also
+proxies `/strudel-cc/*` → `https://strudel.cc/*`
 to work around missing CORS headers on Strudel's sample manifests.
 
 `src/midi-bridge.js` listens on Web MIDI directly, routes noteons through
 `superdough()` (the same one-shot audio entry point Strudel's pattern engine
 uses), and supports a "capture phrase → save as pattern file" workflow.
+MIDI files are read by `src/midi-smf.js` (not a library) and translated by
+`src/midi-to-strudel.js`.
 
 `src/strudel-ext/` is the home for runtime helpers strasbeat layers on
 top of Strudel's pattern language. See the dedicated section below.
@@ -86,10 +111,12 @@ strasbeat/
 │   ├── main.js             # orchestration: editor construction, panel wiring, toolbar
 │   ├── boot.js             # prebake state machine (evalScope, soundfonts, samples)
 │   ├── eval-feedback.js    # patched evaluate/stop, error tracking, sound validation
+│   ├── eval-state.js       # pure evaluate/stop sequencer + engine-log classification
+│   ├── storage-guard.js    # in-memory localStorage stand-in when storage is blocked (imported first)
 │   ├── capture.js          # MIDI capture preview modal + capture handler
 │   ├── panels.js           # right-rail panel creation & registration
-│   ├── export.js           # WAV render + encode + download
-│   ├── share.js            # URL share codec
+│   ├── export.js           # WAV render (renderPatternToBuffer) + encode + download
+│   ├── share.js            # URL share codec + share-link arrival as a user pattern
 │   ├── editor-actions.js   # sound preview, insert, try example, insert template
 │   ├── editor-setup.js     # CM settings merge + extension dispatch
 │   ├── piano-roll-resize.js # roll toggle + divider drag
@@ -100,10 +127,13 @@ strasbeat/
 │   ├── strudel-logger.js   # strudel.log filtering
 │   ├── user-setup.js       # user setup script runner
 │   ├── midi-bridge.js      # Web MIDI → superdough trigger-and-decay
+│   ├── midi-smf.js         # Standard MIDI File reader (linear, tick-based)
 │   ├── midi-to-strudel.js  # MIDI file → Strudel pattern translation pipeline
 │   ├── midi-gm.js          # GM program → Strudel sound mapping
 │   ├── editor/
 │   │   ├── format.js       # Prettier + quote-restoration post-processor
+│   │   ├── text-diff.js    # minimal diff → CM changes (whole-buffer rewrites keep marks/widgets)
+│   │   ├── latest-wins.js  # one-in-flight, trailing-run throttle (scrubber evaluates)
 │   │   ├── keymap.js       # VSCode-style keybindings
 │   │   ├── numeric-scrubber.js  # Figma-style drag-to-scrub
 │   │   ├── hover-docs.js   # CM6 hoverTooltip for Strudel functions
@@ -126,7 +156,8 @@ strasbeat/
 │   │   ├── export-panel.js     # WAV export UI
 │   │   ├── settings-panel.js   # editor settings + about
 │   │   ├── learn-panel.js      # interactive Strudel lessons
-│   │   ├── setup-panel.js      # user packages + samples configuration
+│   │   ├── setup-panel.js      # UNUSED — setup lives in settings-panel.js; nothing imports this
+│   │   ├── storage-notice.js   # persistent "Not saving" notice
 │   │   ├── track-bar.js        # track mute/solo bar
 │   │   ├── scope.js            # oscilloscope visualizer
 │   │   ├── bottom-panel-modes.js # roll/scope/custom mode switcher
@@ -137,6 +168,7 @@ strasbeat/
 │   ├── strudel-ext/        # runtime helpers wired into Strudel's evalScope()
 │   │   ├── index.js            # barrel — anything exported here becomes a global in patterns
 │   │   ├── progression.js      # progression() helper (chords + voicing + rhythm + style)
+│   │   ├── visuals-host.js     # shared lifecycle for the Hydra and shader layers
 │   │   ├── styles.js           # style presets (jazz-comp, pop-pad, lo-fi, folk-strum, piano-bare)
 │   │   └── roman.js            # Roman-numeral → absolute chord parser (used by progression())
 │   └── styles/             # design-system CSS (base, editor, shell, tokens, etc.)
@@ -151,7 +183,8 @@ strasbeat/
 │   ├── PATTERN-STYLE.md    # modern Strudel pattern idioms
 │   └── work/               # task specs (01-shell through 16-midi-import)
 ├── vite.config.js          # /api/save middleware + strudel.cc proxy
-├── vercel.json             # production deployment config
+├── vercel.json             # production deployment config (ci/** branches don't deploy)
+├── .github/workflows/ci.yml # pnpm test + pnpm build on PRs, main and ci/** branches
 ├── README.md               # user-facing front door
 ├── STRUDEL.md              # mini-notation cheatsheet (incl. progression() reference)
 ├── strudel-source/         # full upstream repo, READ-ONLY reference, gitignored
@@ -168,7 +201,7 @@ part of strasbeat work — patches belong upstream.
 
 This directory holds the runtime helpers strasbeat layers on top of
 Strudel's pattern language. The mechanism is dead simple:
-`src/main.js:188` passes `strudelExt` (a namespace import of
+`src/boot.js` passes `strudelExt` (a namespace import of
 `src/strudel-ext/index.js`) as one of the arguments to `evalScope()`,
 the same call that wires `@strudel/core`, `@strudel/mini`,
 `@strudel/tonal`, etc. So everything re-exported from
@@ -275,7 +308,7 @@ synthesis/sample features.
 
 ### WAV export: DO NOT use upstream `renderPatternAudio`
 
-strasbeat ships its own `renderPatternToBuffer` in `src/main.js` instead of
+strasbeat ships its own `renderPatternToBuffer` in `src/export.js` instead of
 calling `@strudel/webaudio`'s `renderPatternAudio`. The upstream function
 has a bug: it eagerly constructs a fresh `SuperdoughAudioController` against
 the offline context *before* `await initAudio()` runs, and somewhere in that
@@ -291,6 +324,73 @@ is fully settled). That avoids the leak entirely.
 If `renderPatternToBuffer` ever produces silent output again, the cause is
 almost always that the controller was constructed too eagerly somewhere new.
 Check for that first before chasing other hypotheses.
+
+Two more rules around the live ↔ offline context swap:
+
+- **Flush the node pools after every swap.** superdough pools audio nodes
+  per node type, not per `AudioContext`, so after a swap a pooled node from
+  the other context makes the first filtered notes drop — in the render,
+  and in live playback afterwards. `flushStaleNodePools()` in
+  `src/export.js` uses the stale nodes up with silent probe events; call it
+  after any new context swap, before scheduling anything audible. Known
+  gap: wavetable pools are probed only with the sounds the rendered
+  pattern uses.
+- **Never call a bare `initAudio()` for the live context.** Without
+  `maxPolyphony` superdough parses `undefined` into NaN and voice stealing
+  silently switches off. Every live call passes
+  `{ maxPolyphony: LIVE_MAX_POLYPHONY }` (128, from `src/export.js`); the
+  offline render passes `EXPORT_MAX_POLYPHONY`.
+
+An export whose code fails to evaluate stops with the error (it checks the
+outcome of `editor.evaluate(false)`), rather than rendering whatever the
+repl evaluated last. While an export runs, `isExportRunning()` blocks
+play, live MIDI notes, the metronome and sound previews.
+
+### Visuals lifecycle (Hydra and shader)
+
+A visual layer exists if and only if the most recently evaluated code
+asked for it (`initHydra()` / `shader()`) **and** the scheduler is
+running. `src/strudel-ext/visuals-host.js` enforces that from one place:
+`syncVisualsToRepl` is wired as the repl's `onUpdateState` in
+`src/main.js`, so it sees every stop path (play button, Ctrl+., palette,
+vim, export) and every evaluate, including the silent `evaluate(false)`
+at boot and during export.
+
+- Don't call `clearHydra()` / `clearShader()` from stop handlers or add a
+  new teardown hook; the host does it.
+- The patched evaluate takes a start hold (`holdVisualsForStart`) because
+  the repl no longer autostarts: without it the layer would be torn down
+  in the gap between evaluate and scheduler start.
+- A hidden canvas never renders, and `prefers-reduced-motion` renders one
+  still frame (`localStorage['strasbeat:visuals-motion'] = 'full'` opts
+  out).
+- A new visual layer registers with the host instead of owning its own
+  canvas placement or render gate.
+
+### Persistence and autosave
+
+- **Autosave writes only real edits, and merges.** A flush does nothing
+  unless the buffer was edited, and it merges into the stored record
+  instead of rebuilding it — a record carries more than `code` (its
+  folder, for one). Never write a pattern record from scratch on a save
+  path.
+- **Closing a tab, `pagehide` and `visibilitychange → hidden` flush**, as
+  well as `beforeunload`. Delete paths opt out.
+- **Share links** (`#code=…`) arrive as an indexed user pattern named
+  `shared-<name>` (`-2`, `-3`, … when taken) and the hash is cleared once
+  it is stored, so a reload restores the recipient's edits rather than the
+  original snapshot.
+- **Unusable localStorage** (blocked, `null`, zero quota): the
+  `storage-guard.js` stand-in keeps the app working for the session and
+  `src/ui/storage-notice.js` shows a persistent "Not saving" notice. A
+  working-but-full store is not replaced; failed writes stay pending, are
+  retried, and raise the same notice.
+- **Cross-window rule:** a window follows another window's save of a
+  pattern only while its own buffer still equals the previously stored
+  code. If it has edits of its own it keeps them; within the 1 s autosave
+  debounce the last writer wins.
+- **"Try"** in Learn and Reference opens the example in a scratch user
+  pattern named `try-example`; it never replaces the open pattern.
 
 ### `progression()` and the single-quote rule
 
@@ -344,15 +444,34 @@ Both use the browser's `MIDIAccess`. The bridge reads inputs (no sysex);
 `@strudel/midi` (via the `webmidi` library) writes outputs (sysex: true).
 No conflict — `requestMIDIAccess()` returns the same shared object.
 
-**MIDI output** (`@strudel/midi`) is an opt-in package toggled in the
-Setup panel. When enabled, `user-setup.js` calls `enableWebMidi()`
-proactively at boot so the MIDI bar's output device selector is populated.
-The selected output device name is persisted to
-`localStorage("strasbeat:midi-output-device")`.
+**Permission is never requested on page load.** At boot both paths check
+the Permissions API and connect only if access was already granted
+(`midi.startIfPermitted()`; the output side does the same in
+`user-setup.js`). Otherwise the transport pill reads "Connect MIDI" and
+the request happens on that click (`midi.start()`), on the MIDI bar's
+Enable / Retry button, or when a pattern that calls `.midi()` is
+evaluated. Don't add a `requestMIDIAccess()` call outside a user gesture.
+
+**Mod wheel:** at rest (0) live notes are unfiltered; pushing the wheel up
+closes the low-pass.
+
+**Voice budget:** superdough returns no voice handle, so the bridge cannot
+steal voices. Held notes taper instead — from 24 sounding voices the
+sustain pedal stops extending them, past 48 the hold shrinks in
+proportion.
+
+**MIDI output** (`@strudel/midi`) is an opt-in package toggled in
+Settings. The output device picked in the MIDI bar is persisted to
+`localStorage("strasbeat:midi-output-device")` and applied by a wrapper
+around `Pattern.prototype.midi` (`installMidiOutputDefault` in
+`user-setup.js`): a bare `.midi()` goes to the selected device, a call
+that names a port still wins, and a selected device that has gone missing
+warns once and falls back to upstream's default. The device is resolved at
+evaluate time.
 
 **OSC output** (`@strudel/osc`) is also opt-in. It sends events over
 WebSocket to `ws://localhost:8080` (hardcoded in the upstream package —
-not configurable). The Setup panel shows the fixed URL and a connection
+not configurable). Settings shows the fixed URL and a connection
 test button. Users must run an OSC bridge server on that port.
 
 ### `setcps(...)` propagation
@@ -383,6 +502,16 @@ plug in keyboard → pick a preset → ● capture → play a phrase →
 strasbeat is a git repo on `main`, with a remote at `origin`. The
 `strudel-source/` clone is gitignored (it's its own separate repo) and
 should never be touched by strasbeat commits.
+
+## CI
+
+`.github/workflows/ci.yml` runs `pnpm test` and `pnpm build` on pull
+requests, on pushes to `main`, and on pushes to `ci/**` branches. Those
+branches exist to check work in progress on a clean runner without opening
+a PR (`git push origin <branch>:ci/<name>`); `vercel.json` keeps them from
+creating preview deployments. Tests are `node:test` files listed
+explicitly in the `test` script in `package.json` — a new `*.test.js` does
+not run until it is added there.
 
 ## License note
 
