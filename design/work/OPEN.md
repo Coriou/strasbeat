@@ -35,7 +35,7 @@ then fixed in it have been removed; the status lines in §4 are the record.
 | ED-16 (rest) | Digit-leading sample names (`808bd`) are still rejected by the drum-lane parser; not picked up | Small |
 | ED-21 (rest) | Bank chip not refreshed on tab switch; not picked up | Small; refresh it from the tab install hook |
 | TR-22 (rest) | The four 15 s boot timeout timers are never cleared (`src/boot.js` `withTimeout`); harmless, they fire once into a settled race | Clear the timer when its phase settles |
-| TR-19 (rest) | Arrange-bar solo still starts playback when stopped; the keymap, track bar and palette paths are fixed | Gate `handleSoloClick`'s evaluate on the scheduler running, once §7 item 5 is confirmed |
+| TR-19 (rest) | Arrange-bar solo still evaluates unconditionally: it starts playback when stopped and, clicked in a tab that is not playing, replaces the playing pattern. The keymap, track bar and palette paths are fixed, including across tabs | Gate `handleSoloClick`'s evaluate on `isTabPlaying` (as the other bars are), once §7 item 5 is confirmed for the stopped case; the solo itself is registry state, not a code edit, so decide what a solo set in a non-playing tab should do (see §7 item 11) |
 | TR-21 (rest) | Single-token raw rhythms such as `'0*4'` are rejected; `comp` doubles a note on three-note voicings | Small; do with the next `progression()` change |
 | MX-10 | Closing the live context while decodes are in flight could cache a rejected promise; not reproduced | Leave until it is seen; the fix is to await or re-issue pending decodes before the swap |
 | MX-16 (rest) | True steal-oldest for live MIDI is impossible from the bridge: superdough returns no voice handle | Tapering is in place; decide in §7 |
@@ -122,11 +122,15 @@ later work changed them); 14–21 are new.
    solo there while another tab plays still re-evaluates the focused
    buffer. Recommended: confirm "only Play starts audio", gate the arrange
    solo the same way, and give the track bar the beat grid's predicate.
-   - Decision: fix the track bar. Done: it and the beat grid now share one
-     predicate (`isTabPlaying`, `src/tabs.js`), so a mute or solo in a tab
-     that is not playing only edits that tab's code. Still open: the arrange
-     bar's solo starting playback when stopped, and the mute/solo keys and
-     palette commands, which check only that the scheduler runs.
+   - Decision: fix every mute/solo path. Done: the track bar, the beat
+     grid, the mute/solo keys (Mod-M, Mod-Shift-S) and the palette's mute
+     and solo commands all ask one predicate (`isTabPlaying`,
+     `src/tabs.js`), so a mute or solo in a tab that is not playing only
+     edits that tab's code, and in the playing tab it applies live. Still
+     open: the arrange bar's section solo, which evaluates the focused
+     buffer unconditionally — it starts playback when stopped and, from a
+     tab that is not playing, replaces the pattern that is (§6, TR-19
+     rest).
 6. **"Insert sound" (ED-14).** Today it replaces the whole mini-notation
    string under the cursor, as its docstring says. The audit recommends
    replacing only the token under the cursor (`tokenAtOffset` exists).

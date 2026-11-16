@@ -73,8 +73,8 @@ export function toggleLabelAtCursor(view, onEvaluate, toggleLabel, userEvent) {
  * @param {() => void} options.onEvaluate
  *   Called after a mute/solo toggle edited the buffer, so the change is
  *   heard. The host decides whether that means re-evaluating — see
- *   `evaluateIfPlaying` in editor-setup.js (a toggle while stopped must not
- *   start playback).
+ *   `evaluateIfPlaying` in editor-setup.js (a toggle while stopped, or in
+ *   a tab that is not the playing one, is only an edit).
  */
 export function createVscodeKeymap({ onEvaluate }) {
   return keymap.of([

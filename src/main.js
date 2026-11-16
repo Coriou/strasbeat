@@ -331,6 +331,11 @@ let evalFeedback = null;
 let beatGrid = null;
 let tabStrip = null;
 let tabs = null;
+// The one rule for "re-evaluate so the edit is heard" — track bar, beat grid,
+// the mute/solo keys and the palette's mute/solo commands: only while the
+// focused tab is the one playing. `editor` and `tabs` are read at call time.
+const isActiveTabPlaying = () =>
+  isTabPlaying({ scheduler: editor.repl?.scheduler, tabs });
 
 const editor = new StrudelMirror({
   defaultOutput: webaudioOutput,
@@ -623,6 +628,8 @@ dispatchEditorExtensions(editor, {
   // recorded and nothing orphaned" is a play that has started but not been
   // credited to its tab yet (ownership is claimed once the evaluate
   // resolves) — that is the focused tab too.
+  // Mute/solo keys: live only in the playing tab (see isActiveTabPlaying).
+  isTabPlaying: isActiveTabPlaying,
   isFocusedTabPlaying: () => {
     if (!tabs) return true;
     if (tabs.getOrphanedPlaying() != null) return false;
@@ -1807,6 +1814,7 @@ const palette = mountCommandPalette({
       if (a) tabs.close(a);
     },
     onToggleVisualsFullWindow: toggleVisualsFullWindow,
+    isTabPlaying: isActiveTabPlaying,
   }),
 });
 
@@ -1829,10 +1837,6 @@ document.addEventListener(
 mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
 // A tab swap replaces the document the roll's last frame described.
 docSync.subscribe(({ immediate }) => immediate && bottomCanvas.handleDocSwap());
-// The rule the track bar and the beat grid share for "re-evaluate so the
-// edit is heard": only while the focused tab is the one playing.
-const isActiveTabPlaying = () =>
-  isTabPlaying({ scheduler: editor.repl?.scheduler, tabs });
 mountTrackBar({
   container: document.getElementById("track-bar"),
   view: editor.editor,

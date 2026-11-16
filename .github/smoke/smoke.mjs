@@ -346,6 +346,26 @@ await step("track bar mute and solo across tabs", async () => {
   check("track bar: a mute in another tab edits that tab only",
     started && other.started && other.buffer !== codeB && other.playing === codeA, JSON.stringify(other));
 
+  // The palette's mute command (the same code path as the Mod-M key) follows
+  // the same rule. The cursor goes on the second track's line first.
+  const paletteCommand = async (lineText, query) => {
+    await page.evaluate((needle) => {
+      const view = window.editor.editor;
+      view.dispatch({ selection: { anchor: view.state.doc.toString().indexOf(needle) + 1 } });
+      view.focus();
+    }, lineText);
+    await page.keyboard.press("Control+Shift+P");
+    await page.waitForSelector(".palette-overlay .palette__input", { timeout: 3000 });
+    await page.keyboard.type(query);
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(800);
+  };
+  await paletteCommand("snare:", "Mute Track at Cursor");
+  const viaPalette = await state();
+  check("palette: a mute in another tab edits that tab only",
+    viaPalette.started && viaPalette.buffer !== other.buffer && viaPalette.playing === codeA, JSON.stringify(viaPalette));
+
   await openTab(a);
   await page.click("#track-bar .track-bar__entry");
   let live = await state();
@@ -355,6 +375,16 @@ await step("track bar mute and solo across tabs", async () => {
   }
   check("track bar: a mute in the playing tab is applied live",
     live.started && live.buffer !== codeA && live.playing === live.buffer, JSON.stringify(live));
+
+  const beforePalette = live.buffer;
+  await paletteCommand("hats:", "Mute Track at Cursor");
+  live = await state();
+  for (let i = 0; i < 40 && live.playing === beforePalette; i++) {
+    await page.waitForTimeout(100);
+    live = await state();
+  }
+  check("palette: a mute in the playing tab is applied live",
+    live.started && live.buffer !== beforePalette && live.playing === live.buffer, JSON.stringify(live));
 
   await stop(page);
   await setCode(originalA);

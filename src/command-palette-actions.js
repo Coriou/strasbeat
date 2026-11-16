@@ -28,17 +28,19 @@ export function buildPaletteCommands({
   onPrevTab,
   onCloseActiveTab,
   onToggleVisualsFullWindow,
+  isTabPlaying,
 }) {
   // Same rule as the keymap (editor-setup.js) and the track bar: a mute /
-  // solo toggle re-evaluates so it is heard, but with the transport stopped
-  // it is only an edit and must not start playback.
+  // solo toggle re-evaluates so it is heard, but only while the focused tab
+  // is the one playing. Stopped, it is only an edit and must not start
+  // playback; in another tab it must not replace the pattern that plays.
   const evaluateIfPlaying = () => {
-    if (editor.repl?.scheduler?.started) editor.evaluate();
+    if (isTabPlaying()) editor.evaluate();
   };
   return buildCommands({
     onEvaluate: () => editor.evaluate(),
     onStop: () => editor.stop(),
-    onSave: import.meta.env.DEV ? () => saveBtn?.click() : null,
+    onSave: import.meta.env?.DEV ? () => saveBtn?.click() : null,
     onExportWav: () => exportBtn?.click(),
     onShare: () => shareBtn?.click(),
     onFormatCode: () => formatCommand(editor.editor),

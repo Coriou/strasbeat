@@ -128,13 +128,24 @@ export function editorClaimsCtrlB(target) {
 }
 
 // Mute/solo edit the buffer and re-evaluate so the change is heard — but
-// only while something is playing. With the transport stopped the toggle is
-// just an edit; it must not start playback.
-function evaluateIfPlaying(editor, onEvaluate) {
+// only while this buffer is the one playing (the track bar and the beat grid
+// follow the same rule). With the transport stopped the toggle is just an
+// edit and must not start playback; in a tab that is not the playing one it
+// must not replace the pattern that is.
+//
+// `isPlaying` is the host's "the focused tab is playing" predicate
+// (`isTabPlaying` in tabs.js), handed over once through
+// dispatchEditorExtensions and read at each keypress: the overlay is rebuilt
+// from several places on a profile change, and all of them must gate alike.
+// Until the host has provided it, nothing is known to be playing.
+let isBufferPlaying = () => false;
+export function evaluateIfPlaying(isPlaying, onEvaluate) {
   return () => {
-    if (editor.repl?.scheduler?.started) onEvaluate();
+    if (isPlaying()) onEvaluate();
   };
 }
+const evaluateIfBufferPlaying = (onEvaluate) =>
+  evaluateIfPlaying(() => isBufferPlaying(), onEvaluate);
 
 // Re-evaluate for a live edit (the numeric scrubber) without the ceremony of
 // a user-initiated evaluate: no flash, no console divider, no transport
@@ -192,8 +203,10 @@ export function dispatchEditorExtensions(
     onFocusBrowser,
     onStatus,
     isFocusedTabPlaying,
+    isTabPlaying,
   },
 ) {
+  if (isTabPlaying) isBufferPlaying = isTabPlaying;
   const profile = getProfile(getStoredProfileId());
   const onEvaluate = () => editor.evaluate();
 
@@ -220,7 +233,7 @@ export function dispatchEditorExtensions(
         profile.applyStrasbeatOverlay
           ? Prec.highest(
               createVscodeKeymap({
-                onEvaluate: evaluateIfPlaying(editor, onEvaluate),
+                onEvaluate: evaluateIfBufferPlaying(onEvaluate),
               }),
             )
           : [],
@@ -241,7 +254,7 @@ export function reconfigureOverlay(editor, applyOverlay, onEvaluate) {
       applyOverlay
         ? Prec.highest(
             createVscodeKeymap({
-              onEvaluate: evaluateIfPlaying(editor, onEvaluate),
+              onEvaluate: evaluateIfBufferPlaying(onEvaluate),
             }),
           )
         : [],
