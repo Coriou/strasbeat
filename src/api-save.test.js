@@ -36,4 +36,19 @@ describe("/api/save request screening", () => {
       assert.equal(rejectSaveRequest({ ...rest, "content-type": type }).status, 415);
     }
   });
+
+  test("refuses a rebound hostname, which is same-origin with itself", () => {
+    // evil.example re-pointed at 127.0.0.1: Origin and Host agree.
+    const rebound = { ...own, host: "evil.example:5173", origin: "http://evil.example:5173" };
+    assert.equal(rejectSaveRequest(rebound).status, 403);
+    assert.equal(rejectSaveRequest({ host: "evil.example:5173", "content-type": "application/json" }).status, 403);
+    assert.equal(rejectSaveRequest({ ...own, host: undefined }).status, 403);
+    assert.equal(rejectSaveRequest({ ...own, host: "localhost.evil.example:5173", origin: "http://localhost.evil.example:5173" }).status, 403);
+  });
+
+  test("accepts the names and addresses a dev server is really reached by", () => {
+    for (const host of ["localhost:5173", "app.localhost:5173", "127.0.0.1:5173", "192.168.1.20:5173", "[::1]:5173", "localhost"]) {
+      assert.equal(rejectSaveRequest({ ...own, host, origin: `http://${host}` }), null, host);
+    }
+  });
 });

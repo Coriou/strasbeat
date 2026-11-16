@@ -1,5 +1,6 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, normalizePath } from "vite";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,7 +40,17 @@ function sendJson(res, statusCode, payload) {
 // JSON forces a preflight for cross-origin callers (which fails — no CORS
 // headers are ever sent), and the Origin / Sec-Fetch-Site checks reject
 // anything not issued by the app's own page.
+//
+// Those checks compare the request with its own Host header, so on their own
+// they pass a DNS-rebinding page: `evil.example:5173` re-pointed at 127.0.0.1
+// is same-origin with itself. (Vite's allowedHosts check does not cover this
+// middleware — hooks registered in configureServer run ahead of it.) The Host
+// therefore has to be a name rebinding cannot produce: localhost, or an IP
+// address literal (the dev server reached over the LAN).
 export function rejectSaveRequest(headers) {
+  if (!isLocalHost(headers.host)) {
+    return { status: 403, error: "save refused: unexpected Host header" };
+  }
   const origin = headers.origin;
   if (origin) {
     let originHost = null;
@@ -62,6 +73,18 @@ export function rejectSaveRequest(headers) {
   return null;
 }
 
+function isLocalHost(hostHeader) {
+  let hostname;
+  try {
+    hostname = new URL(`http://${hostHeader}`).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  // URL keeps the brackets on an IPv6 literal.
+  return net.isIP(hostname.replace(/^\[|\]$/g, "")) !== 0;
+}
+
 // Vite middleware: write the editor's current code to patterns/<name>.js
 // so the dev workflow is: iterate in the browser → save → commit.
 function patternSavePlugin() {
@@ -78,14 +101,20 @@ function patternSavePlugin() {
           });
         }
         // Cap request body at 1MB to prevent accidental memory exhaustion.
+        // Bytes are collected and decoded once: decoding chunk by chunk
+        // would turn a multi-byte character split across two chunks into
+        // U+FFFD in the saved file.
         const MAX_BODY = 1024 * 1024;
-        let body = "";
+        const chunks = [];
+        let size = 0;
         for await (const chunk of req) {
-          body += chunk;
-          if (body.length > MAX_BODY) {
+          size += chunk.length;
+          if (size > MAX_BODY) {
             return sendJson(res, 413, { ok: false, error: "payload too large" });
           }
+          chunks.push(chunk);
         }
+        const body = Buffer.concat(chunks).toString("utf8");
         let payload;
         try {
           payload = JSON.parse(body);
