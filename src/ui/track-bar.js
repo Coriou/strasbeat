@@ -185,10 +185,11 @@ export function mountTrackBar({
             userEvent,
           });
           view.focus?.();
-          // Re-evaluate so the change is audible — but only while the
-          // transport is running. Muting a track before pressing play edits
-          // the code and must not start playback by itself (same rule as
-          // the beat grid); the next play picks the change up.
+          // Re-evaluate so the change is audible — but only while this
+          // buffer is the one playing (same rule as the beat grid). Muting
+          // a track while stopped edits the code and must not start
+          // playback; muting one in a tab that is not playing must not
+          // replace the pattern that is. The next play picks the change up.
           if (isPlaying()) onEvaluate?.();
         } catch (err) {
           console.warn("[strasbeat/track-bar] toggle failed:", err);

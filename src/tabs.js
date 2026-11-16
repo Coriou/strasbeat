@@ -75,6 +75,19 @@ export function migrateOpenSet(store) {
 }
 
 /**
+ * Is the focused tab the one that is playing? The bottom bars (track bar,
+ * beat grid) ask this before re-evaluating so an edit is heard at once:
+ * evaluating a stopped buffer would start playback from a click, and
+ * evaluating another tab's buffer would replace the pattern that is playing.
+ *
+ * `tabs` may be missing (the controller is built late in boot); then the
+ * scheduler alone decides, as it does for a play not yet credited to a tab.
+ */
+export function isTabPlaying({ scheduler, tabs }) {
+  return !!scheduler?.started && tabs?.getPlayingItem() === tabs?.getActiveItem();
+}
+
+/**
  * Create the open-set controller. DOM-free; the host injects how to build /
  * install / capture editor state and how to flush + relabel.
  *

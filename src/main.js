@@ -81,7 +81,7 @@ import {
   editorClaimsCtrlB,
   strasbeatOverlayCompartment,
 } from "./editor-setup.js";
-import { createTabController } from "./tabs.js";
+import { createTabController, isTabPlaying } from "./tabs.js";
 import { freshTabState, liveCompartmentValues, syncTabState } from "./editor/build-editor-state.js";
 import { createDocSync } from "./editor/doc-sync.js";
 import { readSelectedCompletion } from "./editor/keymap-universal.js";
@@ -1829,12 +1829,18 @@ document.addEventListener(
 mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
 // A tab swap replaces the document the roll's last frame described.
 docSync.subscribe(({ immediate }) => immediate && bottomCanvas.handleDocSwap());
+// The rule the track bar and the beat grid share for "re-evaluate so the
+// edit is heard": only while the focused tab is the one playing.
+const isActiveTabPlaying = () =>
+  isTabPlaying({ scheduler: editor.repl?.scheduler, tabs });
 mountTrackBar({
   container: document.getElementById("track-bar"),
   view: editor.editor,
   docSync,
   onEvaluate: () => editor.evaluate(),
-  isPlaying: () => !!editor.repl?.scheduler?.started,
+  // A mute or solo is heard at once only in the tab that is playing; in any
+  // other tab it is an edit, and the playing pattern is left alone.
+  isPlaying: isActiveTabPlaying,
 });
 mountArrangeBar({
   container: document.getElementById("arrange-bar"),
@@ -1869,7 +1875,7 @@ beatGrid = mountBeatGrid({
   // Auto-replay after any grid edit so changes are immediately audible
   // during playback — same mechanism track-bar's mute/solo uses.
   onEvaluate: () => editor.evaluate(),
-  isPlaying: () => !!editor.repl?.scheduler?.started && tabs?.getPlayingItem() === tabs?.getActiveItem(),
+  isPlaying: isActiveTabPlaying,
 });
 async function previewDrumCell(name, { bank, variant } = {}) {
   // (the context is the offline one while an export renders)

@@ -309,6 +309,59 @@ await step("stop then play does not double the layers", async () => {
   await page.evaluate((c) => window.editor.setCode(c), original);
 });
 
+await step("track bar mute and solo across tabs", async () => {
+  // A mute in a tab that is not playing edits that tab's code and leaves the
+  // playing pattern alone; in the playing tab it is applied live.
+  const names = await page.$$eval('[role="treeitem"][data-name]', (els) =>
+    els.filter((e) => e.offsetParent).map((e) => e.dataset.name));
+  const [a, b] = names;
+  check("track bar: two patterns to open", !!a && !!b, names.slice(0, 4).join(", "));
+  if (!a || !b) return;
+  const openTab = async (name) => {
+    await page.click(`[role="treeitem"][data-name="${name}"]`);
+    await page.waitForTimeout(300);
+  };
+  const setCode = async (code) => {
+    await page.evaluate((c) => window.editor.setCode(c), code);
+    await page.waitForTimeout(300);
+  };
+  const state = () => page.evaluate(() => ({
+    started: !!window.editor.repl.scheduler.started,
+    playing: window.editor.repl.state.activeCode,
+    buffer: window.editor.code,
+  }));
+  const codeA = 'drums: s("bd*2")\nhats: s("hh*4")';
+  const codeB = 'kick: s("bd")\nsnare: s("sd")';
+
+  await openTab(a);
+  const originalA = await page.evaluate(() => window.editor.code);
+  await setCode(codeA);
+  const started = await play(page);
+  await openTab(b);
+  const originalB = await page.evaluate(() => window.editor.code);
+  await setCode(codeB);
+  await page.click("#track-bar .track-bar__entry");
+  await page.waitForTimeout(800);
+  const other = await state();
+  check("track bar: a mute in another tab edits that tab only",
+    started && other.started && other.buffer !== codeB && other.playing === codeA, JSON.stringify(other));
+
+  await openTab(a);
+  await page.click("#track-bar .track-bar__entry");
+  let live = await state();
+  for (let i = 0; i < 40 && live.playing === codeA; i++) {
+    await page.waitForTimeout(100);
+    live = await state();
+  }
+  check("track bar: a mute in the playing tab is applied live",
+    live.started && live.buffer !== codeA && live.playing === live.buffer, JSON.stringify(live));
+
+  await stop(page);
+  await setCode(originalA);
+  await openTab(b);
+  await setCode(originalB);
+});
+
 const visual = async (name, patternKey, canvasSel) => {
   await step(name, async () => {
     const code = await page.evaluate((k) => window.patterns[k], patternKey);

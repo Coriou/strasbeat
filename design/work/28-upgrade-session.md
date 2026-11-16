@@ -688,7 +688,7 @@ RD-7, RD-19 and RD-21 were then confirmed by the headless measurements
 - **RD-13 · P2 · `src/ui/beat-grid.js:724-730`, `:792-808`, `:929-932`** — The grid's root keydown handler exempts only inputs: Enter/Space on any other button inside the grid (M, S, bank chip, "+ Add drum", …) is cancelled and toggles the last focused cell instead — an unintended source edit, and an auto-replay while playing. Fix: return early unless the event target is a cell (same for `v`).
   - Status: fixed (1f34df6)
 - **RD-14 · P2 · `src/ui/beat-grid.js:1187-1200`; `src/main.js:1426-1434`, `:1561`; `src/ui/track-bar.js:152`; `src/ui/arrange-bar.js:333-349`** — Auto-replay hazards: a grid edit or mute in a non-playing tab evaluates the focused buffer and steals playback from the playing tab; and the 120 ms replay timer is not cancelled on stop, so toggling a cell then pressing Stop restarts playback. Fix: an `isFocusedTabPlaying()` predicate for the three bars; re-check `started` inside the timer and clear it on idle. The first half is partly a product decision.
-  - Status: fixed (1f34df6) — the beat grid's replay is tab-aware and cancelled on stop; the track bar's `isPlaying` does not use the same tab-aware predicate yet (§7 item 5)
+  - Status: fixed (1f34df6) — the beat grid's replay is tab-aware and cancelled on stop; the track bar was given the same tab-aware predicate afterwards (§7 item 5)
 - **RD-15 · P2 · `src/main.js:162-163`, `:181`, `:352-353`; `src/ui/piano-roll.js:239-245`** — A device-pixel-ratio change alone is not detected (the ResizeObserver uses the content box), and the renderers divide the old backing store by the new DPR: drag the window from a 2× to a 1× display and the roll draws at half size in one quarter with a broken hit map (from the spec; not browser-verified). Fix: observe `device-pixel-content-box` with a `matchMedia` fallback; store the DPR used at resize time.
   - Status: fixed (0ae6dd7) — not checked on a real display change (§8)
 - **RD-16 · P2 · `src/strudel-ext/uniforms.js:55-61`, `:114-129`; `src/strudel-ext/shader.js:184`, `:190`, `:352`** — Per-frame cost in the shader path: `hapId` stringifies a Fraction twice per hap for every hap in the ±2-cycle window, plus fresh `Set`/`Object.keys`/spread allocations; `getAttribLocation` and `Object.entries` run every frame; every evaluate recompiles and relinks even when the source is unchanged (cost not measured). Fix: after RD-5 only active haps matter; cache the attribute location; skip `setFragment` when the source is unchanged.
@@ -1288,7 +1288,11 @@ later work changed them); 14–21 are new.
    solo there while another tab plays still re-evaluates the focused
    buffer. Recommended: confirm "only Play starts audio", gate the arrange
    solo the same way, and give the track bar the beat grid's predicate.
-   - Decision: —
+   - Decision: fix the track bar. Done: it and the beat grid now share one
+     predicate (`isTabPlaying`, `src/tabs.js`), so a mute or solo in a tab
+     that is not playing only edits that tab's code. Still open: the arrange
+     bar's solo starting playback when stopped, and the mute/solo keys and
+     palette commands, which check only that the scheduler runs.
 6. **"Insert sound" (ED-14).** Today it replaces the whole mini-notation
    string under the cursor, as its docstring says. The audit recommends
    replacing only the token under the cursor (`tokenAtOffset` exists).
