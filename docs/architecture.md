@@ -9,6 +9,7 @@ Sections: [Overview](#overview) · [Pattern file contract](#pattern-file-contrac
 [Boot and sound names](#boot-and-sound-names) ·
 [Bundle and lazy loading](#bundle-and-lazy-loading) ·
 [Service worker, updates and offline](#service-worker-updates-and-offline) ·
+[Flags](#flags) ·
 [Strudel extensions and the docs index](#strudel-extensions-and-the-docs-index) ·
 [Bottom canvas and docSync](#bottom-canvas-and-docsync) ·
 [Responsive layout and keyboard models](#responsive-layout-and-keyboard-models) ·
@@ -242,11 +243,21 @@ Rules:
 `src/app-update.js` is the web adapter a desktop shell would replace.
 Production registers `/sw.js` at scope `/`, with `updateViaCache: "none"`,
 after `bootPromise` and an idle callback (5 s timeout; a 1 s timer when
-idle callbacks are unavailable). Dev unregisters it. Registration, install
-state and update-check failures are warned in the console and status line;
-they do not reject boot or stop playback. Unsupported browsers keep using
-the network normally. `window.strasbeat.buildId` and Settings → About show
-`STRASBEAT_BUILD_ID`, or the short git SHA ("local" without git).
+idle callbacks are unavailable). Dev unregisters it. A registration or
+install failure is warned in the console and the status line; a failed
+check for updates only in the console, because launching offline is a
+supported state. None of them rejects boot or stops playback. Unsupported
+browsers keep using the network normally.
+
+**The build identifier** (`window.strasbeat.buildId`, Settings → About) is
+a hash of the names of the build's hashed files, written into `index.html`
+as `<meta name="strasbeat-build">`. It is deliberately not the commit and
+not inside a hashed script: a commit that changes no shipped byte must
+build a byte-identical site, or every documentation push would give each
+installed app a new worker, a new entry chunk to download and an "update
+ready" notice. `STRASBEAT_BUILD_ID` overrides it and is also compiled into
+the entry chunk; it exists for the lifecycle test, which needs two builds
+of one source to differ. Leave it unset for real deploys.
 
 The Vite plugin in `src/sw/plugin.js` emits a self-contained classic script
 from `src/sw/worker.js`, using Vite's public `build()` API. It injects the
@@ -258,10 +269,13 @@ csound/xen graphs (including their dynamic dependencies). Currently this
 excludes the roughly 3.5 MB csound engine and 1.1 MB xen chunk. Shared code
 and the entry remain required. Missing HTML, entry or icons, a missing
 expected opt-in exclusion, a required asset above 3 MiB, or a total above
-8 MiB fails the build. The build
+5 MiB (it is 3.5 MiB in 32 files today) fails the build. The build
 logs the actual count, raw bytes and excluded files; review that output
-when changing dependencies. This initial ceiling needs confirmation on the
-runner, not a local build.
+when changing dependencies. Source maps (`vite build --sourcemap`, as the
+performance rig builds) are never precached. Installing takes a hashed
+file from any cache that already holds it, or from the HTTP cache, so an
+update downloads what changed rather than every chunk again; the unhashed
+shell files are always fetched from the network.
 
 Caching rules (GET only, never Range requests):
 
@@ -325,6 +339,19 @@ and reloads a controlled page once to release the old controller. Future
 launches stay on the network. `/?sb-sw=on` clears the override. If storage
 is blocked, the URL flag still applies to this visit; it cannot promise
 persistence. Neither switch deletes patterns or other localStorage data.
+
+## Flags
+
+A change that could need switching off on a real machine goes behind a
+per-browser flag (`src/flags.js`): `?sb-<name>=off` turns it off and
+remembers that in `localStorage["strasbeat:flag:<name>"]` (an installed
+app has no address bar), `?sb-<name>=on` forgets it. A flag is temporary
+unless it is a safety switch: remove it, and the path it keeps alive, once
+the change has proven itself.
+
+| Flag | Default | Off means | Kind |
+|---|---|---|---|
+| `sw` | on | no service worker in this browser: unregister, delete strasbeat's caches, load from the network | safety switch, permanent |
 
 ## Strudel extensions and the docs index
 

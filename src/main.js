@@ -105,6 +105,13 @@ const { getAudioContext, webaudioOutput, initAudio, setLogger, soundMap, getSoun
 // Injected at build/dev time by vite.config.js — always match package.json.
 const APP_VERSION = __APP_VERSION__;
 const STRUDEL_VERSION = __STRUDEL_VERSION__;
+// Which build is running. The production build writes it into index.html (a
+// hash of the shipped file names, so it only changes when the app does — see
+// src/sw/plugin.js); the dev server has none.
+const BUILD_ID =
+  __BUILD_TAG__ ||
+  document.querySelector('meta[name="strasbeat-build"]')?.content ||
+  "dev";
 
 // ─── Auto-discover patterns ──────────────────────────────────────────────
 // Every .js file in /patterns must `export default` a string of Strudel code.
@@ -1652,6 +1659,7 @@ const {
   exportBtn,
   status,
   APP_VERSION,
+  BUILD_ID,
   STRUDEL_VERSION,
   isDev: import.meta.env.DEV,
   bootPromise,
@@ -2107,8 +2115,8 @@ captureBtn.addEventListener("click", () =>
 // prettier-ignore
 window.strasbeat = mountDebugHelpers({ soundMap, getSound, editor, getConsolePanel: () => consolePanel, getAudioContext, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, drumKit });
 
-window.strasbeat.buildId = __BUILD_ID__;
-initAppUpdates({ bootPromise, status });
+window.strasbeat.buildId = BUILD_ID;
+initAppUpdates({ bootPromise, setStatus: (s) => transport.setStatus(s) });
 
 // expose for console tinkering
 window.editor = editor;

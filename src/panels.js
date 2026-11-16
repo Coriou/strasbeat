@@ -134,6 +134,7 @@ export function registerPanels({
   exportBtn,
   status,
   APP_VERSION,
+  BUILD_ID,
   STRUDEL_VERSION,
   isDev,
   bootPromise,
@@ -281,6 +282,7 @@ export function registerPanels({
     subscribeDrumKit: (fn) => drumKit.onChange(fn),
     themes: THEME_OPTIONS,
     appVersion: APP_VERSION,
+    buildId: BUILD_ID,
     strudelVersion: STRUDEL_VERSION,
     onReloadRequired: () => {
       status.textContent = "Reload to apply changes";

@@ -1,5 +1,9 @@
 import { defineConfig, loadEnv, normalizePath } from "vite";
-import { serviceWorkerPlugin, buildId } from "./src/sw/plugin.js";
+import {
+  serviceWorkerPlugin,
+  buildIdPlugin,
+  buildTag,
+} from "./src/sw/plugin.js";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -14,9 +18,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 if (process.env.VERCEL_PROJECT_PRODUCTION_URL && !process.env.VITE_SITE_URL) {
   process.env.VITE_SITE_URL = `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
 }
-// Read non-VITE flags too, so an emergency off switch can be committed in
-// .env.production as well as configured in the deployment environment.
-const swEnv = loadEnv(process.env.NODE_ENV === "development" ? "development" : "production", __dirname, "STRASBEAT_");
+// The service worker's emergency off switch (docs/architecture.md, "Service
+// worker, updates and offline"): STRASBEAT_SW=off in the deployment's
+// environment, or committed in .env.production. loadEnv reads the .env files
+// for the STRASBEAT_ prefix, which Vite does not expose to the app by itself.
+const swEnv = loadEnv(
+  process.env.NODE_ENV === "development" ? "development" : "production",
+  __dirname,
+  "STRASBEAT_",
+);
 const swEnabled = (process.env.STRASBEAT_SW ?? swEnv.STRASBEAT_SW) !== "off";
 const PATTERNS_DIR = path.join(__dirname, "patterns");
 
@@ -421,6 +431,7 @@ export default defineConfig({
     patternSavePlugin(),
     umamiPlugin(),
     fontPreloadPlugin(),
+    buildIdPlugin(),
     serviceWorkerPlugin({ enabled: swEnabled }),
   ],
   resolve: {
@@ -435,7 +446,8 @@ export default defineConfig({
     ],
   },
   define: {
-    __BUILD_ID__: JSON.stringify(buildId()),
+    // "" in every real build; see buildTag in src/sw/plugin.js.
+    __BUILD_TAG__: JSON.stringify(buildTag()),
     __SW_ENABLED__: JSON.stringify(swEnabled),
     __APP_VERSION__: JSON.stringify(appPkg.version),
     __STRUDEL_VERSION__: JSON.stringify(strudelCorePkg.version),

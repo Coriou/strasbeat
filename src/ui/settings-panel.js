@@ -30,6 +30,7 @@
 //     getSoundMap,       // () => object
 //     themes,            // Array<{ key: string, label: string }>
 //     appVersion,        // string
+//     buildId,           // string — which build this is (see src/sw/plugin.js)
 //     strudelVersion,    // string
 //     onReloadRequired,  // () => void — host shows "reload to apply" status
 //     confirm,           // (msg: string) => Promise<boolean> | boolean
@@ -139,6 +140,7 @@ export function createSettingsPanel({
   getSoundMap = () => ({}),
   themes = [],
   appVersion = "",
+  buildId = "",
   strudelVersion = "",
   onReloadRequired = () => {},
   confirm: confirmFn,
@@ -897,7 +899,9 @@ export function createSettingsPanel({
     const section = buildSection("About");
 
     const versionLine = el("div", "settings-panel__about-line");
-    versionLine.textContent = `strasbeat ${appVersion || "dev"} (${__BUILD_ID__})`;
+    versionLine.textContent = buildId
+      ? `strasbeat ${appVersion || "dev"} (build ${buildId})`
+      : `strasbeat ${appVersion || "dev"}`;
     section.body.appendChild(versionLine);
 
     const strudelLine = el("div", "settings-panel__about-line");
