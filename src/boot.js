@@ -139,9 +139,10 @@ export function createBoot({ shellEl, exportBtn, status }) {
       // Several of these maps define the same names (bd, sd, hh… and sax);
       // dirt-samples keeps them, whichever manifest arrives first.
       const names = createNamePrecedence();
+      const drumMachines = samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/', { tag: DRUM_MACHINES_TAG }); // prettier-ignore
       const phases = {
         "dirt-samples": withTimeout(SAMPLE_NAME_OWNER.label, fetchJson(SAMPLE_NAME_OWNER.manifest).then((json) => samples(names.claim(json)))), // prettier-ignore
-        'tidal-drum-machines': withTimeout('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/', { tag: DRUM_MACHINES_TAG })), // prettier-ignore
+        'tidal-drum-machines': withTimeout('tidal-drum-machines', drumMachines), // prettier-ignore
       };
       await Promise.all([
         ...Object.values(phases),
@@ -163,11 +164,14 @@ export function createBoot({ shellEl, exportBtn, status }) {
         ),
         // aliasBank() walks the sounds registered so far, so the
         // drum-machine map has to be in before the short names are added.
+        // That means the map itself, not its boot phase: the phase gives up
+        // after the timeout, and a manifest that arrives later than that
+        // would otherwise get its long names but never its aliases.
         withTimeout(
           DRUM_MACHINE_ALIASES.label,
           applyJsonAfter(
             DRUM_MACHINE_ALIASES.manifest,
-            phases[DRUM_MACHINE_ALIASES.after],
+            Promise.resolve(drumMachines).catch(() => {}),
             (aliases) => aliasBank(aliases),
           ),
         ),
