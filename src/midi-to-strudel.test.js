@@ -2757,3 +2757,47 @@ describe("a slot holding a very large chord", () => {
     );
   });
 });
+
+describe("tracks of different lengths", () => {
+  test("a part that stops early keeps its rest bars, so every track loops together", () => {
+    const ppq = 480;
+    const bar = 4 * ppq;
+    const smf = buildSmf({
+      tracks: [
+        // four bars, one note at the start of each
+        simpleTrack({
+          name: "lead",
+          notes: [60, 62, 64, 65].map((midi, i) => ({ midi, ticks: i * bar, dur: ppq })),
+        }),
+        // a single note in bar one
+        simpleTrack({ name: "stab", channel: 1, notes: [{ midi: 48, ticks: 0, dur: ppq }] }),
+      ],
+    });
+    const { patternBody } = translationInputToPattern(parseMidiFile(smf, "two.mid"));
+    const barsOf = (name) => {
+      const block = patternBody.match(new RegExp(`const ${name} = note\\(([\\s\\S]*?)\\n\\)`))[1];
+      return block.split("\n").filter((line) => /^\s*"/.test(line)).length;
+    };
+    assert.equal(barsOf("lead"), 4);
+    assert.equal(barsOf("stab"), 4, "one bar would repeat the stab every bar");
+  });
+
+  test("bars after the last note of every track are still trimmed", () => {
+    const input = {
+      sourceName: "tail",
+      bpm: 120,
+      timeSignature: [4, 4],
+      tracks: [0, 1].map((i) => ({
+        name: `t${i}`,
+        channel: i,
+        isDrum: false,
+        // a half-second note: ends inside bar one at 120 BPM
+        notes: [{ midi: 60, name: "C4", time: 0, duration: 0.5, velocity: 0.8 }],
+      })),
+    };
+    const analysis = analyzeTranslationInput(input);
+    const body = generatePatternDraft({ ...analysis, totalBars: 6 });
+    assert.match(body, /\/\/ bar 1\b/);
+    assert.doesNotMatch(body, /\/\/ bar 2\b/, "the empty tail is dropped");
+  });
+});

@@ -455,13 +455,24 @@ export function generatePatternDraft(analysis, options = {}) {
   lines.push(`setcpm(${cleanNumber(bpm)}/${cleanNumber(beatsPerCycle)})`);
   lines.push("");
 
+  // Every track is written as one `cat(...)` of bars and loops on its own
+  // length, so all of them must have the same number of bars: a part that
+  // stops early keeps its rest bars up to the last bar anything plays in,
+  // or it would come round again while the others are still finishing.
+  let keepBars = 1;
+  for (const track of tracks) {
+    for (const bar of groupNotesByBar(track.notes).keys()) {
+      if (bar + 1 > keepBars) keepBars = bar + 1;
+    }
+  }
+
   // Generate const declarations for each track
   for (const track of tracks) {
     let result;
     if (track.isDrum) {
-      result = generateDrumTrack(track, totalBars, usedVarNames);
+      result = generateDrumTrack(track, totalBars, usedVarNames, keepBars);
     } else {
-      result = generateMelodicTrack(track, totalBars, usedVarNames);
+      result = generateMelodicTrack(track, totalBars, usedVarNames, keepBars);
     }
     lines.push(...result.lines);
     if (preserveVelocity && track.hasVelocityVariation && result.velocityBars) {
@@ -703,7 +714,7 @@ export function captureBufferToTranslationInput(events, options = {}) {
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function generateMelodicTrack(track, totalBars, usedVarNames) {
+function generateMelodicTrack(track, totalBars, usedVarNames, keepBars = 1) {
   const noteBars = [];
   const velocityBars = [];
   const slotsPerBar = track.slotsPerBar;
@@ -724,8 +735,11 @@ function generateMelodicTrack(track, totalBars, usedVarNames) {
     velocityBars.push(eventsToVelocityNotation(events));
   }
 
-  // Trim trailing all-rest bars
-  while (noteBars.length > 1 && isAllRest(noteBars[noteBars.length - 1])) {
+  // Trim trailing all-rest bars — the ones no track plays in
+  while (
+    noteBars.length > keepBars &&
+    isAllRest(noteBars[noteBars.length - 1])
+  ) {
     noteBars.pop();
     velocityBars.pop();
   }
@@ -772,7 +786,7 @@ function generateMelodicTrack(track, totalBars, usedVarNames) {
   };
 }
 
-function generateDrumTrack(track, totalBars, usedVarNames) {
+function generateDrumTrack(track, totalBars, usedVarNames, keepBars = 1) {
   const slotsPerBar = track.slotsPerBar;
 
   // Collect all unique drum names used
@@ -801,8 +815,11 @@ function generateDrumTrack(track, totalBars, usedVarNames) {
     velocityBars.push(eventsToVelocityNotation(events));
   }
 
-  // Trim trailing all-rest bars
-  while (noteBars.length > 1 && isAllRest(noteBars[noteBars.length - 1])) {
+  // Trim trailing all-rest bars — the ones no track plays in
+  while (
+    noteBars.length > keepBars &&
+    isAllRest(noteBars[noteBars.length - 1])
+  ) {
     noteBars.pop();
     velocityBars.pop();
   }
