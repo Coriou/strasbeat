@@ -3,6 +3,7 @@ import {
   shouldIgnoreStrudelLog,
 } from "./strudel-logger.js";
 import { track } from "./analytics.js";
+import { classifyStrudelLog } from "./eval-state.js";
 
 // ─── Export current pattern → WAV ────────────────────────────────────────
 // We don't use upstream `renderPatternAudio` because it has a bug: it
@@ -15,12 +16,30 @@ import { track } from "./analytics.js";
 // context swap is fully settled. Same teardown shape, audible output.
 export const EXPORT_SAMPLE_RATE = 48000;
 export const EXPORT_MAX_POLYPHONY = 1024;
+// The live engine's voice cap (superdough's own default). It has to be passed
+// on every live initAudio(): called without it, superdough parses `undefined`
+// into NaN and voice stealing silently switches off.
+export const LIVE_MAX_POLYPHONY = 128;
 
 // Module-level export lock — prevents concurrent exports from corrupting
 // the global audio context / controller state.
 let _exportRunning = false;
 export function isExportRunning() {
   return _exportRunning;
+}
+
+/**
+ * Take the export lock for another offline render (the `probeRender` debug
+ * helper swaps the audio context exactly like an export does). Returns
+ * false when a render is already running; pair with `releaseExportLock()`.
+ */
+export function acquireExportLock() {
+  if (_exportRunning) return false;
+  _exportRunning = true;
+  return true;
+}
+export function releaseExportLock() {
+  _exportRunning = false;
 }
 
 // ─── Pre-warm: force lazy sample/soundfont buffers to load ──────────────
@@ -54,12 +73,15 @@ export function isExportRunning() {
  *
  * @param {Array} haps    Haps from pattern.queryArc()
  * @param {object} deps   { getSound, getAudioContext }
- * @param {object} [opts] { onProgress?: (loaded, total) => void }
- * @returns {Promise<{ warmed: number, failed: string[] }>}
+ * @param {object} [opts] { onProgress?: (loaded, total) => void, skip?: Set<string> }
+ *   `skip` holds sound keys that are already warm — they are left alone, so
+ *   a caller that re-warms on every evaluate doesn't rebuild a voice per
+ *   sound each time. Feed it from the returned `warmedKeys`.
+ * @returns {Promise<{ warmed: number, failed: string[], total: number, warmedKeys: string[] }>}
  */
 export async function prewarmSounds(haps, deps, opts = {}) {
   const { getSound, getAudioContext } = deps;
-  const { onProgress } = opts;
+  const { onProgress, skip } = opts;
 
   // Collect unique sound keys (with bank prefix, matching superdough's lookup).
   const seen = new Map(); // soundKey → representative hap.value
@@ -70,6 +92,7 @@ export async function prewarmSounds(haps, deps, opts = {}) {
     let s = v.s ?? "triangle";
     if (v.bank && s) s = `${v.bank}_${s}`;
     if (["-", "~", "_"].includes(s)) continue;
+    if (skip?.has(s)) continue;
     if (!seen.has(s)) seen.set(s, v);
   }
 
@@ -77,6 +100,7 @@ export async function prewarmSounds(haps, deps, opts = {}) {
   let loaded = 0;
   let warmed = 0;
   const failed = [];
+  const warmedKeys = [];
 
   const warmOne = async ([soundKey, value]) => {
     try {
@@ -113,6 +137,7 @@ export async function prewarmSounds(haps, deps, opts = {}) {
         }
       }
       warmed++;
+      warmedKeys.push(soundKey);
     } catch (err) {
       console.warn(`[strasbeat/prewarm] failed to warm "${soundKey}":`, err);
       failed.push(soundKey);
@@ -136,7 +161,134 @@ export async function prewarmSounds(haps, deps, opts = {}) {
     await Promise.all(batch.map(warmOne));
   }
 
-  return { warmed, failed, total };
+  return { warmed, failed, total, warmedKeys };
+}
+
+// ─── Stale pooled nodes across a context swap ───────────────────────────
+// superdough recycles filter / compressor / supersaw / wavetable nodes
+// through module-level pools keyed by node type only — not by AudioContext
+// — and offers no way to empty them (superdough/nodePools.mjs; the pools are
+// private to its bundle). After we swap contexts, the pools still hand out
+// nodes that belong to the previous context; connecting one throws
+// "cannot connect to an AudioNode belonging to a different audio context"
+// and superdough drops the hap. Going live → offline that silently removes
+// the first filtered notes from the WAV; going offline → live it drops the
+// first notes of the next play.
+//
+// This is a workaround, not a fix: the one thing the public API lets us do
+// is use the stale nodes up. Every superdough() call that fails this way has
+// popped (and discarded) one of them, so for each pool we schedule a silent
+// probe event that draws from it, again and again, until one goes through —
+// at that point that pool holds nothing from the old context any more.
+//
+// The probes are fixed, not derived from the pattern being rendered: the
+// pools are shared by everything played this session, so a tab with filters
+// leaves stale filters behind even when the exported tab has none. They
+// carry `gain: 0` and no orbit-level control (delay, room, duck, djf, bus…),
+// so a probe that goes through adds a voice of exact silence on the default
+// orbit and writes no shared parameter — the rendered audio is unchanged.
+const POOL_PROBES = [
+  // "filter" — also what .hpf / .bpf / .phaser draw from.
+  { s: "sawtooth", cutoff: 1000 },
+  // "compressor"
+  { s: "sawtooth", compressor: -20 },
+  // "supersaw"
+  { s: "supersaw" },
+];
+const MAX_FLUSH_ATTEMPTS = 4096;
+
+function isCrossContextError(err) {
+  return (
+    err?.name === "InvalidAccessError" ||
+    /different audio context/i.test(err?.message ?? "")
+  );
+}
+
+// The "wavetable" pool can only be reached through a registered wavetable
+// sound, and those exist only when a pattern loaded some with tables(). Probe
+// with the ones this pattern uses (their tables are already fetched). A
+// wavetable voice left in the pool by a DIFFERENT pattern is not covered.
+function wavetableProbes(haps, getSound) {
+  const probes = new Map();
+  if (typeof getSound !== "function") return [];
+  for (const hap of haps ?? []) {
+    const value = hap?.value;
+    if (!value || typeof value !== "object" || typeof value.s !== "string") {
+      continue;
+    }
+    const name = value.bank ? `${value.bank}_${value.s}` : value.s;
+    if (probes.has(name)) continue;
+    if (getSound(name)?.data?.type !== "wavetable") continue;
+    probes.set(name, { s: name, n: value.n });
+  }
+  return [...probes.values()];
+}
+
+/**
+ * Use up pooled audio nodes left over from the previous AudioContext.
+ * Call right after a context swap (and its `initAudio`), before anything
+ * audible is scheduled. Returns how many stale nodes were discarded.
+ *
+ * `haps` is only consulted for wavetable sounds (see wavetableProbes).
+ */
+export async function flushStaleNodePools(haps, cps, deps) {
+  const { superdough, getAudioContext, getSound } = deps;
+  let discarded = 0;
+  for (const probe of [...POOL_PROBES, ...wavetableProbes(haps, getSound)]) {
+    for (let attempt = 0; attempt < MAX_FLUSH_ATTEMPTS; attempt++) {
+      try {
+        const t = getAudioContext().currentTime + 0.1;
+        // A fresh copy per attempt: superdough writes into the value.
+        await superdough({ ...probe, gain: 0 }, t, 0.02, cps, t);
+        break;
+      } catch (err) {
+        if (isCrossContextError(err)) {
+          discarded++;
+          continue;
+        }
+        // Not a stale node — this pool was not drained. Say so: the symptom
+        // (dropped first notes) is otherwise impossible to trace back here.
+        console.warn(
+          `[strasbeat/export] could not flush superdough's node pool with "${probe.s}":`,
+          err,
+        );
+        break;
+      }
+    }
+  }
+  return discarded;
+}
+
+/**
+ * Schedule every onset hap into the (offline) context through superdough.
+ * A hap that throws is skipped — one bad event must not abort the render —
+ * but it is recorded, so the export can say that events are missing instead
+ * of reporting a clean render.
+ */
+async function scheduleHaps(haps, cps, superdough) {
+  let scheduled = 0;
+  const failures = [];
+  for (const hap of haps) {
+    if (!hap.hasOnset()) continue;
+    // `.midi()` / `.osc()` layers set a dominant trigger: live, the repl
+    // skips the WebAudio output for them (core/repl.mjs getTrigger), so
+    // they are silent in the app and must be silent in the file too.
+    if (hap.context?.onTrigger && hap.context.dominantTrigger) continue;
+    const t = hap.whole.begin.valueOf() / cps;
+    const dur = hap.duration / cps;
+    try {
+      await superdough(hap.value, t, dur, cps, t);
+      scheduled++;
+    } catch (err) {
+      console.warn(
+        "[strasbeat/export] superdough failed for hap:",
+        err,
+        hap.value,
+      );
+      failures.push(err?.message ?? String(err));
+    }
+  }
+  return { scheduled, failures };
 }
 
 /**
@@ -158,6 +310,7 @@ export async function renderPatternToBuffer(
     setSuperdoughAudioController,
     initAudio,
     superdough,
+    onContextSwap,
   } = ctx;
 
   // Query haps first so we can pre-warm while the live context is still open.
@@ -170,6 +323,8 @@ export async function renderPatternToBuffer(
   await prewarmSounds(haps, { getSound, getAudioContext });
 
   const live = getAudioContext();
+  // From here on the live context is gone and the caller has to rebuild it.
+  onContextSwap?.();
   if (live.state !== "closed") {
     await live.close();
   }
@@ -184,25 +339,17 @@ export async function renderPatternToBuffer(
   setSuperdoughAudioController(null);
   await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
 
-  let scheduled = 0;
-  for (const hap of haps) {
-    if (!hap.hasOnset()) continue;
-    const t = hap.whole.begin.valueOf() / cps;
-    const dur = hap.duration / cps;
-    try {
-      await superdough(hap.value, t, dur, cps, t);
-      scheduled++;
-    } catch (err) {
-      console.warn(
-        "[strasbeat/export] superdough failed for hap:",
-        err,
-        hap.value,
-      );
-    }
-  }
+  // Still the lazy-controller order: this is the first superdough() call
+  // after the swap, so it is what builds the controller against `offline`.
+  await flushStaleNodePools(haps, cps, {
+    superdough,
+    getAudioContext,
+    getSound,
+  });
+  const { scheduled, failures } = await scheduleHaps(haps, cps, superdough);
 
   const rendered = await offline.startRendering();
-  return { rendered, scheduled };
+  return { rendered, scheduled, failures };
 }
 
 /** Encode a 2-channel AudioBuffer to a 16-bit PCM WAV ArrayBuffer. */
@@ -257,7 +404,9 @@ export function downloadWav(arrayBuf, filename) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Revoking in the same tick can cancel the download before the browser
+  // has started reading the blob (Safari, large files).
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
 // ─── Export pipeline with progress polling ──────────────────────────────
@@ -304,6 +453,7 @@ export async function renderPatternToBufferWithProgress(
     setSuperdoughAudioController,
     initAudio,
     superdough,
+    onContextSwap,
   } = ctx;
 
   // Query haps first so we can pre-warm while the live context is still open.
@@ -320,6 +470,8 @@ export async function renderPatternToBufferWithProgress(
   // Guard: the context may already be closed if the user triggered a rapid
   // double-export (the mutex in runExport prevents this, but
   // renderPatternToBuffer is also used by probeRender).
+  // From here on the live context is gone and the caller has to rebuild it.
+  onContextSwap?.();
   if (live.state !== "closed") {
     await live.close();
   }
@@ -334,22 +486,14 @@ export async function renderPatternToBufferWithProgress(
   setSuperdoughAudioController(null);
   await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
 
-  let scheduled = 0;
-  for (const hap of haps) {
-    if (!hap.hasOnset()) continue;
-    const t = hap.whole.begin.valueOf() / cps;
-    const dur = hap.duration / cps;
-    try {
-      await superdough(hap.value, t, dur, cps, t);
-      scheduled++;
-    } catch (err) {
-      console.warn(
-        "[strasbeat/export] superdough failed for hap:",
-        err,
-        hap.value,
-      );
-    }
-  }
+  // Still the lazy-controller order: this is the first superdough() call
+  // after the swap, so it is what builds the controller against `offline`.
+  await flushStaleNodePools(haps, cps, {
+    superdough,
+    getAudioContext,
+    getSound,
+  });
+  const { scheduled, failures } = await scheduleHaps(haps, cps, superdough);
 
   // Poll the offline context's currentTime so the panel can show a
   // moving progress bar. `startRendering()` advances `currentTime`
@@ -379,7 +523,7 @@ export async function renderPatternToBufferWithProgress(
         /* ignore */
       }
     }
-    return { rendered, scheduled };
+    return { rendered, scheduled, failures };
   } finally {
     if (pollHandle != null) clearInterval(pollHandle);
   }
@@ -407,7 +551,33 @@ export function computeBufferStats(buffer) {
   return {
     peakAmplitude: absMax,
     percentNonZero: totalSamples > 0 ? (100 * nonZero) / totalSamples : 0,
+    // The 16-bit encoder hard-clamps to ±1, so anything above is distortion.
+    clipped: absMax > 1,
   };
+}
+
+/**
+ * Throws unless `outcome` (what the patched `editor.evaluate` resolved to)
+ * says the CURRENT buffer was evaluated. Shared by the export and the
+ * `probeRender` debug helper.
+ */
+export function assertEvaluated(outcome, editor) {
+  const status = outcome?.status;
+  if (status === "ok") return;
+  if (status === "error" || editor?.repl?.state?.evalError) {
+    const detail = editor?.repl?.state?.evalError?.message;
+    throw new Error(
+      `the pattern has an error — fix it before exporting${detail ? ` (${String(detail).split(/\r?\n/, 1)[0]})` : ""}`,
+    );
+  }
+  if (status === "empty") {
+    throw new Error("nothing to export — the editor is empty");
+  }
+  if (status === "cancelled" || status === "superseded") {
+    throw new Error("export was interrupted — try again");
+  }
+  // No outcome at all: evaluate was not the patched one. Fall through to
+  // the caller's own "is there a pattern?" check.
 }
 
 /**
@@ -448,6 +618,10 @@ export async function runExport(options, ctx) {
   }
   _exportRunning = true;
 
+  // Set the moment the render closes the live context. Until then a failed
+  // export (eval error, silent pattern, bad cps) has left the audio engine
+  // untouched and there is nothing to rebuild.
+  let contextSwapped = false;
   const webaudioCtx = {
     getAudioContext,
     getSound,
@@ -455,6 +629,9 @@ export async function runExport(options, ctx) {
     setSuperdoughAudioController,
     initAudio,
     superdough,
+    onContextSwap: () => {
+      contextSwapped = true;
+    },
   };
   const { cycles, sampleRate, filename } = options;
   const exportLabel = exportBtn.querySelector(".btn__label");
@@ -472,6 +649,11 @@ export async function runExport(options, ctx) {
     console.warn("[strasbeat/console] export log failed:", err);
   }
 
+  // What the render scheduled — passed to the node-pool flush that runs
+  // after the live context is rebuilt; see flushStaleNodePools.
+  let renderedHaps = [];
+  let renderedCps = 1;
+
   // Surface per-hap errors that superdough's errorLogger normally swallows.
   const captured = [];
   setLogger((msg, type) => {
@@ -482,8 +664,12 @@ export async function runExport(options, ctx) {
   });
 
   try {
-    await editor.evaluate(false);
+    // The repl swallows eval errors and keeps the previous pattern, so a
+    // plain "is there a pattern?" check would happily render the LAST good
+    // code under the current filename. Only render what just evaluated.
+    const evalOutcome = await editor.evaluate(false);
     editor.repl.scheduler.stop();
+    assertEvaluated(evalOutcome, editor);
 
     const pattern = editor.repl.state.pattern;
     const cps = editor.repl.scheduler.cps;
@@ -502,6 +688,9 @@ export async function runExport(options, ctx) {
       throw new Error(
         "pattern produced no onset haps for the requested cycle range",
       );
+
+    renderedHaps = onsetHaps;
+    renderedCps = cps;
 
     status.textContent = `pre-loading sounds for ${onsetHaps.length} events…`;
 
@@ -522,14 +711,15 @@ export async function runExport(options, ctx) {
       }
     }
 
-    const { rendered, scheduled } = await renderPatternToBufferWithProgress(
-      pattern,
-      cps,
-      cycles,
-      sampleRate,
-      (ratio) => exportPanel.showProgress(ratio),
-      webaudioCtx,
-    );
+    const { rendered, scheduled, failures } =
+      await renderPatternToBufferWithProgress(
+        pattern,
+        cps,
+        cycles,
+        sampleRate,
+        (ratio) => exportPanel.showProgress(ratio),
+        webaudioCtx,
+      );
 
     const wavArrayBuffer = audioBufferToWav16(rendered);
     // Cache a Uint8Array view so the panel's "download again" button
@@ -541,7 +731,21 @@ export async function runExport(options, ctx) {
     downloadWav(wavArrayBuffer, filename);
     track("wav_exported", { cycles, sampleRate });
 
-    const errorCount = captured.filter((c) => c.type === "error").length;
+    // Events superdough refused outright (unknown sound, a node that
+    // couldn't be built). They are missing from the file.
+    if (failures.length) {
+      const distinct = [...new Set(failures)];
+      const shown = distinct.slice(0, 3).join("; ");
+      consolePanel?.warn?.(
+        `export: ${failures.length} of ${failures.length + scheduled} events could not be rendered and are missing from the file — ${shown}${distinct.length > 3 ? "; …" : ""}`,
+      );
+    }
+
+    // errorLogger() reports without a type ("[origin] error: …"), so count
+    // those as well as the typed ones.
+    const errorCount = captured.filter(
+      (c) => classifyStrudelLog(c.msg, c.type) === "error",
+    ).length;
     if (errorCount) {
       console.warn(
         `[strasbeat/export] ${errorCount} strudel errors during render — see above`,
@@ -554,6 +758,12 @@ export async function runExport(options, ctx) {
     const stats = computeBufferStats(rendered);
     const duration = rendered.length / rendered.sampleRate;
     const fileSize = wavArrayBuffer.byteLength;
+
+    if (stats.clipped) {
+      consolePanel?.warn?.(
+        `export: the mix peaks at ${stats.peakAmplitude.toFixed(2)} (above full scale) and was clipped in the file — lower .gain() or add .postgain() to avoid distortion`,
+      );
+    }
 
     // Loud silent-export warning — the #1 export footgun.
     if (stats.peakAmplitude <= 0) {
@@ -574,7 +784,7 @@ export async function runExport(options, ctx) {
       );
     }
 
-    status.textContent = `exported ${filename}.wav (${scheduled} events, ${cycles} cycle${cycles === 1 ? "" : "s"})`;
+    status.textContent = `exported ${filename}.wav (${scheduled} events${failures.length ? `, ${failures.length} failed` : ""}, ${cycles} cycle${cycles === 1 ? "" : "s"})`;
     try {
       consolePanel?.log(
         `export: done — ${scheduled} events, peak=${stats.peakAmplitude.toFixed(3)}, ${fileSize} bytes`,
@@ -587,6 +797,8 @@ export async function runExport(options, ctx) {
       buffer: rendered,
       wavBytes,
       scheduled,
+      failed: failures.length,
+      clipped: stats.clipped,
       cycles,
       sampleRate,
       filename,
@@ -614,13 +826,24 @@ export async function runExport(options, ctx) {
     // Restore the default strudel logger.
     installDefaultStrudelLogger(setLogger);
     // The render tore down the live audio context — restore it so the
-    // user can press play again without reloading.
-    try {
+    // user can press play again without reloading. An export that failed
+    // before the swap still has its live context: leave it alone rather
+    // than orphaning a running AudioContext and building another.
+    if (contextSwapped) try {
       setAudioContext(null);
       setSuperdoughAudioController(null);
       resetGlobalEffects();
-      await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
+      await initAudio({ maxPolyphony: LIVE_MAX_POLYPHONY });
       editor.repl.scheduler.stop();
+      try {
+        await flushStaleNodePools(renderedHaps, renderedCps, {
+          superdough,
+          getAudioContext,
+          getSound,
+        });
+      } catch (err) {
+        console.warn("[strasbeat/export] node pool flush failed:", err);
+      }
 
       // Verify the restored context is actually usable — a closed or
       // suspended context that slipped through would cause all subsequent
@@ -649,7 +872,7 @@ export async function runExport(options, ctx) {
         setAudioContext(null);
         setSuperdoughAudioController(null);
         resetGlobalEffects();
-        await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
+        await initAudio({ maxPolyphony: LIVE_MAX_POLYPHONY });
         status.textContent =
           "audio restored after export (required full reset) — press play";
       }

@@ -1,7 +1,12 @@
 import {
   EXPORT_SAMPLE_RATE,
   EXPORT_MAX_POLYPHONY,
+  LIVE_MAX_POLYPHONY,
   renderPatternToBuffer,
+  flushStaleNodePools,
+  acquireExportLock,
+  releaseExportLock,
+  assertEvaluated,
 } from "./export.js";
 import { score as completionScore } from "./editor/completions/score.js";
 import { getBufferTokens } from "./editor/completions/context.js";
@@ -68,50 +73,83 @@ export function mountDebugHelpers({
      *   await strasbeat.probeRender(4)
      */
     async probeRender(cycles = 4, sampleRate = EXPORT_SAMPLE_RATE) {
-      await editor.evaluate(false);
-      editor.repl.scheduler.stop();
-      const pattern = editor.repl.state.pattern;
-      const cps = editor.repl.scheduler.cps;
-      if (!pattern) throw new Error("no pattern after evaluate");
-      const { rendered, scheduled } = await renderPatternToBuffer(
-        pattern,
-        cps,
-        cycles,
-        sampleRate,
-        {
-          getAudioContext,
-          getSound,
-          setAudioContext,
-          setSuperdoughAudioController,
-          initAudio,
-          superdough,
-        },
-      );
-      const ch0 = rendered.getChannelData(0);
-      let absMax = 0,
-        nz = 0;
-      for (let i = 0; i < ch0.length; i++) {
-        const a = Math.abs(ch0[i]);
-        if (a > absMax) absMax = a;
-        if (ch0[i] !== 0) nz++;
+      // Same lock as the WAV export: the render swaps superdough's audio
+      // context, so nothing else may play (or render) meanwhile.
+      if (!acquireExportLock()) {
+        throw new Error("an export is already in progress");
       }
-      setAudioContext(null);
-      setSuperdoughAudioController(null);
-      resetGlobalEffects();
-      await initAudio({ maxPolyphony: EXPORT_MAX_POLYPHONY });
-      const stats = {
-        cps,
-        cycles,
-        scheduled,
-        seconds: rendered.length / sampleRate,
-        absMax,
-        percentNonZero: (100 * nz) / ch0.length,
-      };
-      echoHelper(
-        `probeRender(${cycles}) → ${scheduled} events, absMax=${absMax.toFixed(3)}`,
-        stats,
-      );
-      return stats;
+      let contextSwapped = false;
+      let renderedHaps = [];
+      let renderedCps = 1;
+      try {
+        // A failed evaluate keeps the previous pattern in the repl — refuse
+        // to report stats for code that isn't the code on screen.
+        const evalOutcome = await editor.evaluate(false);
+        editor.repl.scheduler.stop();
+        assertEvaluated(evalOutcome, editor);
+        const pattern = editor.repl.state.pattern;
+        const cps = editor.repl.scheduler.cps;
+        if (!pattern) throw new Error("no pattern after evaluate");
+        renderedHaps = pattern.queryArc(0, cycles, { _cps: cps });
+        renderedCps = cps;
+        const { rendered, scheduled, failures } = await renderPatternToBuffer(
+          pattern,
+          cps,
+          cycles,
+          sampleRate,
+          {
+            getAudioContext,
+            getSound,
+            setAudioContext,
+            setSuperdoughAudioController,
+            initAudio,
+            superdough,
+            onContextSwap: () => {
+              contextSwapped = true;
+            },
+          },
+        );
+        const ch0 = rendered.getChannelData(0);
+        let absMax = 0,
+          nz = 0;
+        for (let i = 0; i < ch0.length; i++) {
+          const a = Math.abs(ch0[i]);
+          if (a > absMax) absMax = a;
+          if (ch0[i] !== 0) nz++;
+        }
+        const stats = {
+          cps,
+          cycles,
+          scheduled,
+          failed: failures.length,
+          seconds: rendered.length / sampleRate,
+          absMax,
+          percentNonZero: (100 * nz) / ch0.length,
+        };
+        echoHelper(
+          `probeRender(${cycles}) → ${scheduled} events${failures.length ? ` (${failures.length} failed)` : ""}, absMax=${absMax.toFixed(3)}`,
+          stats,
+        );
+        return stats;
+      } finally {
+        // Put the live context back even when the render threw — but only
+        // if it was actually torn down.
+        try {
+          if (contextSwapped) {
+            setAudioContext(null);
+            setSuperdoughAudioController(null);
+            resetGlobalEffects();
+            await initAudio({ maxPolyphony: LIVE_MAX_POLYPHONY });
+            // Clear the offline context's nodes out of superdough's pools.
+            await flushStaleNodePools(renderedHaps, renderedCps, {
+              superdough,
+              getAudioContext,
+            });
+          }
+        } finally {
+          releaseExportLock();
+        }
+      }
     },
     /**
      * Live introspection of the intellisense ranking pipeline. Useful for
