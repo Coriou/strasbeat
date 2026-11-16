@@ -36,10 +36,30 @@
  *   - Empty input is treated as null (cancel) — same as window.prompt.
  *
  * Focus is trapped inside the modal while open. Only one modal may be open
- * at a time; opening a second one rejects the first.
+ * at a time; opening a second one dismisses the first.
+ *
+ * Focus returns to where it was the moment a modal closes — synchronously,
+ * before the caller's `await` continues. That ordering is what makes
+ * chained dialogs work (New pattern → "New folder…"): the second modal
+ * opens after focus is already back, takes it, and later hands it back to
+ * the same place. A delayed restore would fire on top of the second modal
+ * and send its keystrokes to the editor behind the overlay.
  */
 
 let active = null; // { resolve, root, prevFocus, cleanup }
+
+// A dialog with no text is worse than a crash: the user is asked to approve
+// something they can't read. Fail at the call site instead.
+function assertOptions(kind, opts) {
+  if (!opts || typeof opts !== 'object') {
+    throw new TypeError(
+      `modal.${kind}() takes an options object ({ title, … }), got ${typeof opts}`,
+    );
+  }
+  if (typeof opts.title !== 'string' || !opts.title) {
+    throw new TypeError(`modal.${kind}() needs a non-empty title`);
+  }
+}
 
 /**
  * Open a modal prompt. Resolves to the entered string, or null if cancelled.
@@ -54,6 +74,7 @@ let active = null; // { resolve, root, prevFocus, cleanup }
  * @returns {Promise<string | null>}
  */
 export function prompt(opts) {
+  assertOptions('prompt', opts);
   // Closing any previous instance keeps the API simple — callers don't have
   // to worry about a stale modal hanging around. The previous resolver is
   // settled with null so any awaiting `await prompt(...)` unblocks.
@@ -128,6 +149,7 @@ export function prompt(opts) {
  * @returns {Promise<Record<string, string> | null>}
  */
 export function formModal(opts) {
+  assertOptions('formModal', opts);
   if (active) closeActive(null);
 
   return new Promise((resolve) => {
@@ -170,12 +192,13 @@ export function formModal(opts) {
  *   title: string,
  *   message?: string,
  *   confirmLabel?: string,
- *   cancelLabel?: string,
+ *   cancelLabel?: string | null,
  *   destructive?: boolean,
  * }} opts
  * @returns {Promise<boolean>}
  */
 export function confirm(opts) {
+  assertOptions('confirm', opts);
   if (active) closeActive(null);
 
   return new Promise((resolve) => {
@@ -187,8 +210,11 @@ export function confirm(opts) {
       root.classList.add('modal-overlay--open');
     });
 
+    // Enter lands on the confirm button — except for destructive actions,
+    // where the safe choice gets the focus and confirming takes intent.
     const confirmBtn = root.querySelector('.modal__confirm');
-    confirmBtn.focus();
+    const cancelBtn = root.querySelector('.modal__cancel');
+    (opts.destructive && cancelBtn ? cancelBtn : confirmBtn).focus();
 
     const cleanup = installListeners(root, () => closeActive(false));
 
@@ -225,6 +251,7 @@ export function confirm(opts) {
  * @returns {Promise<string | null>}
  */
 export function choiceModal(opts) {
+  assertOptions('choiceModal', opts);
   if (active) closeActive(null);
 
   return new Promise((resolve) => {
@@ -236,10 +263,10 @@ export function choiceModal(opts) {
       root.classList.add('modal-overlay--open');
     });
 
-    // Focus the first choice button (or cancel if no choices). Matches
-    // confirm()'s "primary action under the cursor when the modal opens"
-    // ergonomic — Enter immediately fires the first choice.
-    const firstBtn = root.querySelector('.modal__choice');
+    // Focus the first non-destructive choice (or cancel if there is none).
+    // Matches confirm(): Enter fires the primary action, never a
+    // destructive one.
+    const firstBtn = root.querySelector('.modal__choice:not(.btn--destructive)');
     if (firstBtn) firstBtn.focus();
     else root.querySelector('.modal__cancel')?.focus();
 
@@ -259,14 +286,15 @@ function closeActive(value) {
   root.classList.add('modal-overlay--exiting');
   setTimeout(() => {
     if (root.parentNode) root.parentNode.removeChild(root);
-    if (prevFocus && typeof prevFocus.focus === 'function') {
-      try {
-        prevFocus.focus();
-      } catch {
-        /* element may have been removed */
-      }
-    }
   }, 80);
+  // Hand focus back before resolving — see the header comment.
+  if (prevFocus && prevFocus.isConnected && typeof prevFocus.focus === 'function') {
+    try {
+      prevFocus.focus();
+    } catch {
+      /* element may have been removed */
+    }
+  }
   resolve(value);
 }
 
@@ -542,6 +570,9 @@ function buildConfirm(opts, onResult) {
     cancelLabel = 'Cancel',
     destructive = false,
   } = opts;
+  // `cancelLabel: null` (or '') makes it a single-button notice — there is
+  // nothing to choose between. Escape / click-outside still dismiss.
+  const hasCancel = cancelLabel != null && cancelLabel !== '';
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -569,11 +600,14 @@ function buildConfirm(opts, onResult) {
   actions.className = 'modal__actions';
   dialog.appendChild(actions);
 
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'btn btn--ghost modal__cancel';
-  cancelBtn.textContent = cancelLabel;
-  actions.appendChild(cancelBtn);
+  if (hasCancel) {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn--ghost modal__cancel';
+    cancelBtn.textContent = cancelLabel;
+    cancelBtn.addEventListener('click', () => onResult(false));
+    actions.appendChild(cancelBtn);
+  }
 
   const confirmBtn = document.createElement('button');
   confirmBtn.type = 'button';
@@ -583,7 +617,6 @@ function buildConfirm(opts, onResult) {
   actions.appendChild(confirmBtn);
 
   confirmBtn.addEventListener('click', () => onResult(true));
-  cancelBtn.addEventListener('click', () => onResult(false));
   // Enter on the focused confirm button is the platform default; nothing
   // extra to wire here. Escape is handled by installListeners().
 
@@ -658,7 +691,12 @@ function installListeners(root, onDismiss) {
       }
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
+      if (!root.contains(document.activeElement)) {
+        // Focus got out (a click on the page behind, a programmatic
+        // focus) — pull it back in rather than tab through the app.
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
@@ -670,7 +708,12 @@ function installListeners(root, onDismiss) {
 
   function onClick(e) {
     // Click on the backdrop (overlay itself, not the dialog) dismisses.
-    if (e.target === root) onDismiss();
+    // preventDefault keeps the mousedown from then moving focus to <body>,
+    // undoing the focus restore that closing just performed.
+    if (e.target === root) {
+      e.preventDefault();
+      onDismiss();
+    }
   }
 
   document.addEventListener('keydown', onKeydown, true);

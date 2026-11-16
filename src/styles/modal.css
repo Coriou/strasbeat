@@ -27,7 +27,8 @@
 }
 
 .modal {
-  min-width: 360px;
+  /* min-width beats max-width, so clamp it to the viewport too. */
+  min-width: min(360px, calc(100vw - var(--space-6)));
   max-width: min(480px, calc(100vw - var(--space-6)));
   max-height: calc(100vh - var(--space-6));
   padding: var(--space-4) var(--space-4) var(--space-3);
@@ -98,7 +99,7 @@
 /* Multi-field form variant — wider so labels + values breathe a bit more
    than the single-input prompt(). */
 .modal--form {
-  min-width: 400px;
+  min-width: min(400px, calc(100vw - var(--space-6)));
 }
 
 /* Each field row: label sits above its input + error message. Tight gap
@@ -208,4 +209,12 @@
 .modal__choice.btn--destructive:hover {
   --btn-bg: oklch(0.7 0.22 25);
   --btn-bd: oklch(0.7 0.22 25);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay,
+  .modal-overlay--exiting,
+  .modal {
+    transition: none;
+  }
 }
