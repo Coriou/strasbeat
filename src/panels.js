@@ -332,7 +332,12 @@ export function registerPanels({
       const shippedDemos = new Set(Object.keys(patterns));
       const pv = previewImport(parsed.data, store, shippedDemos);
       const conflictCount = pv.conflicts.length;
-      const newCount = pv.newUserPatterns.length;
+      // New user patterns plus the Demo edits that replace nothing here.
+      const newCount =
+        pv.newUserPatterns.length +
+        pv.demoWorkingCopies.transferable.filter(
+          (name) => !pv.conflicts.includes(name),
+        ).length;
       const untransferable = pv.demoWorkingCopies.untransferable.length;
 
       let strategy = "skip";

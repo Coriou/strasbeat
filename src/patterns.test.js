@@ -195,6 +195,25 @@ describe("saveNewPattern", () => {
     assert.ok(f.statuses.some((s) => /^created "bar"$/.test(s)));
   });
 
+  test("a write the store refuses is not reported as created", async () => {
+    const f = makeFakes();
+    f.store.set = () => false; // what the store returns for a non-quota failure
+    const r = await saveNewPattern({
+      name: "lost",
+      code: "x",
+      store: f.store,
+      leftRail: f.leftRail,
+      setCurrentName: f.setCurrentName,
+      editor: f.editor,
+      transport: f.transport,
+    });
+    assert.equal(r.ok, false);
+    assert.deepEqual(f.idx.userPatterns, []);
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.getCurrent(), null);
+    assert.ok(f.statuses.some((s) => /couldn.t create "lost"/.test(s)));
+  });
+
   test("QuotaExceededError surfaces a status and returns ok:false", async () => {
     const f = makeFakes();
     f.store.set = () => {

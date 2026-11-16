@@ -236,6 +236,56 @@ describe("applyImport: conflict strategies", () => {
     assert.equal(r.skipped, 1); // gone-demo
   });
 
+  test("local edits to a Demo are a conflict: kept on skip, kept beside the import on rename", () => {
+    const json = {
+      version: 1, exportedAt: "t", folders: [],
+      patterns: { "05-dub": { code: "FROM_BACKUP", modified: "t", isUserPattern: false } },
+    };
+    const shippedDemos = new Set(["05-dub"]);
+    const local = () => makeStore({
+      records: { "05-dub": { code: "MY_EDITS", modified: "t", isUserPattern: false } },
+    });
+
+    assert.deepEqual(previewImport(json, local(), shippedDemos).conflicts, ["05-dub"]);
+
+    let store = local();
+    let r = applyImport(json, store, { conflictStrategy: "skip", shippedDemos });
+    assert.equal(store.get("05-dub").code, "MY_EDITS");
+    assert.equal(r.skipped, 1);
+    assert.equal(r.imported, 0);
+
+    store = local();
+    r = applyImport(json, store, { conflictStrategy: "rename", shippedDemos });
+    assert.equal(store.get("05-dub").code, "MY_EDITS");
+    assert.equal(store.get("05-dub-imported").code, "FROM_BACKUP");
+    assert.equal(store.get("05-dub-imported").isUserPattern, true);
+    assert.ok(store.getIndex().userPatterns.includes("05-dub-imported"));
+
+    store = local();
+    applyImport(json, store, { conflictStrategy: "overwrite", shippedDemos });
+    assert.equal(store.get("05-dub").code, "FROM_BACKUP");
+  });
+
+  test("an identical Demo copy, or one with no local edits, is not a conflict", () => {
+    const json = {
+      version: 1, exportedAt: "t", folders: [],
+      patterns: { "05-dub": { code: "SAME", modified: "t", isUserPattern: false } },
+    };
+    const shippedDemos = new Set(["05-dub"]);
+    assert.deepEqual(previewImport(json, makeStore(), shippedDemos).conflicts, []);
+    const same = makeStore({ records: { "05-dub": { code: "SAME", modified: "t", isUserPattern: false } } });
+    assert.deepEqual(previewImport(json, same, shippedDemos).conflicts, []);
+  });
+
+  test("a pattern named __proto__ is exported like any other", () => {
+    const store = makeStore({
+      index: { lastOpen: null, userPatterns: ["__proto__"], folders: [] },
+      records: { ["__proto__"]: { code: "X", modified: "t", isUserPattern: true } },
+    });
+    const text = JSON.stringify(buildExport(store));
+    assert.equal(JSON.parse(text).patterns["__proto__"].code, "X");
+  });
+
   test("QuotaExceededError aborts cleanly, reports counts", () => {
     const store = makeStore();
     let calls = 0;

@@ -589,7 +589,12 @@ export async function saveNewPattern({
       isUserPattern: true,
     };
     if (folder) rec.folder = folder;
-    store.set(name, rec);
+    // set() reports a refused write by returning false (only a full store
+    // throws); listing and opening a pattern that was never stored would
+    // show "created" for something that is gone on reload.
+    if (store.set(name, rec) === false) {
+      throw new Error("browser storage refused the write");
+    }
     const idx = store.getIndex();
     idx.userPatterns = [
       ...(idx.userPatterns ?? []).filter((n) => n !== name),

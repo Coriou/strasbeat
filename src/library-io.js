@@ -11,14 +11,18 @@ const EXPORT_VERSION = 1;
 export function buildExport(store, { now = () => new Date() } = {}) {
   const idx = store.getIndex();
   const folders = Array.isArray(idx.folders) ? idx.folders.slice() : [];
-  const patterns = {};
+  const entries = [];
   for (const name of store.keys()) {
     const rec = store.get(name);
     if (!rec) continue;
     const out = { code: rec.code, modified: rec.modified, isUserPattern: !!rec.isUserPattern };
     if (rec.isUserPattern && typeof rec.folder === "string") out.folder = rec.folder;
-    patterns[name] = out;
+    entries.push([name, out]);
   }
+  // (fromEntries, not `patterns[name] = out`: a pattern may be named
+  // "__proto__", and assigning that key would set the object's prototype
+  // instead of adding the pattern)
+  const patterns = Object.fromEntries(entries);
   return {
     version: EXPORT_VERSION,
     exportedAt: now().toISOString(),
@@ -93,8 +97,11 @@ export function previewImport(payload, store, shippedDemos) {
       if (exists) conflicts.push(name);
       else newUserPatterns.push(name);
     } else {
-      if (shippedDemos.has(name)) transferable.push(name);
-      else untransferable.push(name);
+      if (shippedDemos.has(name)) {
+        transferable.push(name);
+        // The user's own edits to that Demo would be replaced.
+        if (demoCopyConflicts(name, rec, store)) conflicts.push(name);
+      } else untransferable.push(name);
     }
   }
   return {
@@ -103,6 +110,13 @@ export function previewImport(payload, store, shippedDemos) {
     newUserPatterns,
     demoWorkingCopies: { transferable, untransferable },
   };
+}
+
+// An incoming Demo working copy conflicts when this browser already holds
+// edits to the same Demo and they differ: importing would replace them.
+function demoCopyConflicts(name, rec, store) {
+  const local = store.get(name);
+  return local != null && typeof local.code === "string" && local.code !== rec.code;
 }
 
 export function applyImport(payload, store, { conflictStrategy, shippedDemos }) {
@@ -169,6 +183,18 @@ export function applyImport(payload, store, { conflictStrategy, shippedDemos }) 
       } else {
         // Demo working copy.
         if (!shippedDemos.has(name)) { skipped++; continue; }
+        // Local edits to this Demo are a conflict like any other: kept on
+        // "skip", kept next to the import (as a user pattern) on "rename".
+        if (demoCopyConflicts(name, rec, store)) {
+          if (conflictStrategy === "skip") { skipped++; continue; }
+          if (conflictStrategy === "rename") {
+            const newName = makeRenamedName(name, store, shippedDemos);
+            writeUser(newName, rec);
+            renamed.push({ from: name, to: newName });
+            continue;
+          }
+          // overwrite
+        }
         const out = { code: rec.code, modified: rec.modified, isUserPattern: false };
         if (store.set(name, out) === false) throw new Error("browser storage refused the write");
         written.push(name);
