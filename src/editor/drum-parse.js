@@ -89,7 +89,67 @@ export const READ_ONLY_REASONS = Object.freeze({
  * @returns {DrumLane[]}
  */
 export function parseDrumLanes(code) {
+  if (code === lastLanesCode && lastLanes) return lastLanes;
+  const out = scanDrumLanes(code);
+  lastLanesCode = code;
+  lastLanes = out;
+  return out;
+}
+
+// The beat grid re-parses the buffer on every edit and again before each of
+// its own writes, usually with text it has already parsed. Remembering the
+// last result makes those repeats free. The result is shared between
+// callers: treat it as read-only.
+let lastLanesCode = null;
+let lastLanes = null;
+
+// Offsets of line starts that fall inside a block comment or a template
+// literal. A `$: s("…")` line there is dead text (commented out, or part of
+// a string), not a lane — showing it in the grid would let the user "edit"
+// code that never plays.
+function deadLineStarts(code) {
+  const dead = new Set();
+  let mode = "code"; // code | line-comment | block-comment | single | double | template
+  for (let i = 0; i < code.length; i++) {
+    const ch = code[i];
+    if (ch === "\n") {
+      // Only block comments and template literals span lines; anything else
+      // open at a newline is an unterminated token mid-edit — recover.
+      if (mode !== "block-comment" && mode !== "template") mode = "code";
+      else dead.add(i + 1);
+      continue;
+    }
+    if (mode === "code") {
+      const next = code[i + 1];
+      if (ch === "/" && next === "/") mode = "line-comment";
+      else if (ch === "/" && next === "*") {
+        mode = "block-comment";
+        i++;
+      } else if (ch === "'") mode = "single";
+      else if (ch === '"') mode = "double";
+      else if (ch === "`") mode = "template";
+    } else if (mode === "block-comment") {
+      if (ch === "*" && code[i + 1] === "/") {
+        mode = "code";
+        i++;
+      }
+    } else if (mode !== "line-comment") {
+      if (ch === "\\") i++;
+      else if (
+        (mode === "single" && ch === "'") ||
+        (mode === "double" && ch === '"') ||
+        (mode === "template" && ch === "`")
+      ) {
+        mode = "code";
+      }
+    }
+  }
+  return dead;
+}
+
+function scanDrumLanes(code) {
   const lineAt = buildLineMap(code);
+  const dead = deadLineStarts(code);
   const out = [];
 
   // Walk top-level lines: only consider a `$` that begins a line (modulo
@@ -100,7 +160,9 @@ export function parseDrumLanes(code) {
   for (let i = 0; i <= code.length; i++) {
     if (i === code.length || code[i] === "\n") {
       const lineEnd = i;
-      const lane = scanLane(code, lineStart, lineEnd, lineAt);
+      const lane = dead.has(lineStart)
+        ? null
+        : scanLane(code, lineStart, lineEnd, lineAt);
       if (lane) out.push(lane);
       lineStart = i + 1;
     }

@@ -117,7 +117,23 @@ function replaceLabelName(code, label, rawName) {
   return code.slice(0, label.rawStart) + rawName + code.slice(label.rawEnd);
 }
 
+// The bottom bars (track bar, arrange bar, beat grid) and the piano roll
+// each re-parse the whole buffer on every edit, and several of them ask for
+// the same parse of the same text within one frame. Remembering the last
+// result makes those repeats free. The result is shared between callers:
+// treat it as read-only.
+let lastLabelsCode = null;
+let lastLabels = null;
+
 export function parseLabels(code) {
+  if (code === lastLabelsCode && lastLabels) return lastLabels;
+  const labels = scanLabels(code);
+  lastLabelsCode = code;
+  lastLabels = labels;
+  return labels;
+}
+
+function scanLabels(code) {
   const labels = [];
   let line = 1;
   let lineStart = 0;

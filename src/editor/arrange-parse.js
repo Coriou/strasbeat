@@ -57,6 +57,20 @@ const STRING_LITERAL_RE = /^(['"])((?:\\.|(?!\1).)*)\1$/;
  * @returns {Arrangement[]}
  */
 export function parseArrangements(code) {
+  if (code === lastArrangementsCode && lastArrangements) return lastArrangements;
+  const out = scanArrangements(code);
+  lastArrangementsCode = code;
+  lastArrangements = out;
+  return out;
+}
+
+// The arrange bar and the evaluate path both parse the buffer, often the
+// same text back to back. Remembering the last result makes those repeats
+// free. The result is shared between callers: treat it as read-only.
+let lastArrangementsCode = null;
+let lastArrangements = null;
+
+function scanArrangements(code) {
   const lineAt = buildLineMap(code);
   const out = [];
   let i = 0;

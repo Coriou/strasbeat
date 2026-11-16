@@ -384,3 +384,32 @@ describe("parseDrumLanes() — offsets", () => {
     assert.match(tail, /\.gain\(0\.5\)\s*$/);
   });
 });
+
+describe("parseDrumLanes — dead text", () => {
+  test("ignores a lane line inside a block comment", () => {
+    const code = `$: s("bd ~ ~ ~")\n/*\n$: s("hh hh hh hh")\n*/\n$: s("~ sd ~ sd")\n`;
+    const lanes = parseDrumLanes(code);
+    assert.equal(lanes.length, 2);
+    assert.deepEqual(
+      lanes.map((l) => l.steps.map((s) => s.sound ?? "~").join(" ")),
+      ["bd ~ ~ ~", "~ sd ~ sd"],
+    );
+  });
+
+  test("ignores a lane line inside a multi-line template literal", () => {
+    const code = "const notes = `\n$: s(\"hh hh hh hh\")\n`\n$: s(\"bd ~ ~ ~\")\n";
+    const lanes = parseDrumLanes(code);
+    assert.equal(lanes.length, 1);
+    assert.equal(lanes[0].steps[0].sound, "bd");
+  });
+
+  test("a line comment or an unterminated quote does not swallow later lanes", () => {
+    const code = `// it's a "kick\nconst x = 'oops\n$: s("bd ~ ~ ~")\n`;
+    assert.equal(parseDrumLanes(code).length, 1);
+  });
+
+  test("a block comment closed on the lane's own line keeps the lane", () => {
+    const code = `/* drums */ const a = 1\n$: s("bd ~ ~ ~")\n`;
+    assert.equal(parseDrumLanes(code).length, 1);
+  });
+});
