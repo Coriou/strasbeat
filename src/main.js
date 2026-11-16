@@ -37,6 +37,9 @@ import {
 } from "./editor/error-marks.js";
 import { loadDocs } from "./editor/docs-store.js";
 import { setLazyImportReporter } from "./lazy-import.js";
+import { onKeymapLoaded } from "./editor/lazy-keymaps.js";
+import { applyKeymapProfile } from "./editor/keymap-apply.js";
+import { getProfile, getStoredProfileId } from "./editor/keymap-profiles.js";
 import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
@@ -505,6 +508,20 @@ bottomCanvas.setOnHapDemandChange((wide) => {
   }
 });
 
+// The Vim and Emacs keymaps are fetched on first use (editor/lazy-keymaps.js):
+// asking for one before its code is in leaves the editor on its base keymap,
+// and this runs when the code arrives. Applying the stored profile again
+// swaps the real keymap in and lets the keymap chip attach its mode readout.
+// It covers both a modal profile restored just below and one picked later;
+// if the user has moved to another profile in the meantime there is nothing
+// to do.
+onKeymapLoaded((name) => {
+  const profile = getProfile(getStoredProfileId());
+  if (profile.strudelKeybindings !== name) return;
+  applyKeymapProfile(editor, profile.id, {
+    onEvaluate: () => editor.evaluate(),
+  });
+});
 
 applyInitialSettings(editor, INITIAL_STORED_CM_SETTINGS);
 

@@ -170,8 +170,158 @@ function umamiPlugin() {
   };
 }
 
+// `@strudel/codemirror` is published both as a prebuilt bundle (its `main`)
+// and as the source modules that bundle was made from. The prebuilt file
+// inlines upstream's whole documentation dump (`doc.json`, ~540 kB) for an
+// autocomplete and a Ctrl+hover tooltip that strasbeat replaces with its own
+// (src/editor/completions/, src/editor/hover-docs.js), and it statically
+// imports the Vim and Emacs keymaps (~140 kB) whether or not they are in
+// use. Neither can be tree-shaken out of a prebuilt file, so the app is
+// built from the package's source modules instead (the `resolve.alias`
+// below), with two of their imports redirected here:
+//
+//   - `../../doc.json` (a path that only exists inside upstream's monorepo)
+//     becomes an empty docs list. Its two consumers: `autocomplete.mjs`,
+//     whose completion source is swapped out of the editor by
+//     `installCompletions` and never put back (the settings panel has no
+//     toggle for it), and `tooltip.mjs`, the Ctrl+hover tooltip, which then
+//     finds no entry and shows nothing — strasbeat's own hover docs cover
+//     the same identifiers.
+//   - `@replit/codemirror-vim` / `-emacs` become src/editor/lazy-keymaps.js,
+//     which fetches the real package the first time that keymap is used.
+//     Only imports made from inside `@strudel/codemirror` are redirected;
+//     the shim's own import of the real package passes through.
+//
+// Every import of the package has to land on the same copy (it holds the
+// slider value store, the settings atom and the editor compartments), which
+// is why this is an alias for the bare specifier rather than a different
+// import path in some files: `@strudel/codemirror/slider.mjs` (boot.js) is
+// one of the source modules already, so it is the very module the aliased
+// entry re-exports.
+function slimStrudelCodemirrorPlugin() {
+  const EMPTY_DOCS = "\0strasbeat:upstream-doc-json";
+  const lazyKeymaps = path.join(__dirname, "src/editor/lazy-keymaps.js");
+  const fromStrudelCodemirror = (importer) =>
+    typeof importer === "string" &&
+    /[\\/]@strudel[\\/]codemirror[\\/]/.test(importer);
+  return {
+    name: "strasbeat:slim-strudel-codemirror",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (!fromStrudelCodemirror(importer)) return null;
+      if (source === "../../doc.json") return EMPTY_DOCS;
+      if (
+        source === "@replit/codemirror-vim" ||
+        source === "@replit/codemirror-emacs"
+      ) {
+        return lazyKeymaps;
+      }
+      return null;
+    },
+    load(id) {
+      if (id === EMPTY_DOCS) return "export default { docs: [] };";
+      return null;
+    },
+  };
+}
+
+// escodegen (the code generator behind Strudel's transpiler) `require`s the
+// `source-map` package, ~30 kB, for one optional feature: emitting a source
+// map when `generate()` is called with `sourceMap`. Strudel's transpiler
+// never asks for one, so the production bundle gets a stand-in that fails
+// loudly if that ever changes. Build only — the dev pre-bundler keeps the
+// real package, which is equally unused there.
+function stubSourceMapPlugin() {
+  const STUB = "\0strasbeat:source-map-stub";
+  return {
+    name: "strasbeat:stub-source-map",
+    apply: "build",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (source !== "source-map") return null;
+      if (!/[\\/]escodegen[\\/]/.test(importer ?? "")) return null;
+      return STUB;
+    },
+    load(id) {
+      if (id !== STUB) return null;
+      return `export class SourceNode {
+  constructor() {
+    throw new Error(
+      "escodegen source maps are not available: the source-map package is stubbed out of this build (see vite.config.js)",
+    );
+  }
+}`;
+    },
+  };
+}
+
+// Preload the two font files the first paint uses — the UI face and the
+// editor's monospace face, latin subset. Without the hint they are only
+// discovered once the stylesheet has been parsed, one round-trip later, and
+// the code visibly re-flows when the monospace face swaps in. The files are
+// content-hashed, so the tags are generated from the build's asset list
+// (production build only; the dev server serves them from node_modules). The
+// other unicode-range subsets stay on-demand.
+const PRELOADED_FONTS =
+  /^assets\/geist(-mono)?-latin-wght-normal-[\w-]+\.woff2$/;
+function fontPreloadPlugin() {
+  let base = "/";
+  return {
+    name: "strasbeat:font-preload",
+    apply: "build",
+    configResolved(config) {
+      base = config.base;
+    },
+    transformIndexHtml: {
+      order: "post",
+      handler(_html, ctx) {
+        const fonts = Object.keys(ctx.bundle ?? {})
+          .filter((fileName) => PRELOADED_FONTS.test(fileName))
+          .sort();
+        if (fonts.length !== 2) {
+          // The font packages renamed their files, or a subset was added.
+          // The page still works; it just loses the preload.
+          console.warn(
+            `[strasbeat:font-preload] expected 2 latin font files to preload, found ${fonts.length}: ${fonts.join(", ")}`,
+          );
+        }
+        return fonts.map((fileName) => ({
+          tag: "link",
+          attrs: {
+            rel: "preload",
+            as: "font",
+            type: "font/woff2",
+            href: base + fileName,
+            // Fonts are always fetched in CORS mode; without this the
+            // preloaded response is not reused and the file downloads twice.
+            crossorigin: "",
+          },
+          injectTo: "head",
+        }));
+      },
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [patternSavePlugin(), umamiPlugin()],
+  plugins: [
+    slimStrudelCodemirrorPlugin(),
+    stubSourceMapPlugin(),
+    patternSavePlugin(),
+    umamiPlugin(),
+    fontPreloadPlugin(),
+  ],
+  resolve: {
+    alias: [
+      // Build from the package's source modules, not its prebuilt bundle —
+      // see slimStrudelCodemirrorPlugin above. Exact match only, so deep
+      // imports (`@strudel/codemirror/slider.mjs`) are left alone.
+      {
+        find: /^@strudel\/codemirror$/,
+        replacement: "@strudel/codemirror/index.mjs",
+      },
+    ],
+  },
   define: {
     __APP_VERSION__: JSON.stringify(appPkg.version),
     __STRUDEL_VERSION__: JSON.stringify(strudelCorePkg.version),
@@ -192,6 +342,27 @@ export default defineConfig({
       "src/**/*.{js,mjs,ts}",
       "!src/**/*.test.{js,mjs,ts}",
       "patterns/*.js",
+    ],
+    // Serve `@strudel/codemirror`'s source modules through the normal plugin
+    // pipeline in dev as well, so the redirects in
+    // slimStrudelCodemirrorPlugin apply there too (the dependency
+    // pre-bundler does not run Vite plugins) and dev and production run the
+    // same code. Its own dependencies are still pre-bundled.
+    exclude: ["@strudel/codemirror"],
+    // …including the ones only it imports, which the scanner cannot see
+    // behind an excluded package. This list is REQUIRED, not a warm-up: a
+    // bare import made from a file inside node_modules is only resolved to
+    // a pre-bundled dependency that is already known to the optimizer, and
+    // is otherwise served raw. Without these entries dev would load each of
+    // them unbundled, together with what they import (@lezer/*) — a second
+    // copy next to the one pre-bundled into @codemirror/language. When
+    // upstream's source gains a dependency that strasbeat's own code does
+    // not import, add it here.
+    include: [
+      "@strudel/codemirror > @codemirror/lang-javascript",
+      "@strudel/codemirror > @lezer/highlight",
+      "@strudel/codemirror > @nanostores/persistent",
+      "@strudel/codemirror > @replit/codemirror-vscode-keymap",
     ],
   },
   server: {
