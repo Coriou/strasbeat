@@ -107,11 +107,12 @@ export class HapWindow {
     this.publish(time);
   }
 
+  // `time` may lie before the last frame: the scheduler's clock steps back
+  // when an evaluate raises the tempo, and a restart begins near zero. Either
+  // way what was played before `time` stays (after a restart nothing was),
+  // as upstream keeps it; refilling here would redraw the past of the roll
+  // with notes of the new pattern that never sounded.
   invalidate(pattern, time, cps) {
-    if (this.time !== null && time < this.time) {
-      this.refill(pattern, time, cps);
-      return;
-    }
     const samePattern = this.pattern === pattern;
     this.pattern = pattern;
     this.records = this.records.filter((record) => record.begin < time);
@@ -169,9 +170,14 @@ export class HapWindow {
     // numbers and retain the exact published array identities.
     for (let i = 0; i < this.records.length; i++) {
       const record = this.records[i];
-      if (record.endClipped < left) continue;
+      // A note is published for at least one frame once its onset is
+      // reached, even if it ended before this frame came (a slow frame, a
+      // short note and the narrow window): the shader's pulses count onsets.
+      if (record.endClipped < left && (record.shown || record.begin > right))
+        continue;
       this.records[kept++] = record;
       if (record.begin > right) continue;
+      record.shown = true;
       if (visible[visibleCount] !== record.hap) {
         if (visible === this.visibleHaps)
           visible = visible.slice(0, visibleCount);

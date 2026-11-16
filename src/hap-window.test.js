@@ -412,3 +412,56 @@ test("a stopped clock (setcps(0)) is not an error", () => {
   window.advance(pattern, 0.4, 0.5);
   assert.ok(window.activeHaps.some((h) => h.value === "b"));
 });
+
+test("an evaluate that steps the clock back keeps the notes already played", () => {
+  // Cyclist.now() goes back a little when setcps raises the tempo.
+  const window = new HapWindow();
+  const before = mini("a b c d");
+  window.invalidate(before, 0, 0.5);
+  for (let time = 0; time <= 3.47; time += 0.01)
+    window.advance(before, time, 0.5);
+  window.invalidate(mini("e f"), 3.365, 1);
+  // (A new note already under way at that moment is shown from its onset.)
+  const past = window.visibleHaps.filter((h) => Number(h.whole.end) <= 3.365);
+  assert.ok(past.length > 0);
+  assert.ok(
+    past.every((h) => "abcd".includes(h.value)),
+    "the past of the roll is what sounded",
+  );
+  assert.deepEqual(
+    [
+      ...new Set(
+        window.visibleHaps
+          .filter((h) => Number(h.whole.begin) >= 3.365)
+          .map((h) => h.value),
+      ),
+    ].sort(),
+    ["e", "f"],
+  );
+  assert.equal(keys(window.visibleHaps).length, window.visibleHaps.length);
+});
+
+test("a note shorter than the frame gap is still published once, narrow window", () => {
+  const pattern = mini("hh*16");
+  const window = new HapWindow();
+  window.setRollDemand(false, pattern, 0, 0.5, {
+    playing: false,
+    hasFrame: false,
+  });
+  window.invalidate(pattern, 0, 0.5);
+  const seen = new Set();
+  // 7 frames a second at 0.5 cps: each frame spans more than one note.
+  for (let time = 0; time <= 4; time += 0.5 / 7) {
+    window.advance(pattern, time, 0.5);
+    for (const hap of window.visibleHaps) seen.add(Number(hap.whole.begin));
+    assert.ok(window.records.length < 8, "shown notes are still dropped");
+  }
+  const due = pattern
+    .queryArc(0, 4 - 0.5 / 7)
+    .filter((h) => h.hasOnset())
+    .map((h) => Number(h.whole.begin));
+  assert.deepEqual(
+    due.filter((begin) => !seen.has(begin)),
+    [],
+  );
+});
