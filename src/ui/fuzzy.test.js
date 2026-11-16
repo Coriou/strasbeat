@@ -111,3 +111,49 @@ describe("score: edge cases", () => {
     assert.equal(score("a", ""), null);
   });
 });
+
+describe("score: alignment search", () => {
+  test("finds a subsequence even when the word-start pick is a dead end", () => {
+    // The "b" at the start of the last word leaves nothing after it for
+    // "s" — the match has to use the earlier "b"/"s" instead.
+    const r = score("abs", "ambient-pads-b");
+    assert.ok(r, "a…b…s is a subsequence of ambient-pads-b");
+    assert.equal(r.matches.length, 3);
+    assert.equal(
+      r.matches.map((i) => "ambient-pads-b"[i]).join(""),
+      "abs",
+    );
+    assert.ok(score("dbs", "dub-drums-b"));
+  });
+
+  test("matched indices spell the query for every hit", () => {
+    const target = "808-bass-drum-b2";
+    for (const q of ["8bd", "bdb", "sdb2", "0ab", "bb2", "mb"]) {
+      const r = score(q, target);
+      assert.ok(r, `${q} should match ${target}`);
+      assert.equal(r.matches.map((i) => target[i]).join(""), q);
+    }
+  });
+
+  test("still prefers a contiguous run over scattered letters", () => {
+    const r = score("drum", "adarauam drum");
+    assert.deepEqual(r.matches, [9, 10, 11, 12]);
+  });
+});
+
+describe("score: indices on decomposed (NFD) targets", () => {
+  test("indices point into the original string, not the folded one", () => {
+    const target = "café-x".normalize("NFD"); // "e" + U+0301 — 7 code units
+    assert.equal(target.length, 7);
+    const r = score("x", target);
+    assert.ok(r);
+    assert.deepEqual(r.matches, [6]);
+    assert.equal(target[r.matches[0]], "x");
+  });
+
+  test("an accented letter matches at its base character", () => {
+    const target = "café".normalize("NFD");
+    assert.deepEqual(score("e", target).matches, [3]);
+    assert.deepEqual(score("e", "café".normalize("NFC")).matches, [3]);
+  });
+});

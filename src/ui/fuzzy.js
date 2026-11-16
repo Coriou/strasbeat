@@ -4,8 +4,10 @@
 //   foldAccents(s) -> string         // lowercase + strip diacriticals
 //   score(query, target) -> {score, matches: number[]} | null
 //
-// "matches" indices are into the ORIGINAL target string (post-fold, same length).
-// Caller renders highlights against the original target using these indices.
+// "matches" are UTF-16 indices into the ORIGINAL target string, so the
+// caller can render highlights against it directly. Folding can change a
+// string's length (a decomposed "e" + combining accent folds to one unit),
+// so matching runs on the folded text and maps positions back.
 
 const DIACRITICAL_RE = /\p{M}/gu;
 
@@ -15,6 +17,21 @@ export function foldAccents(s) {
 }
 
 const WORD_BOUNDARY_RE = /[^a-z0-9]/;
+
+// Fold `target` one character at a time, remembering which original index
+// each folded code unit came from.
+function foldWithIndexMap(target) {
+  let folded = "";
+  const map = [];
+  let i = 0;
+  for (const ch of target) {
+    const f = foldAccents(ch);
+    for (let k = 0; k < f.length; k++) map.push(i);
+    folded += f;
+    i += ch.length;
+  }
+  return { folded, map };
+}
 
 /**
  * Score how well `query` matches `target`. Returns null if any token has no
@@ -26,7 +43,7 @@ export function score(query, target) {
   const q = foldAccents(query).trim();
   if (!q) return null;
   if (!target) return null;
-  const t = foldAccents(target);
+  const { folded: t, map } = foldWithIndexMap(target);
   if (!t) return null;
 
   const tokens = q.split(/\s+/);
@@ -38,7 +55,7 @@ export function score(query, target) {
     const r = bestSubsequence(tok, t);
     if (!r) return null;
     total += r.score;
-    for (const i of r.matches) allMatches.add(i);
+    for (const i of r.matches) allMatches.add(map[i]);
   }
 
   return {
@@ -49,93 +66,77 @@ export function score(query, target) {
 
 /**
  * Find the highest-scoring subsequence alignment of `tok` in `t` (both
- * already lowercased + accent-folded). Returns {score, matches} or null.
+ * already lowercased + accent-folded). Returns {score, matches} or null
+ * when `tok` is not a subsequence of `t`.
  *
- * Strategy: greedy left-to-right scan, but with a small look-ahead to prefer
- * consecutive runs and word-start positions. This is intentionally simple —
- * good enough for the small libraries we expect. If we ever need to handle
- * pathological cases, swap for a proper dp.
+ * An alignment scores:
+ *   + 1 per matched char
+ *   + RUN_BONUS for each match directly after the previous one
+ *   + WORD_START_BONUS per match at a word boundary
+ *   + PREFIX_BONUS once if the first matched index is 0
+ *
+ * Solved exactly with a small dynamic program over (token char, target
+ * position) — O(tok × t). A greedy scan can paint itself into a corner
+ * (jumping ahead to a word start and leaving no room for the rest), which
+ * would report "no match" for a perfectly good subsequence.
  */
 function bestSubsequence(tok, t) {
-  // First check feasibility: subsequence must exist at all.
-  let j = 0;
-  for (let i = 0; i < t.length && j < tok.length; i++) {
-    if (t[i] === tok[j]) j++;
-  }
-  if (j < tok.length) return null;
-
-  // Now find the alignment that maximizes a score combining:
-  //   + 1 per matched char
-  //   + (run-length - 1) * RUN_BONUS for each consecutive run beyond length 1
-  //   + WORD_START_BONUS per match at a word boundary
-  //   + PREFIX_BONUS once if the first matched index is 0
-  //
-  // We use a simple iterative search: anchor on each viable starting index,
-  // greedily extend, score, keep the best. With small targets (<80 chars)
-  // this is fast.
   const RUN_BONUS = 4;
   const WORD_START_BONUS = 3;
   const PREFIX_BONUS = 6;
 
-  let best = null;
+  const n = t.length;
+  const m = tok.length;
+  if (m > n) return null;
 
-  for (let start = 0; start < t.length; start++) {
-    if (t[start] !== tok[0]) continue;
-    // Match greedily from `start`, but at each subsequent step, prefer the
-    // immediately-next char if it matches, otherwise prefer the next
-    // word-boundary occurrence, else the next occurrence.
-    const matches = [start];
-    let cursor = start + 1;
-    let tokIdx = 1;
-    while (tokIdx < tok.length) {
-      const target = tok[tokIdx];
-      let pick = -1;
-      // Immediate next char?
-      if (cursor < t.length && t[cursor] === target) {
-        pick = cursor;
-      } else {
-        // Prefer word-boundary match, else first occurrence.
-        let wbPick = -1;
-        for (let k = cursor; k < t.length; k++) {
-          if (t[k] !== target) continue;
-          if (k === 0 || WORD_BOUNDARY_RE.test(t[k - 1])) {
-            wbPick = k;
-            break;
-          }
-        }
-        if (wbPick >= 0) {
-          pick = wbPick;
-        } else {
-          for (let k = cursor; k < t.length; k++) {
-            if (t[k] === target) { pick = k; break; }
-          }
-        }
-      }
-      if (pick < 0) break;
-      matches.push(pick);
-      cursor = pick + 1;
-      tokIdx++;
-    }
-    if (matches.length < tok.length) continue;
+  // best[i]: top score with the current token char matched at t[i]
+  // (-Infinity when impossible). from[j][i]: where the previous char sat.
+  let prev = new Array(n).fill(-Infinity);
+  const from = [];
 
-    // Score this alignment.
-    let s = tok.length; // base: one point per matched char
-    let runLen = 1;
-    for (let k = 1; k < matches.length; k++) {
-      if (matches[k] === matches[k - 1] + 1) {
-        runLen++;
-        s += RUN_BONUS;
-      } else {
-        runLen = 1;
+  for (let j = 0; j < m; j++) {
+    const cur = new Array(n).fill(-Infinity);
+    const back = new Int32Array(n).fill(-1);
+    // Best score among prev[0 .. i-2] (a non-adjacent predecessor), and
+    // its position; leftmost wins ties so highlights hug the start.
+    let gapBest = -Infinity;
+    let gapAt = -1;
+    for (let i = 0; i < n; i++) {
+      if (j > 0 && i >= 2 && prev[i - 2] > gapBest) {
+        gapBest = prev[i - 2];
+        gapAt = i - 2;
       }
-    }
-    for (const i of matches) {
+      if (t[i] !== tok[j]) continue;
+      let s = 1;
       if (i === 0 || WORD_BOUNDARY_RE.test(t[i - 1])) s += WORD_START_BONUS;
+      if (j === 0) {
+        cur[i] = s + (i === 0 ? PREFIX_BONUS : 0);
+        continue;
+      }
+      const adjacent = i >= 1 ? prev[i - 1] + RUN_BONUS : -Infinity;
+      if (adjacent >= gapBest && adjacent > -Infinity) {
+        cur[i] = adjacent + s;
+        back[i] = i - 1;
+      } else if (gapBest > -Infinity) {
+        cur[i] = gapBest + s;
+        back[i] = gapAt;
+      }
     }
-    if (matches[0] === 0) s += PREFIX_BONUS;
-
-    if (best == null || s > best.score) best = { score: s, matches };
+    from.push(back);
+    prev = cur;
   }
 
-  return best;
+  let end = -1;
+  for (let i = 0; i < n; i++) {
+    if (prev[i] > -Infinity && (end < 0 || prev[i] > prev[end])) end = i;
+  }
+  if (end < 0) return null;
+
+  const matches = new Array(m);
+  let at = end;
+  for (let j = m - 1; j >= 0; j--) {
+    matches[j] = at;
+    at = from[j][at];
+  }
+  return { score: prev[end], matches };
 }
