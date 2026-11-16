@@ -75,7 +75,7 @@
     "unit": "calls per frame"
   },
   "playing.roll.callsPerFrame": {
-    "max": 1324.75,
+    "max": 1312.9,
     "tolerance": 0.03,
     "unit": "calls per frame"
   },
@@ -100,12 +100,12 @@
     "unit": "calls per frame"
   },
   "typing.default.perKey.layouts": {
-    "max": 2.53,
+    "max": 2.51,
     "tolerance": 0.01,
     "unit": "layouts per key"
   },
   "typing.default.perKey.mutations": {
-    "max": 9.77,
+    "max": 9.75,
     "tolerance": 0.01,
     "unit": "mutation records per key"
   },
