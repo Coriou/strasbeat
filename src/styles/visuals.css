@@ -19,6 +19,19 @@
     var(--hydra-clip-bottom, 0px)
     var(--hydra-clip-left, 0px)
   );
+  /* Stacking fix (the real "frozen panel" bug): #hydra-canvas is
+   * position:fixed and prepended to <body>, so at z-index:auto it paints
+   * BEHIND any positioned sibling content. .roll-pane is position:relative
+   * (roll.css), i.e. a z-index:auto positioned element that paints AFTER —
+   * and therefore OVER — the canvas. So the live Hydra render was occluded by
+   * the roll-pane's own opaque surface + last-rendered roll/beat-grid frame;
+   * what looked like a "frozen visual" was actually the panel's static
+   * content sitting in front. Lifting the clipped canvas to z-index:1 puts it
+   * above the roll-pane content while staying below the mode-switcher pill
+   * (.bottom-panel__bar, z-index:2). pointer-events stays none, so it blocks
+   * nothing. Full-window mode keeps z-index:auto (the canvas must stay BEHIND
+   * the editor text there), which is why that path already worked. */
+  z-index: 1;
 }
 
 /* Full-window mode (Phase 1.5): un-clipped, full-viewport behind the editor. */

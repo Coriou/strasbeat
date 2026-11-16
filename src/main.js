@@ -94,7 +94,7 @@ const STRUDEL_VERSION = __STRUDEL_VERSION__;
 // to rule out "stale cached bundle / HMR didn't apply" when a fix appears to
 // have "no effect". If you do NOT see this exact line on a fresh load, you are
 // running OLD code: hard-reload (Cmd+Shift+R) / disable cache / restart `vite`.
-const VISUALS_REV = "rescap+observe+heal-2";
+const VISUALS_REV = "panel-zfix-1";
 console.info(
   `[strasbeat] boot — app ${APP_VERSION} · strudel ${STRUDEL_VERSION} · ` +
     `visuals rev: ${VISUALS_REV} · dpr=${typeof window !== "undefined" ? window.devicePixelRatio : "?"}`,
