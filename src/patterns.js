@@ -98,32 +98,48 @@ export function computeDirtySet(patternNames, patterns, store) {
  * Resolve the code for a pattern, auto-healing a broken cached working copy.
  *
  * The store (localStorage working copy) normally SHADOWS the shipped disk
- * original — that's how live edits to a Demo persist. But a working copy that
- * no longer *transpiles* is not an edit worth preserving: it can only error
- * the instant you press play. The classic case is a Demo whose disk source was
- * fixed upstream (e.g. a multi-line single-quoted shader string corrected to
- * `'…\n' + '…\n'`) while a stale, broken copy from before the fix lingers in
- * localStorage and keeps winning at boot — the user sees `Unterminated string
- * constant` forever despite the disk file being correct.
+ * original — that's how live edits to a Demo persist. A working copy that no
+ * longer *transpiles* can only error when played. The classic case is a Demo
+ * whose disk source was fixed upstream (e.g. a multi-line single-quoted
+ * shader string corrected to `'…\n' + '…\n'`) while a stale, broken copy
+ * from before the fix lingers in localStorage and keeps winning at boot — the
+ * user sees `Unterminated string constant` forever despite the disk file
+ * being correct.
  *
- * Auto-heal rule (lossless): for a SHIPPED pattern only (one with a disk
- * original in `patterns`), if the working copy FAILS to transpile but the disk
- * original SUCCEEDS, drop the working copy and fall back to the original. We
- * never touch user patterns (no disk fallback exists), never drop a copy that
- * transpiles (a real edit), and never drop a copy when the original ALSO fails
- * (dropping would lose data without fixing anything). `canTranspile(code)` is
- * injected so this stays headlessly testable and `patterns.js` keeps no
- * transpiler dependency.
+ * But a copy that does not transpile is just as often the user's own work:
+ * autosave stores the buffer as typed, so an hour of edits that ends on a
+ * half-written call or an unbalanced paren looks exactly the same. Healing
+ * therefore never discards anything.
+ *
+ * Auto-heal rule: for a SHIPPED pattern only (one with a disk original in
+ * `patterns`), if the working copy FAILS to transpile but the disk original
+ * SUCCEEDS, the working copy is first moved to a listed user pattern named
+ * `<name>-recovered` (`-2`, `-3`, … when taken), and only then does the
+ * pattern fall back to its original. If that move cannot be stored, nothing
+ * is healed and the working copy stays where it is. We never touch user
+ * patterns (no disk fallback exists), never move a copy that transpiles (a
+ * real edit), and never move a copy when the original ALSO fails.
+ * `canTranspile(code)` is injected so this stays headlessly testable and
+ * `patterns.js` keeps no transpiler dependency.
  *
  * @param {object} a
  * @param {string} a.name
  * @param {Record<string,string>} a.patterns  shipped disk originals (name→code)
- * @param {{ get(name): {code?:string}|null, delete(name): void }} a.store
+ * @param {object} a.store  the pattern store (get/set/delete/getIndex/setIndex)
  * @param {(code: string) => boolean} a.canTranspile  true iff `code` transpiles
- * @returns {{ code: string|undefined, healed: boolean }}
- *   code: the code to load; healed: true iff a broken copy was dropped.
+ * @param {(info: { name: string, recoveredAs: string }) => void} [a.onHeal]
+ *   called after a heal, so the host can tell the user where the copy went
+ * @returns {{ code: string|undefined, healed: boolean, recoveredAs?: string }}
+ *   code: the code to load; healed: true iff the pattern fell back to its
+ *   original; recoveredAs: the user pattern now holding the broken copy.
  */
-export function resolveWorkingCopy({ name, patterns, store, canTranspile }) {
+export function resolveWorkingCopy({
+  name,
+  patterns,
+  store,
+  canTranspile,
+  onHeal,
+}) {
   const record = store.get(name);
   const hasOriginal = name in patterns;
   // No working copy → original (if any). Nothing to heal.
@@ -135,7 +151,7 @@ export function resolveWorkingCopy({ name, patterns, store, canTranspile }) {
   // Working copy transpiles → it's a real edit; honor it (the normal path).
   if (canTranspile(record.code)) return { code: record.code, healed: false };
   // Working copy is broken. Only heal if the ORIGINAL is itself healthy —
-  // otherwise dropping the copy loses data without producing a working file.
+  // otherwise falling back would not produce a working file either.
   if (!canTranspile(patterns[name])) {
     console.warn(
       `[strasbeat] working copy of "${name}" fails to transpile, and so does ` +
@@ -143,13 +159,52 @@ export function resolveWorkingCopy({ name, patterns, store, canTranspile }) {
     );
     return { code: record.code, healed: false };
   }
+  const recoveredAs = keepBrokenCopy({ name, record, patterns, store });
+  if (!recoveredAs) {
+    console.warn(
+      `[strasbeat] working copy of "${name}" no longer transpiles, but it ` +
+        `could not be set aside — keeping it in place.`,
+    );
+    return { code: record.code, healed: false };
+  }
   console.warn(
-    `[strasbeat] working copy of "${name}" no longer transpiles — falling back ` +
-      `to the shipped original and dropping the broken cached copy. (A ` +
-      `non-compiling cache is not a real edit; your disk version is used.)`,
+    `[strasbeat] working copy of "${name}" no longer transpiles — it was ` +
+      `kept as "${recoveredAs}" and "${name}" is back to the shipped original.`,
   );
   store.delete(name);
-  return { code: patterns[name], healed: true };
+  onHeal?.({ name, recoveredAs });
+  return { code: patterns[name], healed: true, recoveredAs };
+}
+
+// Store a shipped pattern's non-transpiling working copy as a listed user
+// pattern. Returns the name it was stored under, or null when either write
+// failed — the caller must then leave the working copy alone.
+function keepBrokenCopy({ name, record, patterns, store }) {
+  const base = `${name}-recovered`;
+  let target = base;
+  for (let n = 2; patternNameTaken(target, patterns, store); n++) {
+    target = `${base}-${n}`;
+  }
+  try {
+    const ok = store.set(target, {
+      code: record.code,
+      modified: record.modified ?? new Date().toISOString(),
+      isUserPattern: true,
+    });
+    if (ok === false) return null;
+    // Read the record back: a store that accepted the write but cannot
+    // return it has not kept the copy.
+    if (store.get(target)?.code !== record.code) return null;
+    const idx = store.getIndex();
+    const listed = idx.userPatterns ?? [];
+    if (!listed.includes(target)) {
+      store.setIndex({ ...idx, userPatterns: [...listed, target] });
+    }
+    return target;
+  } catch (err) {
+    console.warn("[strasbeat] couldn't set the working copy aside:", err);
+    return null;
+  }
 }
 
 /** Build ordered list of user pattern names from the store index. */

@@ -142,7 +142,7 @@ export function createTabController(deps) {
   }
 
   function codeFor(name, { heal = true } = {}) {
-    // Host may inject an auto-healing resolver (drops a broken cached Demo copy
+    // Host may inject an auto-healing resolver (sets a broken cached Demo copy aside
     // and returns the disk original). Default preserves the original behavior:
     // working copy shadows the shipped original.
     if (resolveCode && heal) {

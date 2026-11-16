@@ -28,12 +28,28 @@ import { resolveWorkingCopy } from "./patterns.js";
 import { transpiler } from "./transpiler-patch.js";
 import "@strudel/mini"; // register the minilang so the mini() rewrite resolves
 
-// A minimal fake store: a Map keyed by name, get()/delete() only.
-function makeStore(initial = {}) {
+// A minimal fake store: a Map keyed by name plus an index. `failSet` makes
+// every record write fail the way a refused localStorage write does.
+function makeStore(initial = {}, { failSet = null } = {}) {
   const m = new Map(Object.entries(initial));
+  let index = { lastOpen: null, userPatterns: [] };
   return {
     get: (name) => m.get(name) ?? null,
+    set: (name, record) => {
+      if (failSet === "false") return false;
+      if (failSet === "quota") {
+        const err = new Error("full");
+        err.name = "QuotaExceededError";
+        throw err;
+      }
+      m.set(name, record);
+      return true;
+    },
     delete: (name) => m.delete(name),
+    getIndex: () => index,
+    setIndex: (next) => {
+      index = next;
+    },
     _has: (name) => m.has(name),
     _size: () => m.size,
   };
@@ -78,8 +94,71 @@ describe("resolveWorkingCopy() auto-heal (injected canTranspile)", () => {
     });
     assert.equal(r.code, "GOOD_ORIGINAL");
     assert.equal(r.healed, true);
-    assert.ok(!store._has("demo"), "the broken cached copy must be dropped");
+    assert.ok(!store._has("demo"), "the broken copy must stop shadowing");
   });
+
+  test("a healed copy is kept as a listed user pattern, never discarded", () => {
+    // What autosave leaves behind when an edit session ends mid-expression.
+    const store = makeStore({
+      demo: { code: "HOUR_OF_EDITS(", modified: "2026-01-01T00:00:00.000Z" },
+    });
+    const healed = [];
+    const r = resolveWorkingCopy({
+      name: "demo",
+      patterns,
+      store,
+      canTranspile: (code) => code === "GOOD_ORIGINAL",
+      onHeal: (info) => healed.push(info),
+    });
+    assert.equal(r.healed, true);
+    assert.equal(r.recoveredAs, "demo-recovered");
+    assert.deepEqual(store.get("demo-recovered"), {
+      code: "HOUR_OF_EDITS(",
+      modified: "2026-01-01T00:00:00.000Z",
+      isUserPattern: true,
+    });
+    assert.deepEqual(store.getIndex().userPatterns, ["demo-recovered"]);
+    assert.deepEqual(healed, [{ name: "demo", recoveredAs: "demo-recovered" }]);
+  });
+
+  test("an earlier recovered copy is not overwritten", () => {
+    const store = makeStore({
+      demo: { code: "BROKEN_AGAIN(" },
+      "demo-recovered": { code: "FIRST_RECOVERY(", isUserPattern: true },
+      "demo-recovered-2": { code: "unlisted leftover" },
+    });
+    const r = resolveWorkingCopy({
+      name: "demo",
+      patterns,
+      store,
+      canTranspile: (code) => code === "GOOD_ORIGINAL",
+    });
+    assert.equal(r.recoveredAs, "demo-recovered-3");
+    assert.equal(store.get("demo-recovered").code, "FIRST_RECOVERY(");
+    assert.equal(store.get("demo-recovered-2").code, "unlisted leftover");
+    assert.equal(store.get("demo-recovered-3").code, "BROKEN_AGAIN(");
+  });
+
+  for (const failSet of ["false", "quota"]) {
+    test(`copy cannot be set aside (${failSet}) → nothing is healed or deleted`, () => {
+      const store = makeStore({ demo: { code: "BROKEN_COPY" } }, { failSet });
+      let called = false;
+      const r = resolveWorkingCopy({
+        name: "demo",
+        patterns,
+        store,
+        canTranspile: (code) => code === "GOOD_ORIGINAL",
+        onHeal: () => {
+          called = true;
+        },
+      });
+      assert.equal(r.code, "BROKEN_COPY");
+      assert.equal(r.healed, false);
+      assert.equal(called, false);
+      assert.ok(store._has("demo"), "the only copy must stay in the store");
+      assert.equal(store._size(), 1);
+    });
+  }
 
   test("broken copy AND broken original → keep copy (dropping would lose data)", () => {
     const store = makeStore({ demo: { code: "BROKEN_COPY" } });
@@ -191,6 +270,11 @@ $: s("bd*4")`;
       canTranspile(r.code),
       "the healed code must itself transpile (no more Unterminated string)",
     );
-    assert.ok(!store._has("05-shader-demo"), "the broken copy must be dropped");
+    assert.ok(!store._has("05-shader-demo"), "the broken copy must stop shadowing");
+    assert.equal(
+      store.get("05-shader-demo-recovered").code,
+      BROKEN_SHADER_COPY,
+      "and must still be in the library",
+    );
   });
 });

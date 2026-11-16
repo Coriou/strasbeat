@@ -122,6 +122,11 @@ function canTranspilePattern(code) {
   }
 }
 
+// Status line for a working copy that auto-heal moved aside.
+function healStatus({ name, recoveredAs }) {
+  return `"${name}" had a syntax error and was reset \u2014 your version is kept as "${recoveredAs}"`;
+}
+
 // ─── Persistence store ───────────────────────────────────────────────────
 // See design/work/09-pattern-persistence.md.
 const store = createLocalStore();
@@ -269,6 +274,9 @@ const storeIndex = store.getIndex();
 const fallbackName = patternNames[0] ?? "empty";
 
 let initialName, initialCode;
+// Set when boot moved a non-transpiling working copy aside (see
+// resolveWorkingCopy); reported in the status line once the transport exists.
+let bootHeal = null;
 if (sharedArrival) {
   initialName = sharedArrival.name;
   initialCode = sharedArrival.code;
@@ -276,15 +284,18 @@ if (sharedArrival) {
   initialName = storeIndex.lastOpen;
   // resolveWorkingCopy heals the stale-broken-cache class: if lastOpen is a
   // shipped Demo whose working copy no longer transpiles (e.g. an old broken
-  // shader copy shadowing a fixed 05-shader-demo.js), it drops the copy and
-  // falls back to the disk original — so a non-compiling cache can't strand
-  // boot on the very pattern the user left open. User patterns and healthy
-  // edits are returned untouched.
+  // shader copy shadowing a fixed 05-shader-demo.js), it sets the copy aside
+  // as a user pattern and falls back to the disk original — so a
+  // non-compiling cache can't strand boot on the very pattern the user left
+  // open. User patterns and healthy edits are returned untouched.
   const { code } = resolveWorkingCopy({
     name: initialName,
     patterns,
     store,
     canTranspile: canTranspilePattern,
+    onHeal: (info) => {
+      bootHeal = info;
+    },
   });
   if (code != null) initialCode = code;
   else {
@@ -1148,6 +1159,8 @@ if (sharedArrival) {
       ? `opened shared pattern as "${sharedArrival.name}"`
       : "\u26a0 couldn\u2019t save the shared pattern \u2014 keep the link",
   );
+} else if (bootHeal) {
+  transport.setStatus(healStatus(bootHeal));
 } else if (storeIndex.lastOpen && store.get(storeIndex.lastOpen)) {
   transport.setStatus(`restored your edits to "${storeIndex.lastOpen}"`);
 }
@@ -1319,10 +1332,23 @@ tabs = createTabController({
   store,
   patterns,
   // Auto-heal a broken cached Demo copy on tab open: if a shipped pattern's
-  // working copy no longer transpiles but the disk original does, drop the copy
-  // and use the original (lossless — a non-compiling cache isn't a real edit).
+  // working copy no longer transpiles but the disk original does, the copy is
+  // set aside as a user pattern and the original is used.
   resolveCode: (name) =>
-    resolveWorkingCopy({ name, patterns, store, canTranspile: canTranspilePattern }).code,
+    resolveWorkingCopy({
+      name,
+      patterns,
+      store,
+      canTranspile: canTranspilePattern,
+      onHeal: (info) => {
+        // After the tab switch that asked for this code has finished, so the
+        // message is not overwritten and the rail lists the new pattern.
+        queueMicrotask(() => {
+          refreshRail();
+          transport.setStatus(healStatus(info));
+        });
+      },
+    }).code,
   buildState: buildTabState,
   installState: (snap) => {
     installTabState(snap);
