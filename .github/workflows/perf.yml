@@ -91,6 +91,8 @@ jobs:
         run: |
           if [ -n "$BASE_REF" ] && [ -f base/.github/perf/ratchets.json ]; then
             node .github/perf/ratchet.mjs guard base/.github/perf/ratchets.json .github/perf/ratchets.json
+          else
+            echo "SKIPPED ratchet guard: no base, or the base has no ratchets.json"
           fi
 
       - name: Check head ceilings

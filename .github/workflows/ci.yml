@@ -46,3 +46,24 @@ jobs:
         run: |
           node .github/perf/bundle.mjs dist bundle-results.json
           node .github/perf/ratchet.mjs check bundle-results.json --prefix bundle.
+
+      # A ceiling raised or removed needs a `raises` entry with a reason
+      # (.github/perf/lib/ratchets.mjs). Compared with main, or on a push to
+      # main with the commit it replaced: checked here, on every push, so the
+      # rule does not depend on someone running the performance workflow.
+      - name: Ceilings only go down
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=main
+          if [ "$GITHUB_REF" = refs/heads/main ]; then base="$BEFORE"; fi
+          if [ -z "$base" ] || ! git fetch --quiet --depth=1 origin "$base"; then
+            echo "SKIPPED ratchet guard: no base commit to compare with"
+            exit 0
+          fi
+          if ! git cat-file -e FETCH_HEAD:.github/perf/ratchets.json 2>/dev/null; then
+            echo "SKIPPED ratchet guard: the base has no ratchets.json"
+            exit 0
+          fi
+          git show FETCH_HEAD:.github/perf/ratchets.json > "$RUNNER_TEMP/base-ratchets.json"
+          node .github/perf/ratchet.mjs guard "$RUNNER_TEMP/base-ratchets.json" .github/perf/ratchets.json

@@ -918,10 +918,14 @@ A ceiling only goes down. After a change that lowers a count, download
 the run's `perf` artifact (`ci-run` prints where it put it), run `lower`
 on its `results.json` and commit the file with the change. `lower` never
 raises a ceiling and never adds or removes a key (`--init --metrics a,b`
-adds). The workflow's `guard` step fails when a ceiling was raised or
-removed relative to the base commit, or its tolerance widened, unless the
-key is listed in `raises` with a reason — which is the reviewable way to
-say "this count went up, and here is why".
+adds). A `guard` step fails when a ceiling was raised or removed relative
+to the base commit, or its tolerance widened, unless the key is listed in
+`raises` with a reason — which is the reviewable way to say "this count
+went up, and here is why". It runs in CI on every push (against `main`;
+on a push to `main`, against the commit it replaced) and in the
+performance workflow against its base. A `raises` entry does not expire:
+remove it once `main` carries the raised ceiling, or the key can be
+raised again under the old reason.
 
 **Finding the next bottleneck.** Keep a branch
 (`node scripts/ci-run.mjs perf <name> --keep`) and dispatch the workflow
