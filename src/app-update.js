@@ -60,7 +60,16 @@ export async function registerUpdates({
       offered = worker;
       if (typeof closeNotice === "function") closeNotice();
       closeNotice = showNotice(() => {
-        if (requested || registration.waiting !== worker) return;
+        if (requested || reloaded || offered !== worker) return;
+        if (registration.waiting !== worker) {
+          // No longer waiting: another window applied this update (the new
+          // worker took over every window, and only that one reloaded), or
+          // the worker was discarded. There is nothing left to activate;
+          // the reload the user asked for brings the page up to date.
+          reloaded = true;
+          reload();
+          return;
+        }
         requested = true;
         try {
           worker.postMessage({ type: "SKIP_WAITING" });

@@ -410,6 +410,17 @@ try {
       );
       assertNoShellTraffic(retiredStart);
       await panel(otherWindow, "reference");
+      // Its own card is still up, for a worker that is no longer waiting.
+      // The button must still do what it says, not sit on "Updating…".
+      await otherWindow
+        .getByRole("button", { name: "Reload to update", exact: true })
+        .click();
+      await otherWindow.waitForFunction(
+        () => window.strasbeat?.buildId === "sw-build-2",
+        {},
+        { timeout: 90000 },
+      );
+      await ready(otherWindow);
       await otherWindow.close();
       log(
         "other build-1 window retains lazy chunks after explicit activation",

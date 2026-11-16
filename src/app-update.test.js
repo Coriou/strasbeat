@@ -104,6 +104,22 @@ test("controlled update waits for click and controllerchange, reloads exactly on
   f.sw.emit("controllerchange");
   assert.equal(f.reloads(), 1);
 });
+test("an update another window already applied reloads this one on click", async () => {
+  const f = fixture({ waiting: true });
+  await registerUpdates(f.deps);
+  assert.equal(f.notices.length, 1);
+  // The other window's click: the worker activates and takes over here too.
+  f.reg.waiting = null;
+  f.reg.active = f.worker;
+  f.worker.state = "activated";
+  f.worker.emit("statechange");
+  f.sw.emit("controllerchange");
+  assert.equal(f.reloads(), 0, "a window that did not ask is never reloaded");
+  f.notices[0]();
+  f.notices[0]();
+  assert.deepEqual(f.messages, []);
+  assert.equal(f.reloads(), 1);
+});
 test("waiting at startup is offered", async () => {
   const f = fixture({ waiting: true });
   await registerUpdates(f.deps);
