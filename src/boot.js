@@ -3,17 +3,34 @@ import * as strudelDraw from "@strudel/draw";
 import * as strudelMini from "@strudel/mini";
 import * as strudelTonal from "@strudel/tonal";
 import * as strudelWebaudio from "@strudel/webaudio";
-// slider.mjs exports `sliderWithID`, the function the Strudel transpiler
-// rewrites `slider(value, min, max, step)` calls into. Without it in scope,
-// any pattern using slider() throws "sliderWithID is not defined" at eval.
-import * as strudelSlider from "@strudel/codemirror/slider.mjs";
+// `sliderWithID` is the function the Strudel transpiler rewrites
+// `slider(value, min, max, step)` calls into. Without it in scope, any
+// pattern using slider() throws "sliderWithID is not defined" at eval.
+// It has to come from the package entry, the same module instance the editor
+// (StrudelMirror) uses: the slider widgets post their value to that
+// instance's store, and a second copy would never hear them.
+import { slider, sliderWithID } from "@strudel/codemirror";
+// In scope as a whole so `loadSoundfont(url)`, `setSoundfontUrl` and
+// `soundfontList` work in patterns, as they do on strudel.cc.
+import * as strudelSoundfonts from "@strudel/soundfonts";
 import * as strudelExt from "./strudel-ext/index.js";
-import { registerSoundfonts } from "@strudel/soundfonts";
+import {
+  SAMPLE_NAME_OWNER,
+  UZU_DRUMKIT,
+  UPSTREAM_SAMPLE_MAPS,
+  DRUM_MACHINE_ALIASES,
+  DRUM_MACHINES_TAG,
+  applyJsonAfter,
+  createNamePrecedence,
+  fetchJson,
+} from "./default-samples.js";
 import { runUserSetup } from "./user-setup.js";
 import { LIVE_MAX_POLYPHONY } from "./export.js";
 
 const { evalScope, controls } = strudelCore;
-const { initAudioOnFirstClick, registerSynthSounds, registerZZFXSounds, samples } = strudelWebaudio; // prettier-ignore
+const { initAudioOnFirstClick, registerSynthSounds, registerZZFXSounds, samples, aliasBank } = strudelWebaudio; // prettier-ignore
+const { registerSoundfonts } = strudelSoundfonts;
+const strudelSlider = { slider, sliderWithID };
 
 // What stops working when a boot phase fails to load, in the user's terms.
 // Shown next to the failure in the in-app console (see eval-feedback.js).
@@ -29,6 +46,12 @@ const BOOT_PHASE_AFFECTS = {
   "uzu-drumkit": "the uzu drum kit samples will be silent.",
   "user setup":
     "packages, samples or the setup script from the Setup panel may be missing.",
+  ...Object.fromEntries(
+    [...UPSTREAM_SAMPLE_MAPS, DRUM_MACHINE_ALIASES].map((m) => [
+      m.label,
+      m.affects,
+    ]),
+  ),
 };
 
 /**
@@ -67,7 +90,7 @@ export function createBoot({ shellEl, exportBtn, status }) {
     try {
       initAudioOnFirstClick({ maxPolyphony: LIVE_MAX_POLYPHONY });
       setBootProgress(0.05, "loading modules…");
-      const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelSlider, strudelExt); // prettier-ignore
+      const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelSlider, strudelSoundfonts, strudelExt); // prettier-ignore
       await loadModules;
       setBootProgress(0.15, "loading synth sounds…");
 
@@ -113,13 +136,39 @@ export function createBoot({ shellEl, exportBtn, status }) {
 
       // Phase 3: sample banks (large, in parallel as they're independent)
       // strudel.cc has no CORS headers, so we proxy via vite.config.js
+      // Several of these maps define the same names (bd, sd, hh… and sax);
+      // dirt-samples keeps them, whichever manifest arrives first.
+      const names = createNamePrecedence();
+      const phases = {
+        "dirt-samples": withTimeout(SAMPLE_NAME_OWNER.label, fetchJson(SAMPLE_NAME_OWNER.manifest).then((json) => samples(names.claim(json)))), // prettier-ignore
+        'tidal-drum-machines': withTimeout('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/', { tag: DRUM_MACHINES_TAG })), // prettier-ignore
+      };
       await Promise.all([
-        withTimeout("dirt-samples", samples("github:tidalcycles/dirt-samples")),
-        withTimeout('tidal-drum-machines', samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/')), // prettier-ignore
+        ...Object.values(phases),
         withTimeout(
-          "uzu-drumkit",
-          samples(
-            "https://raw.githubusercontent.com/tidalcycles/uzu-drumkit/main/strudel.json",
+          UZU_DRUMKIT.label,
+          fetchJson(UZU_DRUMKIT.manifest).then((json) =>
+            samples(names.yieldTo(json)),
+          ),
+        ),
+        // The rest of what strudel.cc registers by default (piano, VCSL,
+        // wavetables, mridangam) — manifests only, audio loads on first use.
+        ...UPSTREAM_SAMPLE_MAPS.map((m) =>
+          withTimeout(
+            m.label,
+            fetchJson(m.manifest).then((json) =>
+              samples(names.yieldTo(json), m.base, { tag: m.tag }),
+            ),
+          ),
+        ),
+        // aliasBank() walks the sounds registered so far, so the
+        // drum-machine map has to be in before the short names are added.
+        withTimeout(
+          DRUM_MACHINE_ALIASES.label,
+          applyJsonAfter(
+            DRUM_MACHINE_ALIASES.manifest,
+            phases[DRUM_MACHINE_ALIASES.after],
+            (aliases) => aliasBank(aliases),
           ),
         ),
       ]);

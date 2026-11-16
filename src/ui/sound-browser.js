@@ -70,6 +70,10 @@ const CHUNK_ROWS = 80;
 
 const NON_KIT_PREFIXES = new Set(["gm", "wt"]);
 const NON_KIT_TYPES = new Set(["synth", "soundfont", "wavetable"]);
+// The tag boot gives the drum-machine maps (as strudel.cc does). A sample
+// map with any other tag is an instrument family, listed under that tag; an
+// untagged one (user imports, inline `samples(...)`) is judged by its names.
+const KIT_TAG = "drum-machines";
 
 export function createSoundBrowserPanel({
   getSoundMap,
@@ -78,7 +82,7 @@ export function createSoundBrowserPanel({
   onFocusEditor = () => {},
 }) {
   // ─── State ────────────────────────────────────────────────────────────
-  /** @type {Array<{ name: string, type: string, sampleCount: number, kit: string|null }>} */
+  /** @type {Array<{ name: string, type: string, sampleCount: number, kit: string|null, tag: string|null, aliases: string[] }>} */
   let allSounds = [];
   /** @type {Set<string>} */
   let inUse = new Set();
@@ -666,11 +670,15 @@ export function createSoundBrowserPanel({
   // containing kit group if collapsed so the row is actually visible.
   function focusSound(name) {
     if (!mounted) return;
-    const sound = allSounds.find((s) => s.name === name);
+    const sound = allSounds.find(
+      (s) => s.name === name || s.aliases.includes(name),
+    );
     if (!sound) {
       console.warn(`[sound-browser] focusSound: "${name}" not in allSounds`);
       return;
     }
+    // An alias (tr909_bd) is shown as the row of the sound it points at.
+    name = sound.name;
     // The current search or category may be hiding it — drop whichever
     // filter is in the way so the reveal always lands on a visible row.
     const groupKey = sound.kit ?? bucketLabel(sound);
@@ -874,6 +882,12 @@ export function createSoundBrowserPanel({
  * into the shape the panel renders. Detects kit membership via the
  * `<prefix>_<suffix>` convention used by every Strudel sample bank: a kit
  * exists when 3+ sounds share the same prefix.
+ *
+ * A name that points at the very same entry as an earlier one is an alias
+ * (`aliasBank()` and `soundAlias()` store the original's entry under the
+ * new key): it gets no row of its own and is listed in the original's
+ * `aliases`, so the short bank names stay searchable without every drum
+ * machine showing up twice.
  */
 export function collectSounds(soundMapObj) {
   if (!soundMapObj || typeof soundMapObj !== "object") {
@@ -882,7 +896,21 @@ export function collectSounds(soundMapObj) {
   }
   // An empty map is the normal state until prebake finishes; the panel
   // shows "no sounds loaded yet" and re-reads on the next refresh.
-  const names = Object.keys(soundMapObj);
+  const names = [];
+  const firstNameOf = new Map(); // entry object → the name it was first seen under
+  const aliasesOf = new Map();
+  for (const name of Object.keys(soundMapObj)) {
+    const entry = soundMapObj[name];
+    const isObject = entry != null && typeof entry === "object";
+    const original = isObject ? firstNameOf.get(entry) : undefined;
+    if (original !== undefined) {
+      if (!aliasesOf.has(original)) aliasesOf.set(original, []);
+      aliasesOf.get(original).push(name);
+      continue;
+    }
+    if (isObject) firstNameOf.set(entry, name);
+    names.push(name);
+  }
   if (names.length === 0) return [];
 
   // First pass — count prefix occurrences so we can decide which prefixes
@@ -894,11 +922,15 @@ export function collectSounds(soundMapObj) {
   for (const name of names) {
     types.set(name, soundMapObj[name]?.data?.type ?? inferType(name));
   }
+  const tagOf = (name) => soundMapObj[name]?.data?.tag ?? null;
+  const canBeInKit = (name) =>
+    !NON_KIT_TYPES.has(types.get(name)) &&
+    (tagOf(name) === null || tagOf(name) === KIT_TAG);
   const prefixCounts = new Map();
   for (const name of names) {
     const prefix = splitPrefix(name);
     if (!prefix || NON_KIT_PREFIXES.has(prefix)) continue;
-    if (NON_KIT_TYPES.has(types.get(name))) continue;
+    if (!canBeInKit(name)) continue;
     prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
   }
   const kitPrefixes = new Set();
@@ -922,14 +954,14 @@ export function collectSounds(soundMapObj) {
     const prefix = splitPrefix(name);
     const type = types.get(name);
     const kit =
-      prefix && kitPrefixes.has(prefix) && !NON_KIT_TYPES.has(type)
-        ? prefix
-        : null;
+      prefix && kitPrefixes.has(prefix) && canBeInKit(name) ? prefix : null;
     out.push({
       name,
       type,
       sampleCount,
       kit,
+      tag: tagOf(name),
+      aliases: aliasesOf.get(name) ?? [],
     });
   }
   return out;
@@ -938,7 +970,11 @@ export function collectSounds(soundMapObj) {
 function soundMatchesQuery(sound, q) {
   const lname = sound.name.toLowerCase();
   const lkit = sound.kit ? sound.kit.toLowerCase() : "";
-  return lname.includes(q) || lkit.includes(q);
+  return (
+    lname.includes(q) ||
+    lkit.includes(q) ||
+    sound.aliases.some((alias) => alias.toLowerCase().includes(q))
+  );
 }
 
 function sameNames(a, b) {
@@ -1008,14 +1044,23 @@ function bucketLabel(sound) {
     case "wavetable":
       return "wavetables";
     case "sample":
-      return "samples";
+      return sound.tag && sound.tag !== KIT_TAG ? sound.tag : "samples";
     default:
       return sound.type ?? "other";
   }
 }
 
 function formatGroupLabel(key, sounds) {
-  return sounds[0]?.kit ? key : key.charAt(0).toUpperCase() + key.slice(1);
+  if (!sounds[0]?.kit) return key.charAt(0).toUpperCase() + key.slice(1);
+  // A bank with a short name shows it next to the long one.
+  const short = new Set();
+  for (const s of sounds) {
+    for (const alias of s.aliases) {
+      const prefix = splitPrefix(alias);
+      if (prefix) short.add(prefix);
+    }
+  }
+  return [key, ...short].join(" · ");
 }
 
 function byDrumOrder(a, b) {
@@ -1053,18 +1098,20 @@ function scanInUse(text, sounds) {
     // Use a word-boundary-style match. Sound names contain underscores,
     // which `\b` treats as a word char, so we manually check the chars
     // around the match instead.
-    const name = s.name;
-    let from = 0;
-    while (from <= text.length) {
-      const i = text.indexOf(name, from);
-      if (i < 0) break;
-      const before = i === 0 ? "" : text[i - 1];
-      const after = text[i + name.length] ?? "";
-      if (!isWordChar(before) && !isWordChar(after)) {
-        out.add(name);
-        break;
+    // A sound is in use under any of its names; the row is the original's.
+    names: for (const name of [s.name, ...s.aliases]) {
+      let from = 0;
+      while (from <= text.length) {
+        const i = text.indexOf(name, from);
+        if (i < 0) break;
+        const before = i === 0 ? "" : text[i - 1];
+        const after = text[i + name.length] ?? "";
+        if (!isWordChar(before) && !isWordChar(after)) {
+          out.add(s.name);
+          break names;
+        }
+        from = i + 1;
       }
-      from = i + 1;
     }
   }
   return out;

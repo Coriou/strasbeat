@@ -15,3 +15,6 @@ export { initHydra, clearHydra, H } from "./hydra.js";
 // Importing shader.js here also runs its Pattern.prototype.uniform side effect,
 // registering the .uniform() Pattern method for every pattern file.
 export { shader } from "./shader.js";
+// Side effect only: registers the .piano() Pattern method that strudel.cc's
+// REPL ships outside the published packages.
+import "./piano.js";

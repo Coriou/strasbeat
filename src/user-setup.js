@@ -293,18 +293,6 @@ export const OPT_IN_PACKAGES = [
     description: "Serial port communication",
     load: () => import("@strudel/serial"),
   },
-  {
-    id: "vcsl",
-    label: "VCSL",
-    description: "Orchestral samples (CC0, ~60MB download)",
-    sampleBank: true,
-  },
-  {
-    id: "wavetables",
-    label: "Wavetables",
-    description: "uzu wavetable synthesis samples",
-    sampleBank: true,
-  },
 ];
 
 // ─── Persistence ────────────────────────────────────────────────────────
@@ -338,10 +326,6 @@ export async function loadOptInPackage(id) {
     console.warn(`[user-setup] unknown package id: ${id}`);
     return null;
   }
-  if (entry.sampleBank) {
-    console.warn(`[user-setup] ${id} is a sample bank, use _loadSampleBank()`);
-    return null;
-  }
   try {
     const mod = await entry.load();
     return mod;
@@ -351,47 +335,20 @@ export async function loadOptInPackage(id) {
   }
 }
 
-const SAMPLE_BANK_URLS = {
-  vcsl: [
-    "https://strudel.b-cdn.net/vcsl.json",
-    "https://strudel.b-cdn.net/VCSL/",
-  ],
-  wavetables: [
-    "https://strudel.b-cdn.net/uzu-wavetables.json",
-    "https://strudel.b-cdn.net/uzu-wavetables/",
-  ],
-};
-
-async function _loadSampleBank(id, samples) {
-  const urls = SAMPLE_BANK_URLS[id];
-  if (!urls) {
-    console.warn(`[user-setup] unknown sample bank id: ${id}`);
-    return;
-  }
-  try {
-    await samples(...urls);
-    console.log(`[user-setup] loaded sample bank: ${id}`);
-  } catch (err) {
-    console.warn(`[user-setup] failed to load sample bank ${id}:`, err);
-  }
-}
-
 // ─── Boot integration ───────────────────────────────────────────────────
 
 export async function runUserSetup({ evalScope, samples }) {
-  const enabledIds = getEnabledPackages();
+  // Ids that are no longer in the registry (a package list from an older
+  // session) are ignored rather than reported as load failures.
+  const enabledIds = getEnabledPackages().filter((id) =>
+    OPT_IN_PACKAGES.some((p) => p.id === id),
+  );
   const script = getSetupScript();
 
   // 1. Load enabled opt-in packages
   if (enabledIds.length > 0) {
     const loadResults = await Promise.allSettled(
       enabledIds.map(async (id) => {
-        // Sample-bank packages load via samples() URLs, not dynamic import.
-        const entry = OPT_IN_PACKAGES.find((p) => p.id === id);
-        if (entry?.sampleBank) {
-          await _loadSampleBank(id, samples);
-          return null;
-        }
         const mod = await loadOptInPackage(id);
         if (mod) {
           await evalScope(mod);

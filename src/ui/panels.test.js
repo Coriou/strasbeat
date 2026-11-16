@@ -129,6 +129,54 @@ describe("sound browser: kits and user sounds", () => {
     assert.equal(kitOf.kick, null);
   });
 
+  test("a bank alias is searchable on the original's row, not a second kit", () => {
+    const machine = (file) => ({
+      data: { type: "sample", samples: [file], tag: "drum-machines" },
+    });
+    const withAliases = {
+      rolandtr909_bd: machine("bd.wav"),
+      rolandtr909_sd: machine("sd.wav"),
+      rolandtr909_hh: machine("hh.wav"),
+    };
+    // aliasBank() files the same entry object under the short name
+    for (const name of Object.keys(withAliases)) {
+      withAliases[name.replace("roland", "")] = withAliases[name];
+    }
+    const sounds = collectSounds(withAliases);
+    assert.deepEqual(
+      sounds.map((s) => [s.name, s.kit, s.aliases]),
+      [
+        ["rolandtr909_bd", "rolandtr909", ["tr909_bd"]],
+        ["rolandtr909_sd", "rolandtr909", ["tr909_sd"]],
+        ["rolandtr909_hh", "rolandtr909", ["tr909_hh"]],
+      ],
+    );
+    assert.equal(categorizeSounds(withAliases).total, 3);
+  });
+
+  test("tagged instrument families are grouped by tag, not as kits", () => {
+    const tagged = (tag, samples) => ({ data: { type: "sample", samples, tag } });
+    const sounds = collectSounds({
+      recorder_alto_sus: tagged("instruments", { c4: ["a.wav"] }),
+      recorder_alto_vib: tagged("instruments", { c4: ["a.wav"] }),
+      recorder_bass_sus: tagged("instruments", { c3: ["a.wav"] }),
+      mridangam_ta: tagged("percussion", ["ta.wav"]),
+      mridangam_ki: tagged("percussion", ["ki.wav"]),
+      mridangam_dhin: tagged("percussion", ["dhin.wav"]),
+      // untagged (user import, inline samples()): still judged by its names
+      mykit_bd: tagged(undefined, ["bd.wav"]),
+      mykit_sd: tagged(undefined, ["sd.wav"]),
+      mykit_hh: tagged(undefined, ["hh.wav"]),
+    });
+    const by = Object.fromEntries(sounds.map((s) => [s.name, s]));
+    assert.equal(by.recorder_alto_sus.kit, null);
+    assert.equal(by.recorder_alto_sus.tag, "instruments");
+    assert.equal(by.mridangam_ta.kit, null);
+    assert.equal(by.mridangam_ta.tag, "percussion");
+    assert.equal(by.mykit_bd.kit, "mykit");
+    assert.equal(by.mykit_bd.tag, null);
+  });
+
   test("user sounds are the manifest's keys, not the bank's name", () => {
     const banks = [
       { name: "strudel", sampleMap: { _base: "https://x/", kick: ["k.wav"], snare: ["s.wav"] } },
