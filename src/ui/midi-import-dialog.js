@@ -10,7 +10,7 @@ import { makeIcon } from "./icons.js";
 import {
   parseMidiFile,
   analyzeTranslationInput,
-  midiFileToPattern,
+  translationInputToPattern,
   sanitizePatternName,
   gridSubdivisionLabel,
 } from "../midi-to-strudel.js";
@@ -28,6 +28,8 @@ import {
 // ─── Constants ───────────────────────────────────────────────────────────
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const VALID_EXTENSIONS = [".mid", ".midi"];
+// <option> value for "treat this track as drums" in the per-track select.
+const DRUMS_OPTION = "__drums__";
 
 // ─── Active dialog state ─────────────────────────────────────────────────
 let active = null;
@@ -226,15 +228,45 @@ async function handleFile(file, dialog, ctx) {
     return;
   }
 
+  // Parsing and analysis run on the main thread. They are linear in the
+  // number of notes, but paint a "reading" state first so a big file never
+  // looks like a dead dialog.
+  renderBusy(dialog, `Reading "${file.name}"…`);
+  await nextPaint();
+  if (!dialog.isConnected) return; // dismissed meanwhile
+
   let input;
+  let preAnalysis;
   try {
     input = parseMidiFile(buffer);
+    // Same pass the track list is built from; it also rejects files that
+    // are too long to become a single pattern.
+    preAnalysis = analyzeTranslationInput(input);
   } catch (err) {
-    renderError(dialog, ctx, `Invalid MIDI file: ${err.message}`);
+    renderError(dialog, ctx, `Can't import "${file.name}": ${errorText(err)}`);
     return;
   }
 
-  renderTrackSelection(dialog, ctx, input, buffer, file.name);
+  renderTrackSelection(dialog, ctx, input, preAnalysis, file.name);
+}
+
+function errorText(err) {
+  // Not every thrower hands over an Error with a message.
+  return err?.message || (typeof err === "string" && err) || "unreadable file";
+}
+
+function nextPaint() {
+  return new Promise((resolve) =>
+    requestAnimationFrame(() => setTimeout(resolve, 0)),
+  );
+}
+
+function renderBusy(dialog, message) {
+  dialog.replaceChildren();
+  dialog.appendChild(el("div", "modal__title", "Import MIDI"));
+  const busy = el("div", "midi-import__meta", message);
+  busy.setAttribute("role", "status");
+  dialog.appendChild(busy);
 }
 
 function renderError(dialog, ctx, message) {
@@ -256,7 +288,7 @@ function renderError(dialog, ctx, message) {
 
 // ─── State 2: track selection ────────────────────────────────────────────
 
-function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
+function renderTrackSelection(dialog, ctx, input, preAnalysis, fileName) {
   dialog.replaceChildren();
 
   // Default pattern name from MIDI metadata or filename.
@@ -294,11 +326,8 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
   const [tsNum, tsDenom] = input.timeSignature;
   const totalNotes = input.tracks.reduce((s, t) => s + t.notes.length, 0);
 
-  // Run analysis to get bar count and grid.
-  const preAnalysis = analyzeTranslationInput(input);
-
   const metaEl = el("div", "midi-import__meta");
-  metaEl.textContent = `${tsNum}/${tsDenom} at ${input.bpm} BPM · ${preAnalysis.totalBars} bars · ${totalNotes} notes`;
+  metaEl.textContent = `${tsNum}/${tsDenom} at ${input.bpm} BPM${input.hasTempoChanges ? " (tempo changes flattened)" : ""} · ${preAnalysis.totalBars} bars · ${totalNotes} notes`;
   body.appendChild(metaEl);
 
   // Track checkboxes + instrument overrides.
@@ -308,16 +337,15 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
 
   const trackCheckboxes = [];
   const soundSelects = new Map(); // trackIndex → <select>
+  // Keyed by position in the file, not by name: two tracks may share a name.
+  const analyzedByIndex = new Map(
+    preAnalysis.tracks.map((t) => [t.originalIndex, t]),
+  );
 
   for (let i = 0; i < input.tracks.length; i++) {
     const track = input.tracks[i];
-    const analyzed = preAnalysis.tracks.find((t) => t.name === track.name);
+    const analyzed = analyzedByIndex.get(i);
     const isEmpty = track.notes.length === 0;
-    const sound = analyzed
-      ? track.isDrum
-        ? "drums"
-        : analyzed.strudelSound
-      : "";
     const pitchRange = analyzed ? analyzed.pitchRange : "";
 
     const row = el(
@@ -351,26 +379,28 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
       if (pitchRange) details.textContent += `  ${pitchRange}`;
       info.appendChild(details);
 
-      if (!track.isDrum && sound) {
-        // Instrument override dropdown.
-        const select = el("select", "midi-import__sound-select");
-        const alternatives = getSoundAlternatives(track.gmProgram ?? 0);
-        for (const alt of alternatives) {
-          const opt = el("option");
-          opt.value = alt;
-          opt.textContent = `→ ${alt}`;
-          if (alt === sound) opt.selected = true;
-          select.appendChild(opt);
-        }
-        // Click on select shouldn't toggle the checkbox.
-        select.addEventListener("click", (e) => e.stopPropagation());
-        select.addEventListener("mousedown", (e) => e.stopPropagation());
-        info.appendChild(select);
-        soundSelects.set(i, select);
-      } else {
-        const soundBadge = el("span", "midi-import__badge", `→ ${sound}`);
-        info.appendChild(soundBadge);
+      // What the track becomes: one of the instrument sounds, or a drum
+      // pattern. Drum detection is a guess for anything off channel 10, so
+      // every track can be switched either way here.
+      const select = el("select", "midi-import__sound-select");
+      select.setAttribute("aria-label", `Import "${track.name}" as`);
+      const alternatives = getSoundAlternatives(track.gmProgram ?? 0);
+      const drumOpt = el("option");
+      drumOpt.value = DRUMS_OPTION;
+      drumOpt.textContent = "→ drums";
+      for (const alt of alternatives) {
+        const opt = el("option");
+        opt.value = alt;
+        opt.textContent = `→ ${alt}`;
+        select.appendChild(opt);
       }
+      select.appendChild(drumOpt);
+      select.value = track.isDrum ? DRUMS_OPTION : alternatives[0];
+      // Click on select shouldn't toggle the checkbox.
+      select.addEventListener("click", (e) => e.stopPropagation());
+      select.addEventListener("mousedown", (e) => e.stopPropagation());
+      info.appendChild(select);
+      soundSelects.set(i, select);
     }
 
     row.appendChild(info);
@@ -499,30 +529,38 @@ function renderTrackSelection(dialog, ctx, input, buffer, fileName) {
     const gridSubdivision =
       selectedGrid === "auto" ? undefined : Number(selectedGrid);
 
-    // Build sound overrides from dropdowns.
+    // Build drum / sound overrides from the per-track dropdowns.
     const soundOverrides = {};
+    const drumOverrides = {};
     for (const [trackIndex, select] of soundSelects) {
-      const analyzed = preAnalysis.tracks.find(
-        (t) => t.originalIndex === trackIndex,
-      );
-      if (analyzed && select.value !== analyzed.strudelSound) {
-        soundOverrides[trackIndex] = select.value;
+      const asDrums = select.value === DRUMS_OPTION;
+      if (asDrums !== input.tracks[trackIndex].isDrum) {
+        drumOverrides[trackIndex] = asDrums;
       }
+      if (!asDrums) soundOverrides[trackIndex] = select.value;
     }
 
+    // Generate from the input parsed when the file was opened — the file is
+    // not read a second time.
+    importBtn.disabled = true;
+    importBtn.textContent = "Importing…";
+    await nextPaint();
     let result;
     try {
-      result = midiFileToPattern(buffer, {
+      result = translationInputToPattern(input, {
         patternName: name,
         trackIndices: selectedIndices,
         gridSubdivision,
         preserveVelocity: velocityCb.checked,
-        soundOverrides:
-          Object.keys(soundOverrides).length > 0 ? soundOverrides : undefined,
+        soundOverrides,
+        drumOverrides,
       });
     } catch (err) {
-      nameError.textContent = `Import failed: ${err.message}`;
+      nameError.textContent = `Import failed: ${errorText(err)}`;
       return;
+    } finally {
+      importBtn.disabled = false;
+      importBtn.textContent = "Import as pattern";
     }
 
     // Save via the shared saveNewPattern path.
