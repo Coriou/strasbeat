@@ -10,71 +10,36 @@ these decisions.
 
 If you're an agent picking up a task here:
 
-1. **Read `SYSTEM.md` first.** It's the design system — type, color,
-   spacing, layout grammar, principles, off-limits zones. Every other doc
-   in this directory assumes you've internalised it.
-2. **Read `../CLAUDE.md`** for the broader project context if you haven't
-   already (vision, architecture, gotchas).
-3. **Then read your task spec under `work/`.** Each work spec is
-   self-contained and lists exactly what to build, what's out of scope,
+1. **Read `../AGENTS.md`** for the project's rules and the list of traps
+   if you haven't already; `../docs/architecture.md` has the invariants of
+   each subsystem.
+2. **Read `SYSTEM.md`.** It's the design system — type, color, spacing,
+   layout grammar, principles. Every other doc in this directory assumes
+   you've internalised it.
+3. **Then read your task spec under `work/`.** `work/README.md` is the
+   index: every spec with its status. Read the index, then only the spec
+   you were pointed to. Each spec lists what to build, what's out of scope,
    which files to touch, and what acceptance looks like.
-4. **Stay in your lane.** SYSTEM.md §11 lists what's off-limits — most
-   importantly, the core Strudel plumbing in `src/main.js`. The design
-   pass is DOM/CSS/CodeMirror-extensions only.
 
-## Order of operations
+## Where the work is
 
-Tasks should be tackled in roughly this order, because later ones build
-on earlier ones:
+- `work/README.md` — the index of specs and what state each is in.
+- `work/OPEN.md` — what is deferred, undecided, or waiting for a person to
+  check in a real browser.
+- `work/archive/` — finished implementation plans and the November 2026
+  audit record. Their code listings are out of date; the code is the truth.
 
-1. **`work/01-shell.md`** — the new layout (top bar + left rail +
-   editor + transport + collapsible roll). **Everything else builds on
-   this.** Land it first.
-2. **`work/02-format-and-keybindings.md`** — Prettier on demand + VSCode-
-   style keybindings. Independent of the shell — could be done in
-   parallel.
-3. **`work/03-numeric-scrubber.md`** — drag-to-scrub numeric literals in
-   the editor. Highest "feels like a real music tool" payoff per line of
-   code.
-4. **`work/04-intellisense.md`** — smart autocomplete + hover docs.
-   Phased; the first phase (sound name completion) is small and high-
-   leverage on its own.
-5. **`work/05-piano-roll.md`** — replace the existing 180px canvas with
-   a real piano roll, in the design-system style. Depends on `01-shell.md`
-   being landed (it lives in the new bottom panel).
-6. **`work/07-chord-progression.md`** — `progression("ii V I")` runtime
-   helper: a one-line API on top of Strudel's existing `.voicing()` for
-   sketching tunes from chord charts. Phased; Phase 1 (absolute chord
-   symbols + rhythm presets) is small and shippable on its own.
-   **Not a design-pass feature** — runtime only, touches `evalScope` in
-   `main.js` minimally and additively. Independent of 1–5.
-7. **`work/08-feature-parity-and-beyond.md`** — right-rail panel system:
-   sound browser, API reference, console, export panel, enhanced
-   settings. Phased; Phase 1 (right rail + sound browser) is the
-   highest-value delivery and builds the infrastructure all other
-   panels depend on. Depends on `01-shell.md` being landed.
-8. **`work/09-pattern-persistence.md`** — localStorage-backed autosave,
-   working copies, user-created patterns, revert-to-original, dirty
-   indicators. Phased; Phase 1 (autosave + store abstraction) solves the
-   "lose work" problem. Phase 3 sketches migration to API-backed user
-   accounts. Independent of 1–7 (touches `main.js` boot + left rail).
-9. **`work/10-main-refactor.md`** — pure refactor of `src/main.js`
-   (1,925 → ~600 lines). Extracts seven focused modules (`share.js`,
-   `export.js`, `editor-actions.js`, `piano-roll-resize.js`, `debug.js`,
-   `patterns.js`, `editor-setup.js`). No features, no logic changes, no
-   visual changes. Independent of 1–8 (but best done after 08 and 09 are
-   landed, since those are the last specs that add code to `main.js`).
-10. **`work/06-future.md`** — vision for Phase N+ (bidirectional editing,
-    multi-track DAW). **Not actionable yet** — read for context only when
-    working on the actionable specs above, so you don't paint us into a
-    corner.
+A shipped spec is a record of intent. Where it disagrees with the code,
+the code wins. The early specs (01–10) describe `src/main.js` as holding
+the Strudel boot, WAV export and share code; spec 10 moved those into
+`src/boot.js`, `src/export.js`, `src/share.js` and others.
 
 ## Launching an agent on a task
 
-From a fresh Claude Code session in this repo:
+From a fresh agent session in this repo:
 
-> Read `design/README.md`, then `design/SYSTEM.md`, then
-> `design/work/01-shell.md`. Implement the spec. Stop and ask if anything
+> Read `AGENTS.md`, then `design/SYSTEM.md`, then
+> `design/work/<spec>.md`. Implement the spec. Stop and ask if anything
 > seems out of scope or unclear.
 
 That's it. Each spec is written to be picked up cold.
@@ -83,10 +48,6 @@ That's it. Each spec is written to be picked up cold.
 
 Things deliberately _not_ in scope for this design pass:
 
-- Refactoring `src/main.js` plumbing (Strudel boot, prebake, WAV export,
-  MIDI bridge wiring, share encode/decode). The editor _settings_ block
-  in `main.js` and the editor's CodeMirror extensions are fair game; the
-  rest is off-limits. See `SYSTEM.md` §11 for the exact table.
 - Server-side or build-pipeline changes beyond what a feature explicitly
   needs.
 - Anything in `strudel-source/` — that's a read-only upstream reference.

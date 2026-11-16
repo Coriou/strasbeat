@@ -13,8 +13,8 @@
 // supplies an `onExport(options)` callback that does the actual render
 // (including offline-context progress polling) and returns an
 // `ExportResult` the panel uses to draw the waveform / stats. This
-// keeps the render path (see CLAUDE.md § "WAV export: DO NOT use
-// upstream renderPatternAudio") out of panel code where a casual edit
+// keeps the render path (see docs/architecture.md, "WAV export") out
+// of panel code where a casual edit
 // could reintroduce the eager-controller silent-output bug.
 //
 // Public surface (factory pattern — same shape as the other panels):

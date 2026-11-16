@@ -7,7 +7,7 @@
 
 Related reading:
 
-- `../CLAUDE.md`
+- `../AGENTS.md`
 - `../STRUDEL.md`
 - `work/16-midi-import.md`
 

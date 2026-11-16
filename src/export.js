@@ -422,8 +422,8 @@ export function downloadWav(arrayBuf, filename) {
 // `renderPatternToBuffer` that accepts an `onProgress(ratio)` callback
 // and fires it from a `setInterval` kicked off right before
 // `offline.startRendering()`. The two functions share the same setup
-// order exactly — DO NOT re-order them (see CLAUDE.md § "WAV export:
-// DO NOT use upstream renderPatternAudio"): the `SuperdoughAudio
+// order exactly — DO NOT re-order them (see docs/architecture.md,
+// "WAV export"): the `SuperdoughAudio
 // Controller` must be reset to null BEFORE `initAudio` so the first
 // `superdough()` call builds it lazily against the offline context.
 // The duplication is a deliberate ~30-line clone rather than a shared

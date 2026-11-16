@@ -13,7 +13,7 @@ Today it's a small Vite app wrapping a Strudel editor with the developer-
 comforts a daily-driver tool needs: pattern files on disk, an offline WAV
 exporter, a MIDI bridge, a console with debug helpers.
 
-The vision (see `../CLAUDE.md` § "Vision the user is steering toward") is
+The vision (see `../AGENTS.md`, "Direction") is
 that it grows — without losing Strudel's "code is the source of truth"
 ethos — into a DAW-shaped tool that's powerful for veterans and gentle
 for beginners.
@@ -322,36 +322,23 @@ Motion exists to **explain change**, not to entertain.
   `share-2`, `circle`/`disc`). Keep the text label *next* to the icon
   for the toolbar; transport buttons can be icon-only with a tooltip.
 
-## 11. Off-limits during the design pass
+## 11. Off-limits during the original design pass (historical)
 
-The design pass touches DOM structure, CSS, the editor's CodeMirror
-extensions, and small UI components. **It does not touch the core
-Strudel wiring** in `src/main.js`. Specifically:
+The first design pass (specs 01–05) was limited to DOM structure, CSS, the
+editor's CodeMirror extensions and small UI components, and was told not
+to touch the Strudel wiring that then lived in `src/main.js`. That
+restriction no longer applies: the wiring moved into `src/boot.js`,
+`src/export.js`, `src/share.js` and other focused modules (spec 10), and
+later work changes them routinely. Their invariants are in
+`../docs/architecture.md`; read the section for the module before editing
+it.
 
-| Region in `src/main.js`                  | Status                              |
-| ---------------------------------------- | ----------------------------------- |
-| Imports of `@strudel/*`                  | **off-limits**                      |
-| `prebake` + audio init                   | **off-limits**                      |
-| `renderPatternToBuffer` + WAV export     | **off-limits**                      |
-| `audioBufferToWav16`, `downloadWav`      | **off-limits**                      |
-| `MidiBridge` setup + capture handler     | **off-limits**                      |
-| `import.meta.glob` of `/patterns`        | **off-limits**                      |
-| Share-link encode/decode                 | **off-limits**                      |
-| `editor.updateSettings({...})` block     | **fair game** (extend it freely)    |
-| The editor's CodeMirror `extensions`     | **fair game** (add CM6 extensions)  |
-| DOM event listeners on toolbar buttons   | **fair game** (rewire to new shell) |
-| `window.strasbeat` console helpers       | **off-limits** (don't break them)   |
-| `window.editor`, `window.midi` exports   | **off-limits** (don't break them)   |
+Still off-limits, always:
 
-If a design task seems to require touching off-limits code, **stop and
-ask** — it likely means the task scope is wrong, not that the rule
-should bend.
-
-Also off-limits:
 - Anything in `strudel-source/` (read-only upstream reference; patches
   belong upstream).
-- `vite.config.js` server middleware (the `/api/save` and `strudel.cc`
-  proxy).
+- Breaking the console surface: `window.strasbeat`, `window.editor`,
+  `window.midi`, `window.patterns`.
 
 ## 12. References
 
