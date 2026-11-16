@@ -897,7 +897,7 @@ export function createSettingsPanel({
     const section = buildSection("About");
 
     const versionLine = el("div", "settings-panel__about-line");
-    versionLine.textContent = `strasbeat ${appVersion || "dev"}`;
+    versionLine.textContent = `strasbeat ${appVersion || "dev"} (${__BUILD_ID__})`;
     section.body.appendChild(versionLine);
 
     const strudelLine = el("div", "settings-panel__about-line");

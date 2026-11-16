@@ -22,6 +22,17 @@ language. Patterns are plain `.js` files in [`patterns/`](./patterns) —
 edit them in your IDE *or* live in the browser; both stay in sync via
 Vite HMR. Save → commit → diff → branch.
 
+Installed Chrome apps cache the editor and ordinary panels after the first
+successful online launch. Default sample manifests refresh in the background;
+previously used default samples and GM soundfonts can play offline (up to 256
+cached files). New samples, user packs and unused large opt-in packages still
+need the network. Updates offer **Reload to update** without interrupting a
+session; closing all app windows also lets the next launch update. Settings →
+About shows the build identifier. To disable offline caching in one browser,
+open `/?sb-sw=off`; use `/?sb-sw=on` to restore it. See
+[Service worker, updates and offline](docs/architecture.md#service-worker-updates-and-offline)
+for cache limits and the deployment emergency procedure.
+
 ## What strasbeat adds on top of Strudel
 
 Everything below is custom to this repo — Strudel itself ships none of

@@ -1,6 +1,7 @@
 // MUST stay the first import: it makes localStorage safe to touch before any
 // other module (ours or Strudel's) evaluates. See src/storage-guard.js.
 import { storageIsEphemeral } from "./storage-guard.js";
+import { initAppUpdates } from "./app-update.js";
 import { StrudelMirror } from "@strudel/codemirror";
 import { transpiler } from "./transpiler-patch.js";
 // Strudel packages — imported as namespaces to avoid the static+dynamic
@@ -2105,6 +2106,9 @@ captureBtn.addEventListener("click", () =>
 
 // prettier-ignore
 window.strasbeat = mountDebugHelpers({ soundMap, getSound, editor, getConsolePanel: () => consolePanel, getAudioContext, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, drumKit });
+
+window.strasbeat.buildId = __BUILD_ID__;
+initAppUpdates({ bootPromise, status });
 
 // expose for console tinkering
 window.editor = editor;

@@ -44,7 +44,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm build
+      - name: Build service-worker deploy variants
+        run: |
+          STRASBEAT_BUILD_ID=sw-build-1 pnpm build --manifest
+          STRASBEAT_BUILD_ID=sw-build-2 pnpm build --manifest --outDir dist-sw-2
+          STRASBEAT_BUILD_ID=sw-off STRASBEAT_SW=off pnpm build --outDir dist-sw-off
 
       # Playwright is installed outside the project so it never enters the
       # app's dependencies or lockfile.
@@ -54,13 +58,16 @@ jobs:
           npm init -y >/dev/null
           npm install --no-audit --no-fund playwright@1.65.1
           npx playwright install --with-deps chromium
-          cp "$GITHUB_WORKSPACE/.github/smoke/smoke.mjs" .
+          cp "$GITHUB_WORKSPACE/.github/smoke/"*.mjs .
 
       - name: Smoke
         run: |
           pnpm preview --port 4173 --strictPort &
           npx --yes wait-on@8.0.1 -t 60000 http://localhost:4173
           cd "$RUNNER_TEMP/pw" && node smoke.mjs
+
+      - name: Service worker lifecycle
+        run: cd "$RUNNER_TEMP/pw" && node sw.mjs
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

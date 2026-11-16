@@ -20,6 +20,7 @@ import {
   UPSTREAM_SAMPLE_MAPS,
   DRUM_MACHINE_ALIASES,
   DRUM_MACHINES_TAG,
+  DRUM_MACHINES,
   applyJsonAfter,
   createNamePrecedence,
   fetchJson,
@@ -27,9 +28,10 @@ import {
 import { createDrumKitController } from "./drum-kit.js";
 import { runUserSetup } from "./user-setup.js";
 import { LIVE_MAX_POLYPHONY } from "./export.js";
+import { installSoundMapBatching } from "./sound-map-batch.js";
 
 const { evalScope, controls } = strudelCore;
-const { initAudioOnFirstClick, registerSynthSounds, registerZZFXSounds, samples, aliasBank } = strudelWebaudio; // prettier-ignore
+const { initAudioOnFirstClick, registerSynthSounds, registerZZFXSounds, samples, aliasBank, soundMap } = strudelWebaudio; // prettier-ignore
 const { registerSoundfonts } = strudelSoundfonts;
 const strudelSlider = { slider, sliderWithID };
 
@@ -66,6 +68,9 @@ const BOOT_PHASE_AFFECTS = {
  *   that failed to load (empty until boot completes)
  */
 export function createBoot({ shellEl, exportBtn, status }) {
+  // Before the first sound is registered: without it every one of the
+  // ~1,850 registrations below copies the whole sound map.
+  installSoundMapBatching(soundMap);
   let bootReady = false;
   let bootFailures = [];
   // Which kit `bd`, `sd`, `hh`… play (src/drum-kit.js). It gets the two
@@ -144,7 +149,7 @@ export function createBoot({ shellEl, exportBtn, status }) {
       // Several of these maps define the same names (bd, sd, hh… and sax);
       // dirt-samples keeps them, whichever manifest arrives first.
       const names = createNamePrecedence();
-      const drumMachines = samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/', { tag: DRUM_MACHINES_TAG }); // prettier-ignore
+      const drumMachines = samples(DRUM_MACHINES.manifest, DRUM_MACHINES.base, { tag: DRUM_MACHINES_TAG }); // prettier-ignore
       const phases = {
         "dirt-samples": withTimeout(SAMPLE_NAME_OWNER.label, fetchJson(SAMPLE_NAME_OWNER.manifest).then((json) => { drumKit.setManifest("classic", json); return samples(names.claim(json)); })), // prettier-ignore
         'tidal-drum-machines': withTimeout('tidal-drum-machines', drumMachines), // prettier-ignore

@@ -8,6 +8,7 @@ are in `AGENTS.md`, not here.
 Sections: [Overview](#overview) · [Pattern file contract](#pattern-file-contract) ·
 [Boot and sound names](#boot-and-sound-names) ·
 [Bundle and lazy loading](#bundle-and-lazy-loading) ·
+[Service worker, updates and offline](#service-worker-updates-and-offline) ·
 [Strudel extensions and the docs index](#strudel-extensions-and-the-docs-index) ·
 [Bottom canvas and docSync](#bottom-canvas-and-docsync) ·
 [Responsive layout and keyboard models](#responsive-layout-and-keyboard-models) ·
@@ -129,11 +130,20 @@ ZZFX, the GM soundfonts, dirt-samples, tidal-drum-machines (plus its
 alias table, so `.bank("tr909")` works as well as `.bank("RolandTR909")`),
 uzu-drumkit, and the piano, VCSL, wavetable (`wt_*`) and mridangam maps.
 Only manifests are fetched; audio loads on first use. The maps are data
-in `src/default-samples.js` (tidal-drum-machines alone is registered
-inline in `boot.js`); each has its own 15 s timeout and a sentence saying
+in `src/default-samples.js`, including the drum-machine URL and base used
+by `boot.js`; each has its own 15 s timeout and a sentence saying
 what goes silent if it fails (`getBootFailures()`). The soundfont helpers (`loadSoundfont`, …) are in
 pattern scope. Nothing here is opt-in any more — the opt-in packages in
 Settings are xen, midi, osc, csound and serial.
+
+**Registering a sound must stay O(1).** superdough registers each sound
+with `soundMap.setKey`, and the nanostores map behind it copies the whole
+map for every key — quadratic over the ~1,850 sounds boot registers.
+`src/sound-map-batch.js` replaces `setKey` (installed by `createBoot`,
+before the first registration) with one that writes in place and gives
+listeners one fresh object per burst. `soundMap.get()` readers are
+unaffected. Its test runs against the installed store, so a superdough or
+nanostores upgrade that changes the store's shape fails there.
 
 **Name precedence:** several maps define the same names — `bd sd hh cp cb
 cr ht lt mt` (dirt-samples and uzu-drumkit) and `sax` (dirt-samples and
@@ -226,6 +236,95 @@ Rules:
 - escodegen's `source-map` dependency is stubbed in the production build
   (Strudel's transpiler never asks for a source map; the stub throws if
   that changes). `/assets/*` is served `immutable` (`vercel.json`).
+
+## Service worker, updates and offline
+
+`src/app-update.js` is the web adapter a desktop shell would replace.
+Production registers `/sw.js` at scope `/`, with `updateViaCache: "none"`,
+after `bootPromise` and an idle callback (5 s timeout; a 1 s timer when
+idle callbacks are unavailable). Dev unregisters it. Registration, install
+state and update-check failures are warned in the console and status line;
+they do not reject boot or stop playback. Unsupported browsers keep using
+the network normally. `window.strasbeat.buildId` and Settings → About show
+`STRASBEAT_BUILD_ID`, or the short git SHA ("local" without git).
+
+The Vite plugin in `src/sw/plugin.js` emits a self-contained classic script
+from `src/sw/worker.js`, using Vite's public `build()` API. It injects the
+precache list, revisions, all asset URLs, and a hash of the sorted precache
+list. Hashed asset names are their own revisions; HTML and public icons
+are content-hashed. It precaches `/index.html`, the manifest, six icons,
+and all `/assets/*` except files over 512 KiB used **only** by the opt-in
+csound/xen graphs (including their dynamic dependencies). Currently this
+excludes the roughly 3.5 MB csound engine and 1.1 MB xen chunk. Shared code
+and the entry remain required. Missing HTML, entry or icons, a missing
+expected opt-in exclusion, a required asset above 3 MiB, or a total above
+8 MiB fails the build. The build
+logs the actual count, raw bytes and excluded files; review that output
+when changing dependencies. This initial ceiling needs confirmation on the
+runner, not a local build.
+
+Caching rules (GET only, never Range requests):
+
+- Root and `/index.html` navigations, including shortcut/share queries,
+  use the cached HTML. Other navigations pass through. Precached URLs are
+  cache-first; a missing entry falls back to network.
+- Other `/assets/*` are cache-first in a runtime cache. All ordinary lazy
+  panels are already precached, so an open page keeps its own chunks across
+  a deploy while the replacement waits. Excluded opt-in chunks are available
+  offline only after use; an unfetched old opt-in chunk can disappear at a
+  deploy and still produces the existing lazy-import error.
+- The **eight** default JSON URLs (seven maps plus the drum alias table)
+  come only from `DEFAULT_MANIFESTS` in `default-samples.js`. They use
+  stale-while-revalidate. Install warms them too, because initial boot ran
+  before registration; a failed warm-up warns without blocking shell
+  installation. Offline readiness requires these manifests to have loaded.
+- Default audio is cache-first, with 256 entries, oldest insertion out
+  first; bodies advertised above 16 MiB by Content-Length are skipped.
+  Concurrent writes/pruning are serialized. This is an entry bound, not a
+  disk-byte quota: missing Content-Length is permitted. Allow-listed bases
+  are raw.githubusercontent.com's `tidalcycles/dirt-samples/`,
+  `tidalcycles/uzu-drumkit/`, `ritchse/tidal-drum-machines/` (case-insensitive
+  paths), `https://strudel.b-cdn.net/`, and
+  `https://felixroos.github.io/webaudiofontdata/sound/`. Other JSON URLs,
+  user packs, shabda, analytics and APIs pass through.
+- Only successful, non-opaque, non-206 responses may be cached. A failed
+  shell install leaves the previous worker active. Cache storage can be
+  evicted by the browser; it is not a backup for compositions.
+
+**Lifecycle invariants:** every cache name starts with `strasbeat-`.
+`sw.js` must never be intercepted or stored in a cache, and its hosting
+header stays `no-cache`. Registration explicitly checks for updates on
+launch, then hourly while visible and on returning after an hour. Normal
+install must **never** call `skipWaiting()`. A waiting worker offers a
+polite notice without taking focus; it waits behind the drum-kit card.
+Only "Reload to update" posts `SKIP_WAITING`, and the requesting page
+reloads once on `controllerchange`. Dismissal leaves the worker waiting;
+closing every app window permits activation without a click. Activation
+removes other versioned precaches, prunes runtime assets outside the new
+build, preserves manifests/audio, and claims clients. Before pruning, it
+retains
+old assets under `strasbeat-retired-*`, leased to the IDs of windows still
+open. Only those windows can read them, so another window's update cannot
+strand an old lazy import. Navigation/activation reclaims retired caches
+when their last owning window has gone. No other window auto-reloads.
+
+**Emergency deployment:** set `STRASBEAT_SW=off` in Vercel's production
+environment and redeploy (or commit `STRASBEAT_SW=off` in `.env.production`
+and deploy that commit). The resulting `/sw.js` immediately activates,
+deletes every `strasbeat-` cache, unregisters itself, and navigates each
+window to its own URL. The off build's page also skips registration and
+cleans up. Leave this build deployed long enough for installed users to
+reconnect. Remove the environment variable/committed line and redeploy to
+restore normal registration. Never remove `/sw.js` as the emergency fix:
+stale installations must be able to fetch its replacement. The emergency
+reload deliberately interrupts running sessions.
+
+**Per-browser escape hatch:** open `/?sb-sw=off`. This records `off` under
+`localStorage["strasbeat:flag:sw"]`, unregisters, deletes only our caches,
+and reloads a controlled page once to release the old controller. Future
+launches stay on the network. `/?sb-sw=on` clears the override. If storage
+is blocked, the URL flag still applies to this visit; it cannot promise
+persistence. Neither switch deletes patterns or other localStorage data.
 
 ## Strudel extensions and the docs index
 
@@ -579,6 +678,16 @@ git push origin HEAD:ci/smoke-<name>       # start it for the current commit
 gh run list --branch ci/smoke-<name>       # then: gh run view <id> --log
 git push origin --delete ci/smoke-<name>   # remove the branch afterwards
 ```
+
+After the existing smoke test, the workflow runs `.github/smoke/sw.mjs`
+against three builds (`sw-build-1`, `sw-build-2`, and `STRASBEAT_SW=off`).
+It owns a switchable Node HTTP server with the production cache headers,
+disables the ordinary browser HTTP cache, and checks installation, cached
+online/offline launches, synth scheduling, lazy panels across deploys,
+explicit updates, activation after all windows close, and both escape
+hatches. `out/sw-report.json` records PASS/FAIL details and server traffic;
+failure screenshots and the offline screenshot accompany it. No browser
+or extra build is run locally.
 
 Screenshots and `report.json` are uploaded as the run's `smoke` artifact.
 The runner image and the Playwright version are pinned in the workflow;

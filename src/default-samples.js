@@ -9,7 +9,7 @@
 // dev, vercel.json in production) like the drum-machine manifest in boot.js;
 // the audio is served by Strudel's CDN, which sends CORS headers.
 
-const CDN = "https://strudel.b-cdn.net";
+export const CDN = "https://strudel.b-cdn.net";
 
 /**
  * The default map whose sounds win wherever another default map defines the
@@ -34,6 +34,11 @@ export const UZU_DRUMKIT = {
  * `tag` ends up on every sound of the map (`data.tag`); the sound browser
  * groups by it instead of guessing from the names.
  */
+export const DRUM_MACHINES = {
+  manifest: "/strudel-cc/tidal-drum-machines.json",
+  base: "github:ritchse/tidal-drum-machines/main/machines/",
+};
+
 export const DRUM_MACHINES_TAG = "drum-machines";
 
 export const UPSTREAM_SAMPLE_MAPS = [
@@ -113,6 +118,12 @@ export const DRUM_MACHINE_ALIASES = {
   affects:
     'short bank names (.bank("tr909"), .bank("tr808")…) will be silent — the long names (.bank("RolandTR909")) still work.',
 };
+
+// Shared by boot and the worker; includes the alias table boot also fetches.
+export const DEFAULT_MANIFESTS = [
+  SAMPLE_NAME_OWNER.manifest, UZU_DRUMKIT.manifest, DRUM_MACHINES.manifest,
+  ...UPSTREAM_SAMPLE_MAPS.map((map) => map.manifest), DRUM_MACHINE_ALIASES.manifest,
+];
 
 export async function fetchJson(url, fetchImpl = fetch) {
   const res = await fetchImpl(url);

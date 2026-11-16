@@ -52,7 +52,8 @@ The maintainer's machine must stay lightly loaded.
   servers, or performance runs, and no repeated full `pnpm test` / `pnpm build`.
 - Full check on GitHub runners, through a throwaway branch. `ci/**` runs
   `pnpm test` and `pnpm build`; `ci/smoke-*` also runs the browser smoke test
-  (`.github/smoke/smoke.mjs`, headless Chromium against the production build):
+  (`.github/smoke/smoke.mjs`, plus `sw.mjs` across three deploy variants,
+  headless Chromium against production builds):
 
   ```sh
   git push origin HEAD:refs/heads/ci/<name>         # tests + build
@@ -120,6 +121,7 @@ section first; most were learned from bugs that produced no error.
 | `src/midi-bridge.js`, MIDI or OSC output, MIDI permission | MIDI |
 | layout CSS, breakpoints, left rail, tab strip, focus | Responsive layout and keyboard models |
 | workflows, `.github/smoke/`, `vercel.json` | CI and the smoke test |
+| `src/sw/`, `src/app-update.js`, `src/flags.js`, PWA/offline or update notices | Service worker, updates and offline |
 
 Other references:
 
