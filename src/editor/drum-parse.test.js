@@ -171,6 +171,16 @@ describe("parseDrumLanes() — read-only shapes", () => {
     assert.equal(lane.readOnlyReason, READ_ONLY_REASONS.shortcut);
   });
 
+  test("a bare `_` holds the previous step: not a hit on a sound called \"_\"", () => {
+    const [lane] = parseDrumLanes('$: s("bd _ _ ~")');
+    assert.equal(lane.editable, false);
+    assert.notEqual(lane.primarySound, "_");
+    // …while an underscore inside a name is still a name
+    const [named] = parseDrumLanes('$: s("bd_kick ~ ~ ~")');
+    assert.equal(named.editable, true);
+    assert.equal(named.primarySound, "bd_kick");
+  });
+
   test("`@N` elongation → elongation", () => {
     const code = '$: s("bd@2 sd")';
     const [lane] = parseDrumLanes(code);

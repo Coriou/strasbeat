@@ -365,6 +365,9 @@ function parseStepToken(raw) {
   if (raw === "~" || raw === "-") {
     return { kind: "rest", sound: null, variant: null };
   }
+  // `_` on its own is mini-notation's "hold the previous step", not a sound
+  // named "_": such a lane is not a flat row of hits (read-only).
+  if (raw === "_") return null;
   // sound or sound:N — N is a non-negative integer.
   const m = /^([A-Za-z_$][A-Za-z0-9_$]*)(?::(\d+))?$/.exec(raw);
   if (!m) return null;
