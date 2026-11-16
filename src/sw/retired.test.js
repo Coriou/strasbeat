@@ -42,6 +42,12 @@ test("an old window keeps its lazy assets after precache deletion; a new window 
     undefined,
   );
   assert.equal(await matchRetired(s, "/index.html", "window-1"), undefined);
+  // A worker script's fetch may name no client; the lease still answers it.
+  assert.equal(
+    await (await matchRetired(s, "/assets/old.js", "")).text(),
+    "old code",
+  );
+  assert.equal(await matchRetired(s, "/index.html", ""), undefined);
   await collectRetired(s, ["window-2"]);
   assert.equal(await matchRetired(s, "/assets/old.js", "window-1"), undefined);
   assert.equal(
@@ -50,6 +56,7 @@ test("an old window keeps its lazy assets after precache deletion; a new window 
   );
   await collectRetired(s, []);
   assert.deepEqual(await s.keys(), []);
+  assert.equal(await matchRetired(s, "/assets/old.js", ""), undefined);
 });
 test("retention skips non-assets, partial responses, and files rejected by the source filter", async () => {
   const s = storage();

@@ -47,13 +47,17 @@ export async function collectRetired(storage, clientIds) {
   }
 }
 
+// A request that names no client (browsers differ on whether the fetch of
+// a `new Worker(...)` script names its window) is answered from any lease.
+// That is safe: a hashed file is the same bytes whoever asks, and a lease
+// only exists while a window of that build is open.
 export async function matchRetired(storage, request, clientId) {
-  if (!clientId) return;
   for (const name of await storage.keys()) {
     if (!name.startsWith(PREFIX)) continue;
     const cache = await storage.open(name);
     const response = await cache.match(OWNERS);
-    if (response && (await response.json()).includes(clientId)) {
+    if (!response) continue;
+    if (!clientId || (await response.json()).includes(clientId)) {
       const hit = await cache.match(request);
       if (hit) return hit;
     }
