@@ -420,7 +420,7 @@ describe("failed and empty evaluates", () => {
     assert.equal(outcome.status, "error");
     const shown = entries("error").map((e) => e.message).join("\n");
     assert.match(shown, /@strudel\/midi/);
-    assert.match(shown, /Setup panel/);
+    assert.match(shown, /Packages in Settings/);
     assert.match(lastStatus(), /@strudel\/midi/);
   });
 });

@@ -1249,7 +1249,9 @@ later work changed them); 14–21 are new.
    Batch 1; `src/ui/setup-panel.js` and `src/styles/setup.css` are still in
    the tree with no importer. Recommended: delete both, along with the dead
    popover code in `src/ui/settings-drawer.js`.
-   - Decision: —
+   - Decision: deleted (`src/ui/setup-panel.js`, `src/styles/setup.css`);
+     the two messages that still pointed at a "Setup panel" now say
+     Settings. The dead popover code in `settings-drawer.js` is left.
 2. **"Try" opens examples in a scratch pattern (PN-4, PN-18, UX-26) —
    confirm.** Implemented as the audit recommended: Try in Learn and
    Reference puts the example in a user pattern named `try-example`,

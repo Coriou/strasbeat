@@ -180,7 +180,6 @@ strasbeat/
 │   │   ├── export-panel.js     # WAV export UI
 │   │   ├── settings-panel.js   # editor settings + about
 │   │   ├── learn-panel.js      # interactive Strudel lessons
-│   │   ├── setup-panel.js      # UNUSED — setup lives in settings-panel.js; nothing imports this
 │   │   ├── storage-notice.js   # persistent "Not saving" notice
 │   │   ├── track-bar.js        # track mute/solo bar
 │   │   ├── scope.js            # oscilloscope visualizer

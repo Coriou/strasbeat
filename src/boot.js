@@ -45,7 +45,7 @@ const BOOT_PHASE_AFFECTS = {
     'drum-machine banks (.bank("RolandTR909")…) will be silent.',
   "uzu-drumkit": "the uzu drum kit samples will be silent.",
   "user setup":
-    "packages, samples or the setup script from the Setup panel may be missing.",
+    "packages, samples or the setup script from Settings may be missing.",
   ...Object.fromEntries(
     [...UPSTREAM_SAMPLE_MAPS, DRUM_MACHINE_ALIASES].map((m) => [
       m.label,

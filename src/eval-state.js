@@ -197,7 +197,7 @@ export function createMessageCoalescer({ maxDistinct = 40 } = {}) {
 }
 
 // Functions that only exist once an opt-in package has been enabled in the
-// Setup panel (src/user-setup.js OPT_IN_PACKAGES). Without the package they
+// Settings panel (src/user-setup.js OPT_IN_PACKAGES). Without the package they
 // fail as a bare "x is not a function" / "x is not defined".
 const OPT_IN_NAMES = {
   midi: "@strudel/midi",
@@ -230,7 +230,7 @@ export function optInHintForError(message) {
   if (!match) return null;
   const name = match[1];
   if (!Object.hasOwn(OPT_IN_NAMES, name)) return null;
-  return `"${name}" comes from the opt-in package ${OPT_IN_NAMES[name]} — enable it under Opt-in Packages in the Setup panel, then reload the page.`;
+  return `"${name}" comes from the opt-in package ${OPT_IN_NAMES[name]} — enable it under Packages in Settings, then reload the page.`;
 }
 
 // Calls that produce picture rather than sound. A buffer built around them

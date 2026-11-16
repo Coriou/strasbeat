@@ -301,7 +301,7 @@ describe("optInHintForError()", () => {
   test("names the package for a missing opt-in method", () => {
     const hint = optInHintForError("note(...).midi is not a function");
     assert.match(hint, /@strudel\/midi/);
-    assert.match(hint, /Setup panel/);
+    assert.match(hint, /Packages in Settings/);
     assert.match(hint, /reload/);
     assert.match(optInHintForError("s(...).osc is not a function"), /@strudel\/osc/);
     assert.match(optInHintForError("note(...).tune is not a function"), /@strudel\/xen/);
