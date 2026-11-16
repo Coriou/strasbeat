@@ -15,7 +15,15 @@
 // defaults and the rhythm preset table. See design/work/07-chord-progression.md
 // for the spec this implements (Phase 1).
 
-import { chord, silence, slowcat, stack, timeCat } from "@strudel/core";
+import {
+  chord,
+  fastcat,
+  logger,
+  silence,
+  slowcat,
+  stack,
+  timeCat,
+} from "@strudel/core";
 import { mini } from "@strudel/mini";
 // Side-effect import: @strudel/tonal registers .voicing(), .dict() (the
 // dictionary control comes from core/controls.mjs), and .rootNotes() on
@@ -59,6 +67,19 @@ const DEFAULTS = {
 
 const DEFAULT_BASS_SOUND = "gm_acoustic_bass";
 
+// In the app, Strudel's logger carries the warning to the in-app console
+// panel (and from there to the transport's warning badge) — a console.warn
+// alone is invisible unless devtools happens to be open. Outside a browser
+// (node --test) there is no such listener, so warn on the console.
+function warn(message) {
+  if (typeof document !== "undefined") logger(message, "warning");
+  else console.warn(message);
+}
+
+// Options that must arrive as plain JS strings. `sound` and `dict` are not
+// listed: they are handed to pattern methods that accept a Pattern anyway.
+const STRING_OPTIONS = ["rhythm", "style", "key", "bass"];
+
 // Regex to strip a trailing `@N` (weight) or `*N` (repeat) modifier from a
 // chord token. `@` and `*` never appear in valid chord symbols (which use
 // alphanumeric + `^`, `/`, `+`, `°`, `#`, `b`, `m`, `-`, `o`), so the split
@@ -79,7 +100,7 @@ function parseChordToken(raw) {
   const n = parseInt(m[3], 10);
 
   if (n <= 0 || !Number.isFinite(n)) {
-    console.warn(
+    warn(
       `[strasbeat] progression(): invalid modifier "${op}${m[3]}" on "${symbol}", ignoring`,
     );
     return { symbol, weight: 1, repeat: 1 };
@@ -101,7 +122,7 @@ function parseChordToken(raw) {
  * Use single quotes in pattern files — the transpiler rewrites double-quoted
  * strings to mini-notation, which silently breaks this function.
  *
- * @param {string} chords Space-separated chord symbols or Roman numerals. Per-token modifiers: @N weight (like Strudel's @), *N repeat (like *).
+ * @param {string} chords Space-separated chord symbols or Roman numerals. Each chord lasts one cycle. Per-token modifiers: @N keeps the chord for N cycles (held with the block rhythm; with any other rhythm the figure plays again on each of those cycles), *N plays it N times inside its one cycle (with a rhythm other than block: the rhythm figure runs N times in that cycle).
  * @param {object} options sound, dict, rhythm (block/strum/comp/arp-up/arp-down/alberti), bass, style (jazz-comp/pop-pad/lo-fi/folk-strum/piano-bare), key
  * @example
  * progression('Cm7 F7 Bb^7 Eb^7')
@@ -121,17 +142,30 @@ export function progression(chords, options = {}) {
   // The `_Pattern === true` marker is the canonical cross-module Pattern
   // detector (see strudel-source/packages/core/pattern.mjs:54).
   if (chords?._Pattern === true) {
-    console.warn(
+    warn(
       "[strasbeat] progression() received a Pattern instead of a string — this usually means the chord string was double-quoted (\"...\") and Strudel's transpiler converted it to mini-notation. Use single quotes: progression('Cm7 F7 Bb^7')",
     );
     return silence;
+  }
+
+  // Same trap for option values: `{ rhythm: "arp-up" }` arrives as a Pattern
+  // and would fall through to a default (or an "unknown rhythm [object
+  // Object]" warning) with no hint as to why. Say so and drop the option.
+  for (const name of STRING_OPTIONS) {
+    if (options?.[name]?._Pattern === true) {
+      warn(
+        `[strasbeat] progression(): option "${name}" received a Pattern instead of a string — it was double-quoted and Strudel's transpiler converted it to mini-notation. Use single quotes: { ${name}: '...' }. Ignoring it.`,
+      );
+      options = { ...options };
+      delete options[name];
+    }
   }
 
   // Empty input → return silence loudly. Patterns are re-evaluated live and
   // a thrown error would stop the scheduler entirely (CLAUDE.md "surface
   // silent failures loudly").
   if (typeof chords !== "string" || chords.trim() === "") {
-    console.warn(
+    warn(
       "[strasbeat] progression(): empty chord input, returning silence",
     );
     return silence;
@@ -151,7 +185,7 @@ export function progression(chords, options = {}) {
   const inputTokens = chords.trim().split(/\s+/);
   if (isRomanToken(inputTokens[0])) {
     if (options.key == null) {
-      console.warn(
+      warn(
         '[strasbeat] progression(): Roman-numeral input requires options.key (e.g. { key: "C" } or { key: "Am" }), returning silence',
       );
       return silence;
@@ -165,7 +199,7 @@ export function progression(chords, options = {}) {
       const abs = romanToChord(bare, options.key);
       if (abs == null) {
         // romanToChord already warned with a [strasbeat] prefix.
-        console.warn(
+        warn(
           `[strasbeat] progression(): Roman-numeral token "${token}" failed to resolve in key "${options.key}", returning silence`,
         );
         return silence;
@@ -186,10 +220,10 @@ export function progression(chords, options = {}) {
   // unknown rhythm names.
   let styleConfig = null;
   if (options.style != null) {
-    if (options.style in STYLES) {
+    if (Object.hasOwn(STYLES, options.style)) {
       styleConfig = STYLES[options.style];
     } else {
-      console.warn(
+      warn(
         `[strasbeat] progression(): unknown style "${options.style}", ignoring. Known: ${Object.keys(STYLES).join(", ")}`,
       );
     }
@@ -212,7 +246,7 @@ export function progression(chords, options = {}) {
   // else (including raw mini-notation strings like "0 [0,2] 1") is forwarded
   // verbatim as the escape hatch.
   let arpString;
-  if (opts.rhythm in RHYTHMS) {
+  if (Object.hasOwn(RHYTHMS, opts.rhythm)) {
     arpString = RHYTHMS[opts.rhythm];
   } else if (
     typeof opts.rhythm === "string" &&
@@ -222,42 +256,60 @@ export function progression(chords, options = {}) {
     // commas, or rests) — forward as-is.
     arpString = opts.rhythm;
   } else {
-    console.warn(
+    warn(
       `[strasbeat] progression(): unknown rhythm "${opts.rhythm}", falling back to "block". Known: ${Object.keys(RHYTHMS).join(", ")}`,
     );
     arpString = RHYTHMS.block;
   }
 
-  // Build the per-chord pattern. Parse each token for optional @N (weight)
-  // or *N (repeat) modifiers, then choose the right combinator:
-  //  - No modifiers → slowcat() (the `<a b c>` equivalent, one per cycle).
-  //  - Any @N weight → timeCat() (the `a@2 b` equivalent, weighted cycles).
-  //  - *N repeat → expand inline (the `a*2` equivalent, compressed copies).
+  // Build the per-chord pattern. Every chord owns one cycle; the optional
+  // per-token modifiers follow the documented contract:
+  //  - `G@2` holds G for 2 cycles (the `<Am F C G@2>` reading of a weight).
+  //  - `G*2` plays G twice inside its one cycle.
   // We can't route chord names through mini() because mini reserves `/` as
   // the slow operator, which collides with slash-chord notation (`Cm7/G`).
   const tokens = chords.trim().split(/\s+/);
   const parsed = tokens.map(parseChordToken);
+  const slots = parsed.map(({ symbol, weight, repeat }) => ({
+    weight,
+    pat: repeat > 1 ? fastcat(...Array(repeat).fill(symbol)) : symbol,
+  }));
 
-  // Expand *N repeats inline: `G*2` becomes two `G` entries, each weight 1.
-  const expanded = [];
-  for (const { symbol, weight, repeat } of parsed) {
-    if (repeat > 1) {
-      for (let i = 0; i < repeat; i++) expanded.push({ symbol, weight: 1 });
-    } else {
-      expanded.push({ symbol, weight });
-    }
-  }
-
-  const hasWeights = expanded.some((e) => e.weight !== 1);
+  // Without weights slowcat() is exactly "one chord per cycle". With them,
+  // timeCat() lays the chords out proportionally inside ONE cycle, so the
+  // result is stretched back out to one cycle per weight unit — otherwise
+  // adding `@2` to a single chord would squeeze the whole progression into
+  // a single cycle.
+  const totalWeight = slots.reduce((sum, slot) => sum + slot.weight, 0);
+  const hasWeights = slots.some((slot) => slot.weight !== 1);
   const cyclePat = hasWeights
-    ? timeCat(...expanded.map((e) => [e.weight, e.symbol]))
-    : slowcat(...expanded.map((e) => e.symbol));
+    ? timeCat(...slots.map((slot) => [slot.weight, slot.pat])).slow(totalWeight)
+    : slowcat(...slots.map((slot) => slot.pat));
+
+  // With a rhythm, the chords must be exactly one hap per cycle. .arp() joins
+  // the index pattern into each chord hap, and for a hap longer than a cycle
+  // (what `G@2` is in cyclePat) the result depends on where the query window
+  // falls: one query over both cycles and two queries of one cycle each
+  // return different notes — wrong pitches in a WAV export, dropped
+  // downbeats live. So for the arpeggiated layer the modifiers are unrolled:
+  //  - `G@2` becomes two consecutive one-cycle G slots; the figure plays
+  //    again on each held cycle (it is per-cycle anyway).
+  //  - `G*2` stays one G slot whose rhythm figure runs twice as fast, i.e.
+  //    "N times inside its one cycle" applied to the figure.
+  // cyclePat keeps the held form for the block rhythm and the bass layer.
+  const rhythmSlots = parsed.flatMap(({ symbol, weight, repeat }) =>
+    Array(weight).fill({ symbol, repeat }),
+  );
+  const chordCycles =
+    arpString != null
+      ? slowcat(...rhythmSlots.map((slot) => slot.symbol))
+      : cyclePat;
 
   // chord(pat) attaches the chord control so .voicing() / .dict() / .arp()
   // know which symbol to render. Slash chords (`Cm7/G`) flow through
   // tokenizeChord in @strudel/tonal/tonleiter.mjs:22 — we don't reinvent
   // the parser.
-  let chordPat = chord(cyclePat);
+  let chordPat = chord(chordCycles);
 
   // Only emit .dict() when the user picked something other than the Strudel
   // default — keeps the chain shorter for the 80% case.
@@ -269,8 +321,20 @@ export function progression(chords, options = {}) {
 
   if (arpString != null) {
     // mini() needed for the same reason as above: the inner mini-notation
-    // string isn't auto-wrapped outside the transpiler.
-    chordPat = chordPat.arp(mini(arpString));
+    // string isn't auto-wrapped outside the transpiler. Only when a chord
+    // carries `*N` does the figure differ from cycle to cycle; without one
+    // the plain figure is used so a raw-mini rhythm with `<…>` alternation
+    // keeps counting cycles from zero.
+    const figure = mini(arpString);
+    chordPat = chordPat.arp(
+      rhythmSlots.some((slot) => slot.repeat > 1)
+        ? slowcat(
+            ...rhythmSlots.map((slot) =>
+              slot.repeat > 1 ? figure.fast(slot.repeat) : figure,
+            ),
+          )
+        : figure,
+    );
   }
 
   chordPat = chordPat.s(opts.sound);
@@ -297,7 +361,7 @@ export function progression(chords, options = {}) {
   if (styleConfig?.fx) {
     for (const [method, value] of Object.entries(styleConfig.fx)) {
       if (typeof result[method] !== "function") {
-        console.warn(
+        warn(
           `[strasbeat] progression(): style "${options.style}" sets fx.${method} but Pattern has no .${method}() — skipping`,
         );
         continue;
