@@ -1,4 +1,5 @@
-import { RangeSet, StateEffect, StateField } from "@codemirror/state";
+import { Prec, RangeSet, StateEffect, StateField } from "@codemirror/state";
+import { completionStatus } from "@codemirror/autocomplete";
 import {
   Decoration,
   EditorView,
@@ -52,12 +53,17 @@ class ErrorWidget extends WidgetType {
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.className = "cm-error-widget__dismiss";
-    dismiss.setAttribute("aria-label", "Dismiss error");
-    dismiss.title = "Dismiss error";
+    dismiss.setAttribute("aria-label", "Dismiss error (Escape)");
+    dismiss.title = "Dismiss error  ·  Esc";
     dismiss.textContent = "✕";
     dismiss.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      clearError(view);
+      view.focus();
+    });
+    // Activation that doesn't come with a mousedown (assistive tech).
+    dismiss.addEventListener("click", () => {
       clearError(view);
       view.focus();
     });
@@ -123,6 +129,23 @@ export const errorMarksExtension = [
       return true;
     },
   }),
+  // Keyboard dismiss. The widget's ✕ lives inside the editor content, where
+  // Tab indents instead of moving focus, so it can't be reached without a
+  // mouse. Escape dismisses the mark instead. The handler never consumes the
+  // key — Escape keeps its meaning for modal keymaps (vim/helix leave insert
+  // mode) — and stands down while the completion popup is open, where
+  // Escape means "close the popup".
+  Prec.highest(
+    EditorView.domEventHandlers({
+      keydown(event, view) {
+        if (event.key !== "Escape") return false;
+        if (!view.state.field(errorStateField, false)) return false;
+        if (completionStatus(view.state) != null) return false;
+        clearError(view);
+        return false;
+      },
+    }),
+  ),
 ];
 
 export function extractErrorLine(err) {

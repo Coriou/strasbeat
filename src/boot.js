@@ -10,9 +10,26 @@ import * as strudelSlider from "@strudel/codemirror/slider.mjs";
 import * as strudelExt from "./strudel-ext/index.js";
 import { registerSoundfonts } from "@strudel/soundfonts";
 import { runUserSetup } from "./user-setup.js";
+import { LIVE_MAX_POLYPHONY } from "./export.js";
 
 const { evalScope, controls } = strudelCore;
 const { initAudioOnFirstClick, registerSynthSounds, registerZZFXSounds, samples } = strudelWebaudio; // prettier-ignore
+
+// What stops working when a boot phase fails to load, in the user's terms.
+// Shown next to the failure in the in-app console (see eval-feedback.js).
+const BOOT_PHASE_AFFECTS = {
+  "synth sounds":
+    "the built-in synths (sine, sawtooth, square, triangle, supersaw…) will be silent.",
+  "ZZFX sounds": "the z_* ZZFX synths will be silent.",
+  soundfonts: "every gm_* instrument (gm_piano, gm_epiano1…) will be silent.",
+  "dirt-samples":
+    "the default sample kit (bd, sd, hh, cp and friends) will be silent.",
+  "tidal-drum-machines":
+    'drum-machine banks (.bank("RolandTR909")…) will be silent.',
+  "uzu-drumkit": "the uzu drum kit samples will be silent.",
+  "user setup":
+    "packages, samples or the setup script from the Setup panel may be missing.",
+};
 
 /**
  * Creates the boot state machine (progress tracking, prebake callback).
@@ -21,6 +38,8 @@ const { initAudioOnFirstClick, registerSynthSounds, registerZZFXSounds, samples 
  * - `bootPromise` — resolves when boot completes (success or failure)
  * - `getBootReady()` — returns true once boot is done
  * - `prebake` — pass to StrudelMirror's `prebake` option
+ * - `getBootFailures()` — `[{ label, reason, affects }]` for every phase
+ *   that failed to load (empty until boot completes)
  */
 export function createBoot({ shellEl, exportBtn, status }) {
   let bootReady = false;
@@ -46,7 +65,7 @@ export function createBoot({ shellEl, exportBtn, status }) {
 
   const prebake = async () => {
     try {
-      initAudioOnFirstClick();
+      initAudioOnFirstClick({ maxPolyphony: LIVE_MAX_POLYPHONY });
       setBootProgress(0.05, "loading modules…");
       const loadModules = evalScope(controls, strudelCore, strudelDraw, strudelMini, strudelTonal, strudelWebaudio, strudelSlider, strudelExt); // prettier-ignore
       await loadModules;
@@ -56,7 +75,12 @@ export function createBoot({ shellEl, exportBtn, status }) {
       const safe = (label, p) =>
         Promise.resolve(p).catch((e) => {
           console.warn(`[strasbeat] failed to load ${label}:`, e);
-          failures.push(label);
+          failures.push({
+            label,
+            reason: /timed out/i.test(e?.message ?? "") ? "timed out" : "",
+            affects:
+              BOOT_PHASE_AFFECTS[label] ?? "sounds from it will be silent.",
+          });
         });
 
       // Timeout wrapper — if a phase takes longer than `ms`, continue with
@@ -118,7 +142,10 @@ export function createBoot({ shellEl, exportBtn, status }) {
         status.textContent = "Ready to play";
       } else {
         status.textContent = `Ready with ${failures.length} load warning${failures.length === 1 ? "" : "s"}`;
-        console.warn("[strasbeat] boot completed with failures:", failures);
+        console.warn(
+          "[strasbeat] boot completed with failures:",
+          failures.map((f) => f.label),
+        );
       }
 
       // Fade out progress bar.
@@ -131,6 +158,13 @@ export function createBoot({ shellEl, exportBtn, status }) {
       // editor is at least usable (even if sounds didn't load). Without
       // this, an unhandled throw leaves the boot promise hanging forever.
       console.error("[strasbeat] fatal boot error:", fatalErr);
+      bootFailures = [
+        {
+          label: "the sound engine",
+          reason: fatalErr?.message ?? "",
+          affects: "some or all sounds may be silent.",
+        },
+      ];
       bootReady = true;
       exportBtn.disabled = false;
       shellEl.classList.remove("is-booting");
@@ -145,6 +179,7 @@ export function createBoot({ shellEl, exportBtn, status }) {
   return {
     bootPromise,
     getBootReady: () => bootReady,
+    getBootFailures: () => bootFailures,
     prebake,
   };
 }

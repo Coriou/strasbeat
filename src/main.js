@@ -27,7 +27,6 @@ import {
 } from "./strudel-ext/visuals-host.js";
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { toggleComment } from "@codemirror/commands";
 import { MidiBridge } from "./midi-bridge.js";
 import { mountMidiBar } from "./ui/midi-bar.js";
 import { installCompletions } from "./editor/completions/install.js";
@@ -84,6 +83,8 @@ import { readSelectedCompletion } from "./editor/keymap-universal.js";
 import { previewSoundName, insertSoundName } from "./editor-actions.js";
 import { installDefaultStrudelLogger } from "./strudel-logger.js";
 import { installEvalFeedback } from "./eval-feedback.js";
+import { shouldClaimPlayback } from "./eval-state.js";
+import { clearSolo as clearArrangeSolo } from "./strudel-ext/arrange.js";
 import { createBoot } from "./boot.js";
 import { handleCaptureClick } from "./capture.js";
 import { mountCommandPalette } from "./ui/command-palette.js";
@@ -313,7 +314,7 @@ let currentName = initialName;
 const INITIAL_STORED_CM_SETTINGS = readStoredCmSettingsFromLocalStorage();
 
 // ─── Boot state machine ─────────────────────────────────────────────────
-const { bootPromise, getBootReady, prebake } = createBoot({
+const { bootPromise, getBootReady, getBootFailures, prebake } = createBoot({
   shellEl,
   exportBtn,
   status,
@@ -1235,6 +1236,9 @@ tabs = createTabController({
     // errors are out of scope). Clear on every swap, matching the old onSelect.
     clearError(editor.editor);
     evalFeedback?.resetRuntimeErrors();
+    // Arrange solo addresses a section by position, so it only means
+    // something for the buffer it was set in — don't carry it to another tab.
+    clearArrangeSolo();
   },
   captureState: captureTabState,
   flushToStore,
@@ -1508,6 +1512,8 @@ evalFeedback = installEvalFeedback({
   extractErrorLine,
   prewarmSounds,
   getCurrentName: () => currentName,
+  getEvalOwner: () => tabs?.getActiveItem() ?? null,
+  getBootFailures,
 });
 
 // Tab playing-ownership: an autostart evaluate transfers scheduler ownership to
@@ -1517,17 +1523,27 @@ evalFeedback = installEvalFeedback({
 // (including transferring ownership via Cmd+Enter while another tab plays — no
 // reliance on playback-state transitions). Wrapped AFTER eval-feedback's patch so
 // we compose with its tracking. The WAV export renders with evaluate(false); that
-// must NOT grab ownership — hence the autostart guard. Releasing happens on idle
-// (Stop), handled in onPlaybackStateChange above.
+// must NOT grab ownership — hence the autostart guard. Neither must an evaluate
+// that failed, was cancelled or was replaced: it started nothing. The owner is
+// the tab whose buffer was actually evaluated (captured by eval-feedback when it
+// read the code), not whichever tab has focus once the evaluate settles.
+// Releasing happens on idle (Stop), handled in onPlaybackStateChange above.
 const _evaluateForTabs = editor.evaluate.bind(editor);
 editor.evaluate = async function (...args) {
   const autostart = args.length === 0 || args[0] !== false;
-  const result = await _evaluateForTabs(...args);
-  if (autostart && tabs) {
-    tabs.setPlaying(tabs.getActiveItem());
+  // Nothing open: the buffer still holds the last-closed pattern behind the
+  // empty-state overlay, and playing it would sound code the UI says is gone.
+  if (autostart && tabs && tabs.getActiveItem() == null) {
+    transport.setStatus("nothing open \u2014 pick a pattern to play");
+    return { status: "empty", started: false, owner: null };
+  }
+  const outcome = await _evaluateForTabs(...args);
+  const started = !!editor.repl?.scheduler?.started;
+  if (tabs && shouldClaimPlayback({ autostart, outcome, started })) {
+    tabs.setPlaying(outcome.owner ?? tabs.getActiveItem());
     refreshNowPlaying();
   }
-  return result;
+  return outcome;
 };
 
 // Cmd/Ctrl+B toggles the right rail (matches VSCode's sidebar toggle).
@@ -1547,22 +1563,15 @@ document.addEventListener(
   true,
 );
 
-// Strudel's vim/emacs/helix integrations dispatch these custom DOM events
-// instead of running CM commands directly — the host wires them to
-// whatever the app considers "evaluate" / "stop" / "toggle comment".
-// See node_modules/@strudel/codemirror/keybindings.mjs (Vim.defineEx
-// blocks). Harmless when the active profile is Strudel/VSCode (no event
-// ever fires); load-bearing in modal profiles.
-document.addEventListener("repl-evaluate", () => editor.evaluate());
-document.addEventListener("repl-stop", () => {
-  editor.stop();
-  strudelExt.clearHydra();
-  clearShader();
-});
-document.addEventListener("repl-toggle-comment", () => {
-  editor.editor.focus();
-  toggleComment(editor.editor);
-});
+// Strudel's vim/emacs/helix integrations dispatch `repl-evaluate`, `repl-stop`
+// and `repl-toggle-comment` DOM events instead of running CM commands directly
+// (node_modules/@strudel/codemirror/keybindings.mjs, Vim.defineEx blocks).
+// StrudelMirror itself listens for all three (codemirror.mjs, end of the
+// constructor) and routes them to this.evaluate() / this.stop() — our patched
+// versions — and toggleLineComment. Handling them here as well made vim `:w`
+// evaluate twice and `gc` toggle the comment twice (i.e. not at all). Nothing
+// is left for the host to do: the visuals teardown follows the repl's own
+// state (visuals-host.js), whichever path stopped it.
 
 // ─── Command palette (Cmd+Shift+P) ──────────────────────────────────────
 const palette = mountCommandPalette({
@@ -1618,6 +1627,7 @@ mountTrackBar({
   view: editor.editor,
   docSync,
   onEvaluate: () => editor.evaluate(),
+  isPlaying: () => !!editor.repl?.scheduler?.started,
 });
 mountArrangeBar({
   container: document.getElementById("arrange-bar"),
@@ -1693,14 +1703,16 @@ bottomModes.setOnChange((mode) => {
 // so reading it here is the authoritative "is the engine live?" check — no
 // separate flag to drift out of sync. Idle → play; anything else → stop.
 playBtn.addEventListener("click", async () => {
-  if (isExportRunning()) {
-    transport.setStatus("Export in progress");
-    return;
-  }
+  // Stop comes first, export or not: an export still waiting for its
+  // compile-only evaluate (queued behind a stalled one) shows as non-idle,
+  // and stopping is the way to release it. The visuals follow the repl
+  // (visuals-host.js), so there is nothing to tear down here.
   if ((transportEl.dataset.transportState ?? "idle") !== "idle") {
     editor.stop();
-    strudelExt.clearHydra();
-    clearShader();
+    return;
+  }
+  if (isExportRunning()) {
+    transport.setStatus("Export in progress");
     return;
   }
   await editor.evaluate();

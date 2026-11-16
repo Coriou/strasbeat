@@ -3,7 +3,7 @@
 //
 // Mounted once from main.js after the editor is fully set up:
 //
-//   mountTrackBar({ container, view, docSync, onEvaluate })
+//   mountTrackBar({ container, view, docSync, onEvaluate, isPlaying })
 //
 // The strip auto-hides (via container.hidden) when the pattern has no named
 // labels, causing the auto-sized grid row to collapse to 0 height. It
@@ -17,10 +17,16 @@
 // roll's fallback for haps it cannot attribute to a label at all.
 
 import { parseLabels, toggleMute, toggleSolo } from "../editor/track-labels.js";
-import { computeNewSelection } from "../editor/format.js";
+import { diffChanges } from "../editor/text-diff.js";
 import { PALETTE } from "./palette.js";
 
-export function mountTrackBar({ container, view, docSync, onEvaluate }) {
+export function mountTrackBar({
+  container,
+  view,
+  docSync,
+  onEvaluate,
+  isPlaying = () => true,
+}) {
   // rebuild() runs on every doc change, so the duplicate-name warning is
   // deduped by the offending set — otherwise a single bad file would spam the
   // console once per keystroke. Reset when the names stop colliding.
@@ -136,20 +142,23 @@ export function mountTrackBar({ container, view, docSync, onEvaluate }) {
 
       btn.addEventListener("click", (e) => {
         const currentCode = view.state.doc.toString();
-        const oldSelection = view.state.selection;
-        const oldDoc = view.state.doc;
         const toggle = e.shiftKey ? toggleSolo : toggleMute;
         const userEvent = e.shiftKey ? "input.track-solo" : "input.track-mute";
         const nextCode = toggle(currentCode, displayName);
         if (nextCode === currentCode) return;
         try {
+          // Minimal changes (same as the Cmd+M path in keymap.js) so the
+          // cursor and every mapped decoration outside the edit stay put.
           view.dispatch({
-            changes: { from: 0, to: currentCode.length, insert: nextCode },
-            selection: computeNewSelection(oldSelection, oldDoc, nextCode),
+            changes: diffChanges(currentCode, nextCode),
             userEvent,
           });
           view.focus?.();
-          onEvaluate?.();
+          // Re-evaluate so the change is audible — but only while the
+          // transport is running. Muting a track before pressing play edits
+          // the code and must not start playback by itself (same rule as
+          // the beat grid); the next play picks the change up.
+          if (isPlaying()) onEvaluate?.();
         } catch (err) {
           console.warn("[strasbeat/track-bar] toggle failed:", err);
         }
