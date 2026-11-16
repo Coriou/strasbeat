@@ -18,7 +18,7 @@
   display: flex;
   align-items: stretch;
   gap: 1px; /* hairline seam between tabs; the fill change reads as the divider */
-  height: 34px;
+  height: var(--tab-strip-h);
   flex: 0 0 auto;
   padding: 0 var(--space-2);
   min-width: 0; /* let flex children scroll, never widen the editor pane */
@@ -88,8 +88,18 @@
   color: var(--text);
 }
 
-.tab-strip__tab:focus-visible {
-  outline: 2px solid var(--accent);
+/* The tab proper — the focusable, selectable element. The close button is
+   its sibling inside the chip above, so neither control nests in the other. */
+.tab-strip__tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+}
+.tab-strip__tab-btn:focus-visible {
+  outline: var(--focus-ring);
   outline-offset: -2px;
   border-radius: var(--radius-sm);
 }
@@ -158,6 +168,7 @@
    always present in layout so revealing it never shifts the label — it just
    fades and scales in. */
 .tab-strip__close {
+  position: relative;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -177,6 +188,12 @@
     transform var(--t-hover),
     background var(--t-hover),
     color var(--t-hover);
+}
+/* The glyph box stays 18px; the hit area is 24px. */
+.tab-strip__close::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
 }
 .tab-strip__close svg {
   display: block;
@@ -200,8 +217,26 @@
 .tab-strip__close:focus-visible {
   opacity: 1;
   transform: none;
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
   outline-offset: -1px;
+}
+
+/* Without hover there is nothing to reveal the close button, so it is always
+   shown and the modified dot keeps its place beside it. */
+@media (hover: none) {
+  .tab-strip__close {
+    opacity: 1;
+    transform: none;
+  }
+  .tab-strip__tab:hover .tab-strip__dirty-dot {
+    opacity: 1;
+  }
+}
+@media (pointer: coarse) {
+  .tab-strip__close {
+    width: var(--target-min-sm);
+    height: var(--target-min-sm);
+  }
 }
 
 /* ─── Drag-to-reorder ─────────────────────────────────────────────────────
@@ -259,7 +294,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(34px + 1px); /* clear the tab strip (height) + its bottom seam */
+  top: calc(var(--tab-strip-h) + 1px); /* clear the tab strip + its bottom seam */
   bottom: 0;
   z-index: 1; /* above the CodeMirror scroller, within the pane */
 
@@ -405,9 +440,8 @@
   background: var(--accent-wash);
 }
 .transport__now-playing-chip:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-wash);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* Orphaned playback — the playing pattern was closed but is still sounding.

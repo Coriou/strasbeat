@@ -1275,8 +1275,16 @@ tabStrip = mountTabStrip({
   getPlayingItem: () => tabs.getPlayingItem(),
   getDirtySet: () => computeDirtySet(patternNames, patterns, store),
   isUser: (name) => !(name in patterns),
-  onFocus: (name) => tabs.openOrFocus(name),
-  onClose: (name) => tabs.close(name),
+  // A pointer activation hands focus back to the editor; a keyboard one keeps
+  // it on the strip so arrow-key navigation continues.
+  onFocus: (name, { viaPointer } = {}) => {
+    tabs.openOrFocus(name);
+    if (viaPointer) editor.editor.focus();
+  },
+  onClose: (name, { viaPointer } = {}) => {
+    tabs.close(name);
+    if (viaPointer) editor.editor.focus();
+  },
   onReorder: (name, toIndex) => tabs.reorder(name, toIndex),
 });
 refreshNowPlaying(); // initial state: nothing playing → chip hidden
