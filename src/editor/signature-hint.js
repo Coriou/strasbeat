@@ -14,7 +14,7 @@ import { StateField } from "@codemirror/state";
 import { showTooltip } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { completionStatus } from "@codemirror/autocomplete";
-import docs from "./strudel-docs.json" with { type: "json" };
+import { getDocs } from "./docs-store.js";
 
 /**
  * Escape user-facing text for safe HTML insertion.
@@ -92,6 +92,9 @@ export function findCallContext(state, pos) {
     // otherwise resolve to Object.prototype. A docs entry without params
     // would render as a bare `name()` — misleading for the many functions
     // whose parameters simply aren't documented.
+    // Read per call: the index arrives after the editor does (empty until
+    // then), and the pill appears on the next cursor move once it has.
+    const docs = getDocs();
     if (!calleeName || !Object.hasOwn(docs, calleeName)) return null;
     const entry = docs[calleeName];
     if (!entry.params || entry.params.length === 0) return null;

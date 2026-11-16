@@ -29,6 +29,7 @@ import { bankProvider } from "./providers/bank.js";
 import { chordProvider } from "./providers/chord.js";
 import { modeProvider } from "./providers/mode.js";
 import { functionsProvider, buildFunctionList } from "./providers/functions.js";
+import { areDocsLoaded, onDocsLoaded } from "../docs-store.js";
 
 let installedRecency = null;
 
@@ -47,7 +48,11 @@ export function installCompletions(view, liveExports, { audition } = {}) {
     console.warn("[strasbeat/completions] installCompletions called twice; ignoring");
     return { recency: installedRecency };
   }
-  buildFunctionList(liveExports);
+  // Now with whatever docs are in (possibly none yet), and again when the
+  // docs index lands so documented names gain their info panel and the
+  // documented-only names join the list.
+  if (!areDocsLoaded()) buildFunctionList(liveExports);
+  onDocsLoaded(() => buildFunctionList(liveExports));
   const recency = createRecency();
   installedRecency = recency;
 

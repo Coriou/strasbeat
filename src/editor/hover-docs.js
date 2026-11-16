@@ -9,7 +9,7 @@
 import { hoverTooltip } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { completionStatus } from "@codemirror/autocomplete";
-import docs from "./strudel-docs.json" with { type: "json" };
+import { getDocs } from "./docs-store.js";
 
 /**
  * Escape user-facing text for safe HTML insertion.
@@ -160,8 +160,11 @@ function makeStrudelHover(onOpenReference) {
     }
 
     const text = view.state.sliceDoc(node.from, node.to);
+    // Read at hover time: the index arrives after the editor does, and is
+    // empty until then.
     // hasOwn: `docs` is a plain object, so a bare `docs[text]` also finds
     // `constructor`, `toString`, … on Object.prototype.
+    const docs = getDocs();
     const entry = Object.hasOwn(docs, text) ? docs[text] : null;
     if (!entry) return null;
 

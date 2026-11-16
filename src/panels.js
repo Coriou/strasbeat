@@ -1,10 +1,8 @@
 import { codemirrorSettings } from "@strudel/codemirror";
-import { createSoundBrowserPanel } from "./ui/sound-browser.js";
-import { createReferencePanel } from "./ui/reference-panel.js";
 import { createConsolePanel } from "./ui/console-panel.js";
-import { createExportPanel } from "./ui/export-panel.js";
-import { createSettingsPanel } from "./ui/settings-panel.js";
-import { createLearnPanel } from "./ui/learn-panel.js";
+import { createLazyPanel } from "./ui/lazy-panel.js";
+import { lazyImport } from "./lazy-import.js";
+import { loadDocs } from "./editor/docs-store.js";
 import { previewSoundName, insertSoundName, tryReferenceExample, insertFunctionTemplate, SCRATCH_PATTERN_NAME } from "./editor-actions.js"; // prettier-ignore
 import { saveNewPattern } from "./patterns.js";
 import { runExport } from "./export.js";
@@ -13,6 +11,87 @@ import { THEME_OPTIONS, applyPanelSetting } from "./editor-setup.js";
 import { applyKeymapProfile } from "./editor/keymap-apply.js";
 import { buildExport, parseImportJson, previewImport, applyImport } from "./library-io.js";
 import { choiceModal, formModal, confirm as modalConfirm } from "./ui/modal.js";
+
+// Every panel except the console is fetched the first time its tab is
+// opened (and warmed in the background once the app has booted), so their
+// code is not in front of the editor's first paint. The console stays in the
+// main bundle: it is where errors are shown, including the error of a panel
+// that failed to load.
+//
+// Each factory below has the signature of the panel module's own
+// `create…Panel(options)` and returns a handle with the same id, tab icon,
+// label and public methods, so registration order, the persisted active tab
+// and every caller holding a handle work as if the panel were already there
+// — see ui/lazy-panel.js for what happens to calls made before it is.
+// `id` / `icon` / `label` must match the spec the real module returns.
+function lazyPanelFactory({ id, icon, label, methods, load, prepare }) {
+  return (options) =>
+    createLazyPanel({
+      id,
+      icon,
+      label,
+      methods,
+      load: async ({ silent }) => {
+        const [create, extra] = await Promise.all([
+          lazyImport(load, { what: `the ${label} panel`, silent }),
+          prepare ? prepare({ silent }) : null,
+        ]);
+        return create({ ...options, ...extra });
+      },
+    });
+}
+
+const createLearnPanel = lazyPanelFactory({
+  id: "learn",
+  icon: "graduation-cap",
+  label: "Learn",
+  load: () => import("./ui/learn-panel.js").then((m) => m.createLearnPanel),
+});
+
+const createSoundBrowserPanel = lazyPanelFactory({
+  id: "sounds",
+  icon: "music",
+  label: "Sound browser",
+  methods: ["refresh", "setBufferText", "focusSound", "focusSearch"],
+  load: () =>
+    import("./ui/sound-browser.js").then((m) => m.createSoundBrowserPanel),
+});
+
+const createReferencePanel = lazyPanelFactory({
+  id: "reference",
+  icon: "book-open",
+  label: "API reference",
+  methods: ["setBufferText", "scrollTo"],
+  load: () =>
+    import("./ui/reference-panel.js").then((m) => m.createReferencePanel),
+  // The panel builds its entry list from the docs index when constructed.
+  prepare: async ({ silent }) => ({ docs: await loadDocs({ silent }) }),
+});
+
+const createExportPanel = lazyPanelFactory({
+  id: "export",
+  icon: "download",
+  label: "Export",
+  methods: ["showProgress", "showResult", "showError", "reset", "autoExport"],
+  load: () => import("./ui/export-panel.js").then((m) => m.createExportPanel),
+});
+
+const createSettingsPanel = lazyPanelFactory({
+  id: "settings",
+  icon: "settings",
+  label: "Settings",
+  load: () =>
+    import("./ui/settings-panel.js").then((m) => m.createSettingsPanel),
+});
+
+// Run `fn` when the main thread has nothing better to do.
+function whenIdle(fn) {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(fn, { timeout: 5000 });
+  } else {
+    setTimeout(fn, 1500);
+  }
+}
 
 /**
  * Creates and registers all right-rail panels. Call after `mountRightRail`.
@@ -38,7 +117,6 @@ export function registerPanels({
   focusEditorLocation,
   refreshRail,
   getEvalFeedback,
-  strudelDocs,
   soundMap,
   getAudioContext,
   getSound,
@@ -152,14 +230,13 @@ export function registerPanels({
   rightRail.registerPanel(soundBrowser);
 
   const referencePanel = createReferencePanel({
-    docs: strudelDocs,
     onTry: (exampleCode) => tryReferenceExample(exampleCode, tryContext),
     onInsert: (name, template) =>
       insertFunctionTemplate(name, template, editor.editor),
     onFocusEditor: () => editor.editor.focus(),
   });
   rightRail.registerPanel(referencePanel);
-  // Seed "in use" highlights immediately — buildEntries runs synchronously.
+  // Seed "in use" highlights — held until the panel's module has loaded.
   referencePanel.setBufferText(editor.code ?? "");
 
   const consolePanel = createConsolePanel({
@@ -354,6 +431,18 @@ export function registerPanels({
       );
     }
   });
+
+  // Once the app is up, fetch the panel modules in the background so the
+  // first open of each is instant and they keep working if the connection
+  // drops later. One at a time, quietly: a failure here is retried (and
+  // reported) when the user actually opens the panel.
+  bootPromise.then(() =>
+    whenIdle(async () => {
+      for (const panel of [learnPanel, soundBrowser, referencePanel, exportPanel, settingsPanel]) {
+        await panel.preload();
+      }
+    }),
+  );
 
   return { consolePanel, soundBrowser, referencePanel, exportPanel };
 }

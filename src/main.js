@@ -35,7 +35,8 @@ import {
   extractErrorLine,
   setError,
 } from "./editor/error-marks.js";
-import strudelDocs from "./editor/strudel-docs.json" with { type: "json" };
+import { loadDocs } from "./editor/docs-store.js";
+import { setLazyImportReporter } from "./lazy-import.js";
 import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
@@ -616,6 +617,12 @@ installCompletions(editor.editor, [
   }, opts),
 });
 
+// Fetch the function docs now that the editor is up. Hover docs, signature
+// hints and the doc text in completions start working when it lands; a
+// failure is reported through the lazy-import reporter and retried when the
+// API reference panel is opened.
+loadDocs().catch(() => {});
+
 // ─── Left rail (patterns library) ────────────────────────────────────────
 const indexAtBoot = store.getIndex();
 const collapsedFoldersAtBoot = indexAtBoot.uiState?.collapsedFolders ?? [];
@@ -1101,11 +1108,9 @@ transport = mountTransport({
   },
   onBankChipClick: (name) => {
     rightRail.activate("sounds");
-    const searchInput = document.querySelector(".sound-browser__search-input");
-    if (searchInput) {
-      searchInput.value = name;
-      searchInput.dispatchEvent(new Event("input"));
-    }
+    // Through the panel handle, not its DOM: the panel's module may still
+    // be loading, and the handle holds the request until it is in.
+    soundBrowser.focusSearch(name);
   },
 });
 
@@ -1543,7 +1548,6 @@ const {
   focusEditorLocation,
   refreshRail,
   getEvalFeedback: () => evalFeedback,
-  strudelDocs,
   soundMap,
   getAudioContext,
   getSound,
@@ -1565,6 +1569,14 @@ const {
 });
 consolePanel = cp;
 referencePanel = rp;
+
+// A part of the app that is fetched on demand failed to load (offline, or a
+// newer deploy replaced the file): say so where the user will see it, now
+// and later.
+setLazyImportReporter((err) => {
+  transport?.setStatus(err.message);
+  consolePanel?.error?.(err.message);
+});
 
 // Route raw-WebGL shader compile/link + context-loss errors into the in-app
 // console panel (they also always go to console.error). Surface-failures-

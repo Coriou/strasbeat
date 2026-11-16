@@ -2,6 +2,7 @@
 // EditorState with the JavaScript grammar, the way CodeMirror does.
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { EditorState } from "@codemirror/state";
 import { CompletionContext } from "@codemirror/autocomplete";
 import { javascriptLanguage } from "@codemirror/lang-javascript";
@@ -12,6 +13,15 @@ import "@strudel/tonal";
 import { functionsProvider, buildFunctionList } from "./functions.js";
 import { chordProvider } from "./chord.js";
 import { miniNotationProvider } from "./mini-notation.js";
+import { setDocs } from "../../docs-store.js";
+
+// The app fetches the docs index after the editor mounts; here it is read
+// straight from disk.
+setDocs(
+  JSON.parse(
+    readFileSync(new URL("../../strudel-docs.json", import.meta.url), "utf8"),
+  ),
+);
 
 const NO_RECENCY = {
   score: () => 0,

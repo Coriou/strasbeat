@@ -4,14 +4,28 @@ import { EditorState } from "@codemirror/state";
 import { javascriptLanguage } from "@codemirror/lang-javascript";
 import { ensureSyntaxTree } from "@codemirror/language";
 
+import { readFileSync } from "node:fs";
+
 import { findCallContext } from "./signature-hint.js";
+import { setDocs } from "./docs-store.js";
+
+// The app fetches the docs index after the editor mounts; here it is read
+// straight from disk.
+const docs = JSON.parse(
+  readFileSync(new URL("./strudel-docs.json", import.meta.url), "utf8"),
+);
+setDocs(docs);
 
 // `|` marks the cursor.
 function at(marked) {
   const pos = marked.indexOf("|");
   const doc = marked.slice(0, pos) + marked.slice(pos + 1);
-  const state = EditorState.create({ doc, extensions: [javascriptLanguage] });
-  ensureSyntaxTree(state, doc.length, 10_000);
+  const created = EditorState.create({ doc, extensions: [javascriptLanguage] });
+  // A fresh state parses on a ~20 ms budget and keeps whatever tree it got,
+  // which on a loaded machine is a truncated one. Finish the parse, then
+  // take an empty transaction so the state adopts the complete tree.
+  ensureSyntaxTree(created, doc.length, 10_000);
+  const state = created.update({}).state;
   return findCallContext(state, pos);
 }
 

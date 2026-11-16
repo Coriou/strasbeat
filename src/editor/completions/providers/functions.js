@@ -6,7 +6,7 @@
 
 import { snippet } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
-import docs from "../../strudel-docs.json" with { type: "json" };
+import { getDocs } from "../../docs-store.js";
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
 import { renderCompletionInfo } from "../info.js";
@@ -68,13 +68,16 @@ function isUnterminated(state, node) {
 let functionList = [];
 
 /**
- * Build the function list once at install time. Names from `liveExports`
- * (the union of all @strudel/* package exports) seed the list; names that
- * also have a docs entry get the rich info panel.
+ * Build the function list. Names from `liveExports` (the union of all
+ * @strudel/* package exports) seed the list; names that also have a docs
+ * entry get the rich info panel. Runs at install time and again when the
+ * docs index arrives (see install.js) — before that, completions offer the
+ * live export names without doc text.
  *
  * @param {string[]} liveExports
  */
 export function buildFunctionList(liveExports) {
+  const docs = getDocs();
   const seen = new Set();
   const out = [];
   const consider = (name) => {
