@@ -145,6 +145,9 @@ export function createSettingsPanel({
   onKeymapChange = () => {},
   onExportLibrary = () => {},
   onImportLibrary = () => {},
+  getDrumKit = () => "classic",
+  onDrumKitChange = () => true,
+  subscribeDrumKit = () => () => {},
 }) {
   // ─── State ────────────────────────────────────────────────────────────
   let settings = { ...getSettings() };
@@ -533,6 +536,9 @@ export function createSettingsPanel({
 
   function buildSamplesSection() {
     const section = buildSection("Samples");
+    // The kit choice first, with its own explanation; the line about
+    // importing stays next to the import controls it describes.
+    section.body.appendChild(buildDrumKitControl());
     section.body.appendChild(
       el(
         "div",
@@ -643,6 +649,64 @@ export function createSettingsPanel({
     section.body.appendChild(deleteAllBtn);
 
     return section.root;
+  }
+
+  // Default drum kit: which samples the bare drum names play. Two radio
+  // buttons drawn as one segmented control — the native inputs keep the
+  // arrow-key behaviour and the grouping for free.
+  function buildDrumKitControl() {
+    const wrap = el("div", "settings-panel__kit");
+    const group = el("fieldset", "settings-panel__segmented");
+    group.appendChild(el("legend", "settings-panel__row-label", "Default drum kit"));
+    const options = el("div", "settings-panel__segmented-options");
+    group.appendChild(options);
+
+    /** @type {Record<string, HTMLInputElement>} */
+    const inputs = {};
+    const sync = (kit = getDrumKit()) => {
+      for (const [value, input] of Object.entries(inputs)) {
+        input.checked = value === kit;
+      }
+    };
+    for (const [value, label] of [
+      ["classic", "Classic"],
+      ["strudel", "strudel.cc"],
+    ]) {
+      const option = el("label", "settings-panel__segment");
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "strasbeat-drum-kit";
+      input.value = value;
+      input.className = "settings-panel__segment-input";
+      input.addEventListener("change", () => {
+        if (!input.checked) return;
+        // Refused (that kit's samples did not load): show what is in force.
+        if (onDrumKitChange(value) === false) sync();
+      });
+      input.addEventListener("keydown", onControlKeydown);
+      inputs[value] = input;
+      option.append(input, el("span", "settings-panel__segment-label", label));
+      options.appendChild(option);
+    }
+    sync();
+    // The choice can also be made from the nudge while this panel is open.
+    subscribeDrumKit((kit) => sync(kit));
+
+    wrap.appendChild(group);
+    const desc = el("div", "settings-panel__section-desc");
+    desc.append(
+      "What ",
+      el("code", "settings-panel__code", "bd"),
+      ", ",
+      el("code", "settings-panel__code", "sd"),
+      ", ",
+      el("code", "settings-panel__code", "hh"),
+      " and the other short drum names play when a pattern names no ",
+      el("code", "settings-panel__code", ".bank()"),
+      ". Classic is the Dirt-Samples kit strasbeat has always used; strudel.cc is the kit those names play there. Applies straight away, to playback and WAV export.",
+    );
+    wrap.appendChild(desc);
+    return wrap;
   }
 
   // ─── Script section ───────────────────────────────────────────────────

@@ -24,6 +24,7 @@ import {
   createNamePrecedence,
   fetchJson,
 } from "./default-samples.js";
+import { createDrumKitController } from "./drum-kit.js";
 import { runUserSetup } from "./user-setup.js";
 import { LIVE_MAX_POLYPHONY } from "./export.js";
 
@@ -67,6 +68,10 @@ const BOOT_PHASE_AFFECTS = {
 export function createBoot({ shellEl, exportBtn, status }) {
   let bootReady = false;
   let bootFailures = [];
+  // Which kit `bd`, `sd`, `hh`… play (src/drum-kit.js). It gets the two
+  // manifests as they arrive below and applies the stored choice once every
+  // default map is registered.
+  const drumKit = createDrumKitController({ samples });
   let _bootResolve;
   const bootPromise = new Promise((r) => {
     _bootResolve = r;
@@ -141,16 +146,17 @@ export function createBoot({ shellEl, exportBtn, status }) {
       const names = createNamePrecedence();
       const drumMachines = samples('/strudel-cc/tidal-drum-machines.json', 'github:ritchse/tidal-drum-machines/main/machines/', { tag: DRUM_MACHINES_TAG }); // prettier-ignore
       const phases = {
-        "dirt-samples": withTimeout(SAMPLE_NAME_OWNER.label, fetchJson(SAMPLE_NAME_OWNER.manifest).then((json) => samples(names.claim(json)))), // prettier-ignore
+        "dirt-samples": withTimeout(SAMPLE_NAME_OWNER.label, fetchJson(SAMPLE_NAME_OWNER.manifest).then((json) => { drumKit.setManifest("classic", json); return samples(names.claim(json)); })), // prettier-ignore
         'tidal-drum-machines': withTimeout('tidal-drum-machines', drumMachines), // prettier-ignore
       };
       await Promise.all([
         ...Object.values(phases),
         withTimeout(
           UZU_DRUMKIT.label,
-          fetchJson(UZU_DRUMKIT.manifest).then((json) =>
-            samples(names.yieldTo(json)),
-          ),
+          fetchJson(UZU_DRUMKIT.manifest).then((json) => {
+            drumKit.setManifest("strudel", json);
+            return samples(names.yieldTo(json));
+          }),
         ),
         // The rest of what strudel.cc registers by default (piano, VCSL,
         // wavetables, mridangam) — manifests only, audio loads on first use.
@@ -176,6 +182,15 @@ export function createBoot({ shellEl, exportBtn, status }) {
           ),
         ),
       ]);
+      // dirt-samples holds the shared drum names at this point; a stored
+      // "strudel.cc kit" choice puts uzu-drumkit's sounds over them. Before
+      // the user setup, so samples the user registers under those names
+      // still win.
+      if (!drumKit.applyStored()) {
+        console.warn(
+          "[strasbeat] the strudel.cc drum kit is selected but did not load — bd, sd, hh… play the classic kit for now.",
+        );
+      }
       setBootProgress(0.9, "running user setup…");
 
       // Phase 4: user setup — opt-in packages, user samples, setup script.
@@ -233,6 +248,7 @@ export function createBoot({ shellEl, exportBtn, status }) {
     bootPromise,
     getBootReady: () => bootReady,
     getBootFailures: () => bootFailures,
+    drumKit,
     prebake,
   };
 }

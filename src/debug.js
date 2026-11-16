@@ -31,6 +31,7 @@ export function mountDebugHelpers({
   resetGlobalEffects,
   initAudio,
   superdough,
+  drumKit = null,
 }) {
   function echoHelper(message, data) {
     console.log(message, data ?? "");
@@ -64,6 +65,19 @@ export function mountDebugHelpers({
     /** Check if a specific name resolves. */
     hasSound(name) {
       return !!getSound(name);
+    },
+    /**
+     * Which kit the bare drum names (`bd`, `sd`, `hh`…) play, and proof of
+     * it: where the registered `bd` samples are fetched from. Pass
+     * "classic" or "strudel" to switch (the same choice as in Settings).
+     */
+    drumKit(kit) {
+      if (kit != null) drumKit?.setKit(kit);
+      return {
+        kit: drumKit?.getKit() ?? null,
+        names: drumKit?.getSharedNames() ?? [],
+        bdSource: firstSampleUrl(soundMap.get()?.bd?.data?.samples),
+      };
     },
     /**
      * Debug helper: render the current pattern offline (no file written) and
@@ -182,4 +196,13 @@ export function mountDebugHelpers({
       },
     },
   };
+}
+
+// A registered sample bank is a list of URLs, or a map of note → URLs.
+function firstSampleUrl(samples) {
+  if (Array.isArray(samples)) return samples[0] ?? null;
+  if (samples && typeof samples === "object") {
+    return firstSampleUrl(Object.values(samples)[0]);
+  }
+  return typeof samples === "string" ? samples : null;
 }

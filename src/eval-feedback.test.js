@@ -677,3 +677,41 @@ describe("boot failures", () => {
     assert.equal(getBadge().label, "load warning");
   });
 });
+
+describe("onPlayed hook", () => {
+  test("gets the onsets of a pattern that has started playing, and only then", async () => {
+    const played = [];
+    const { editor } = setup({ deps: { onPlayed: (onsets) => played.push(onsets) } });
+
+    editor.code = `s("bd sd").bank("tr909")`;
+    await editor.evaluate(false); // boot, export: compiled, not played
+    assert.equal(played.length, 0);
+
+    await editor.evaluate();
+    assert.equal(played.length, 1);
+    assert.ok(played[0].length > 0);
+    assert.ok(played[0].every((hap) => hap.hasOnset()));
+    assert.deepEqual(
+      [...new Set(played[0].map((hap) => `${hap.value.bank}/${hap.value.s}`))].sort(),
+      ["tr909/bd", "tr909/sd"],
+    );
+
+    editor.code = `s("bd`; // does not evaluate: the old pattern keeps playing
+    await editor.evaluate();
+    assert.equal(played.length, 1);
+  });
+
+  test("a hook that throws does not fail the evaluate", async () => {
+    const { editor } = setup({
+      deps: {
+        onPlayed: () => {
+          throw new Error("boom");
+        },
+      },
+    });
+    editor.code = `s("bd")`;
+    const outcome = await editor.evaluate();
+    assert.equal(outcome.status, "ok");
+  });
+});
+

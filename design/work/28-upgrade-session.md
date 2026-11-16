@@ -1347,7 +1347,12 @@ later work changed them); 14–21 are new.
     patterns sounding the same, including ones that index its larger
     folders (`bd:7`). Recommended: keep dirt-samples. Flipping it is a
     one-line move of the `claim` in `src/boot.js`.
-    - Decision: —
+    - Decision: keep dirt-samples as the default, tell the user once, and
+      make switching easy. The first time a playing pattern uses one of
+      those names without a `.bank(...)` a small non-modal card says which
+      kit it is and offers "Switch to the strudel.cc kit" / "Keep classic";
+      Settings → Samples has a "Default drum kit" control. The choice is
+      stored, applies at once, and covers WAV export (`src/drum-kit.js`).
 15. **Piano, VCSL, wavetables and mridangam load by default (SC-1,
     SC-5).** Boot now fetches those four manifests (a few kB to ≈180 kB of
     JSON; audio still loads on first use), as strudel.cc does, and the two
@@ -1896,4 +1901,39 @@ Found and left, none of them introduced by the upgrade branch unless noted:
 | `src/editor/lazy-keymaps.js` | Each use of a keymap whose fetch failed retries and reports again |
 | `src/boot.js` | dirt-samples' audio base now comes from the manifest's `_base`; if that field were dropped the kit would be silent with no boot warning |
 | share links | Shared code is evaluated once at boot for the first frame, without sound and without a gesture, as on strudel.cc |
+
+### After the review: maintainer decisions carried out
+
+- §7 item 21 — the browser smoke test is in the repository as an opt-in
+  workflow (fd1bf35).
+- §7 item 1 — the unused Setup panel files are deleted (00c3c12).
+- §7 item 14 — default drum kit: one-time nudge, a Settings control, and a
+  live switch that playback and export share.
+
+For a person to check, in addition to §8:
+
+- [ ] Reload after leaving a syntax error in an edited Demo: the Demo opens
+      on its original, the status line names `<name>-recovered`, and that
+      pattern is in the library with the edits.
+- [ ] Open the Hydra demo, press Play, Stop and Play again quickly on first
+      load (and press Play while "Loading sounds…" is still showing): the
+      drums are not doubled or louder than on a normal play.
+- [ ] Stop during a start that hangs (`await new Promise(() => {})` above
+      some `$:` lines), then Play a different pattern: it starts after a
+      pause of about three seconds, not never.
+- [ ] Import a multi-track MIDI file in which one part ends early: that
+      part stays silent until the others finish, then all loop together.
+      Import a drum track with a ride cymbal: the ride is audible.
+- [ ] With a fresh profile, play a pattern with `s("bd sd hh")`: the drum
+      kit card appears once playback has started, does not take focus and
+      does not get in the way of typing; its timing feels right. Play a
+      pattern with `.bank("tr909")` first: no card.
+- [ ] Hear both kits: switch with the card, then back and forth in
+      Settings → Samples while a `bd`/`sd`/`hh` pattern plays. The sound
+      changes within a bar each time, and the choice survives a reload.
+- [ ] Export a WAV with each kit selected: each file has the kit that was
+      playing.
+- [ ] Tab to the card from the transport, press Escape: it closes and focus
+      is on Play. With a screen reader, the card's text is announced
+      without interrupting.
 

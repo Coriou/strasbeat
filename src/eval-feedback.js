@@ -57,6 +57,9 @@ export function installEvalFeedback({
   // The editor's first-frame evaluate (StrudelMirror.drawFirstFrame), which
   // goes into the repl at boot without passing through the patched evaluate.
   firstFrame = null,
+  // Called with the onsets of the first four cycles each time an evaluate
+  // has left a pattern playing (never for a silent evaluate).
+  onPlayed = null,
   // Injectable for tests; see createEvalSequencer.
   abandonWaitMs,
 }) {
@@ -639,6 +642,13 @@ export function installEvalFeedback({
           // Sounds warmed earlier in the session are cached by superdough;
           // skip them so a live re-evaluate (beat grid, mute/solo, every
           // Cmd+Enter) doesn't build a throwaway voice per sound.
+          if (playing && onPlayed) {
+            try {
+              onPlayed(onsets);
+            } catch (err) {
+              console.warn("[strasbeat] onPlayed hook failed:", err);
+            }
+          }
           const firstPlay = playing && !_firstEvalDone;
           if (firstPlay) {
             _firstEvalDone = true;

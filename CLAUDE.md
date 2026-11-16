@@ -125,6 +125,7 @@ strasbeat/
 │   ├── main.js             # orchestration: editor construction, panel wiring, toolbar
 │   ├── boot.js             # prebake state machine (evalScope, soundfonts, samples)
 │   ├── default-samples.js  # the default sample maps as data + the name-precedence rule
+│   ├── drum-kit.js         # which kit bd/sd/hh… play: stored choice, live switch, nudge rule
 │   ├── lazy-import.js      # lazyImport()/once(): every on-demand import() goes through here
 │   ├── eval-feedback.js    # patched evaluate/stop, error tracking, sound validation
 │   ├── eval-state.js       # pure evaluate/stop sequencer + engine-log classification
@@ -181,6 +182,7 @@ strasbeat/
 │   │   ├── settings-panel.js   # editor settings + about
 │   │   ├── learn-panel.js      # interactive Strudel lessons
 │   │   ├── storage-notice.js   # persistent "Not saving" notice
+│   │   ├── drum-kit-nudge.js   # one-time card offering the strudel.cc drum kit
 │   │   ├── track-bar.js        # track mute/solo bar
 │   │   ├── scope.js            # oscilloscope visualizer
 │   │   ├── bottom-panel-modes.js # roll/scope/custom mode switcher
@@ -375,6 +377,22 @@ patterns index dirt-samples' larger folders (`bd:7`). A new default map
 must register through `names.yieldTo(...)`; the alias table must be
 applied after the drum-machine map is in (`aliasBank` walks the sounds
 registered so far).
+
+**Default drum kit:** dirt-samples owning the nine drum names is the
+default, not the only option. `src/drum-kit.js` holds the choice
+(`localStorage["strasbeat:drum-kit"]`: `classic` | `strudel`): once every
+default map is registered, a stored `strudel` re-registers just the shared
+names from uzu-drumkit's manifest (`applyStored`, before the user setup so
+user samples still win), and `setKit` does the same at any time — a
+registration only records URLs, so the switch is immediate and the WAV
+export, which renders through the same sound map, follows. The control is
+Settings → Samples; `strasbeat.drumKit()` shows what is in force. The
+first time a pattern that is actually playing uses one of those names
+without a `.bank(...)`, a one-time card (`src/ui/drum-kit-nudge.js`) says
+which kit it is and offers the switch: `eval-feedback.js` reports the
+onsets of every started play through `onPlayed`, and the controller's
+`notePlayed` decides. It never shows at boot, for a silent evaluate, to
+someone who has already chosen, or when the other kit failed to load.
 
 `slider()` / `sliderWithID` are imported from the `@strudel/codemirror`
 entry, the same module instance the editor uses — a second copy has its

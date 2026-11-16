@@ -620,7 +620,10 @@ sounds.
   share a name, dirt-samples plays: `bd sd hh cp cb cr ht lt mt` and `sax`
   are its samples here, not the uzu-drumkit and VCSL ones strudel.cc
   plays (VCSL's saxophone is still there as `sax_vib` / `sax_stacc`). Add
-  a `.bank(...)` when the exact drum sound matters.
+  a `.bank(...)` when the exact drum sound matters. To hear those nine
+  drum names the way strudel.cc plays them, set **Default drum kit** to
+  "strudel.cc" in Settings → Samples (it applies at once, to playback and
+  WAV export, and is remembered); "Classic" is dirt-samples.
 - **Tempo carries over between tabs.** Tempo, default voicings and
   default control values are global: a pattern with no `setcpm` line
   plays at whatever the last evaluated pattern set, not at Strudel's

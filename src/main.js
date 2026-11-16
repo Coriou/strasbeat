@@ -88,6 +88,8 @@ import { readSelectedCompletion } from "./editor/keymap-universal.js";
 import { previewSoundName, insertSoundName } from "./editor-actions.js";
 import { installDefaultStrudelLogger } from "./strudel-logger.js";
 import { installEvalFeedback } from "./eval-feedback.js";
+import { DRUM_KITS } from "./drum-kit.js";
+import { mountDrumKitNudge } from "./ui/drum-kit-nudge.js";
 import { shouldClaimPlayback } from "./eval-state.js";
 import { clearSolo as clearArrangeSolo } from "./strudel-ext/arrange.js";
 import { createBoot } from "./boot.js";
@@ -314,7 +316,7 @@ let currentName = initialName;
 const INITIAL_STORED_CM_SETTINGS = readStoredCmSettingsFromLocalStorage();
 
 // ─── Boot state machine ─────────────────────────────────────────────────
-const { bootPromise, getBootReady, getBootFailures, prebake } = createBoot({
+const { bootPromise, getBootReady, getBootFailures, drumKit, prebake } = createBoot({
   shellEl,
   exportBtn,
   status,
@@ -1625,6 +1627,8 @@ const {
   focusEditorLocation,
   refreshRail,
   getEvalFeedback: () => evalFeedback,
+  drumKit,
+  chooseDrumKit: (kit) => chooseDrumKit(kit),
   soundMap,
   getAudioContext,
   getSound,
@@ -1685,7 +1689,31 @@ evalFeedback = installEvalFeedback({
   getEvalOwner: () => tabs?.getActiveItem() ?? null,
   getBootFailures,
   firstFrame,
+  onPlayed: (onsets) => drumKit.notePlayed(onsets),
 });
+
+// ─── Default drum kit: the one-time nudge ────────────────────────────────
+// `bd`, `sd`, `hh`… play dirt-samples here and uzu-drumkit on strudel.cc.
+// The first time a playing pattern leans on those names the card says so
+// and offers the switch; the same choice lives in Settings.
+function chooseDrumKit(kit) {
+  const { ok, stored } = drumKit.setKit(kit);
+  if (!ok) {
+    transport.setStatus(
+      "\u26a0 couldn\u2019t switch: that drum kit didn\u2019t load \u2014 reload and try again",
+    );
+    return false;
+  }
+  const label = DRUM_KITS[kit].label;
+  transport.setStatus(
+    stored
+      ? `Default drum kit: ${label} \u00b7 change it in Settings`
+      : `Default drum kit: ${label} (for this session \u2014 it couldn\u2019t be saved)`,
+  );
+  return true;
+}
+const drumKitNudge = mountDrumKitNudge({ onChoose: chooseDrumKit });
+drumKit.setNudge(() => drumKitNudge.show());
 
 // Tab playing-ownership: an autostart evaluate transfers scheduler ownership to
 // the focused tab. ALL play paths funnel through editor.evaluate() (the play
@@ -2066,7 +2094,7 @@ captureBtn.addEventListener("click", () =>
 );
 
 // prettier-ignore
-window.strasbeat = mountDebugHelpers({ soundMap, getSound, editor, getConsolePanel: () => consolePanel, getAudioContext, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough });
+window.strasbeat = mountDebugHelpers({ soundMap, getSound, editor, getConsolePanel: () => consolePanel, getAudioContext, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, drumKit });
 
 // expose for console tinkering
 window.editor = editor;

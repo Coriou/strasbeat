@@ -65,6 +65,8 @@ it.
   …), wavetables (`wt_*`) and mridangam are available without any setup,
   so patterns pasted from strudel.cc find their sounds. One deliberate
   difference: `bd`, `sd`, `hh` and friends come from dirt-samples here.
+  Settings → Samples → **Default drum kit** switches them to the kit
+  strudel.cc uses; the first time it matters, a small card says so.
 - **Hardware MIDI bridge** (`src/midi-bridge.js`): live play through
   `superdough` with envelope-tuned presets (piano, EP, organ, pluck,
   pad, …), plus a *capture phrase → save as pattern file* flow.

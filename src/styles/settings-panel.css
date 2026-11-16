@@ -503,6 +503,104 @@
   color: var(--text-mut);
 }
 
+/* ─── Default drum kit (segmented control) ───────────────────────────── */
+
+.settings-panel__kit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.settings-panel__segmented {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.settings-panel__segmented > legend {
+  padding: 0;
+}
+
+/* One control, two halves: the track is the border, the checked half is
+   raised onto the hover surface. */
+.settings-panel__segmented-options {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.settings-panel__segment {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  cursor: pointer;
+}
+
+/* The radio itself covers its segment, invisible: it stays focusable and
+   keeps the native arrow-key behaviour. */
+.settings-panel__segment-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settings-panel__segment-label {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border-radius: calc(var(--radius-sm) - 1px);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-mut);
+  white-space: nowrap;
+  transition:
+    background var(--t-hover),
+    color var(--t-hover);
+}
+.settings-panel__segment:hover .settings-panel__segment-label {
+  color: var(--text);
+}
+.settings-panel__segment-input:checked + .settings-panel__segment-label {
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.settings-panel__segment-input:focus-visible + .settings-panel__segment-label {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.settings-panel__code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  color: var(--text);
+}
+
+@media (pointer: coarse) {
+  .settings-panel__segment-label {
+    min-height: 36px;
+  }
+}
+
 /* ─── Reload banner ──────────────────────────────────────────────────── */
 
 /* [hidden] display: none is set by UA stylesheet; :not([hidden]) applies

@@ -1,7 +1,8 @@
 // Browser smoke test: boots the production build in headless Chromium and
 // walks the main flows — boot, play/stop, evaluate outcomes, the panels,
 // completions, the palette, Hydra and shader visuals, a stored Vim profile,
-// a broken working copy, and three viewport widths.
+// the default-drum-kit nudge and switch, a broken working copy, and three
+// viewport widths.
 //
 // Run by .github/workflows/smoke.yml on `ci/smoke-*` branches (and by hand
 // from the Actions tab), against `vite preview`. It is not part of
@@ -38,7 +39,10 @@ const browser = await chromium.launch({
   ],
 });
 
-async function open(viewport, { storage } = {}) {
+// Every session but the drum-kit one starts with that one-time card already
+// seen, so it does not turn up in the middle of an unrelated check.
+const KIT_NUDGE_SEEN = { "strasbeat:drum-kit-nudge": "seen" };
+async function open(viewport, { storage = KIT_NUDGE_SEEN } = {}) {
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   const problems = [];
@@ -50,7 +54,11 @@ async function open(viewport, { storage } = {}) {
   });
   page.on("requestfailed", (r) => problems.push(`requestfailed: ${r.url()}`));
   await page.addInitScript((storage) => {
-    for (const [k, v] of Object.entries(storage || {})) localStorage.setItem(k, v);
+    // Seeded once per context: a reload must see what the page itself stored.
+    if (!localStorage.getItem("smoke:seeded")) {
+      for (const [k, v] of Object.entries(storage || {})) localStorage.setItem(k, v);
+      localStorage.setItem("smoke:seeded", "1");
+    }
     const raf = window.requestAnimationFrame.bind(window);
     window.__raf = 0;
     window.requestAnimationFrame = (cb) => raf((t) => { window.__raf++; cb(t); });
@@ -361,7 +369,7 @@ await d.context.close();
 
 // ── Vim profile stored at boot ─────────────────────────────────────────────
 await step("vim keymap at boot", async () => {
-  const v = await open({ width: 1280, height: 800 }, { storage: { "strasbeat:keymap-profile": "vim" } });
+  const v = await open({ width: 1280, height: 800 }, { storage: { ...KIT_NUDGE_SEEN, "strasbeat:keymap-profile": "vim" } });
   await v.page.waitForTimeout(3000);
   const st = await v.page.evaluate(() => ({ fat: !!document.querySelector(".cm-fat-cursor, .cm-vimMode"), chip: document.querySelector('[class*="keymap-chip"]')?.innerText }));
   check("stored Vim profile is active after boot", st.fat, JSON.stringify(st));
@@ -375,12 +383,106 @@ await step("vim keymap at boot", async () => {
   await v.context.close();
 });
 
+// ── Default drum kit: the one-time nudge and the switch ────────────────────
+await step("drum kit", async () => {
+  const k = await open({ width: 1280, height: 800 }, { storage: {} });
+  const p = k.page;
+  const nudge = () => p.evaluate(() => !!document.querySelector(".kit-nudge"));
+  const kit = () => p.evaluate(() => window.strasbeat.drumKit());
+  const playCode = async (code) => {
+    await p.evaluate((c) => window.editor.setCode(c), code);
+    const started = await play(p);
+    await p.waitForTimeout(700);
+    return started;
+  };
+
+  const boot = await kit();
+  check("drum kit: classic by default, no nudge at boot",
+    boot.kit === "classic" && /dirt-samples/i.test(boot.bdSource ?? "") && !(await nudge()), JSON.stringify(boot));
+
+  await playCode('s("bd*2, hh*4").bank("tr909")');
+  check("drum kit: no nudge for drums with an explicit bank", !(await nudge()));
+  await stop(p);
+  await playCode('note("c e g").s("sawtooth")');
+  check("drum kit: no nudge for a pattern without the shared drum names", !(await nudge()));
+  await stop(p);
+
+  const started = await playCode('s("bd*2, hh*4")');
+  await p.waitForSelector(".kit-nudge__title", { timeout: 5000 }).catch(() => {});
+  const shown = await p.evaluate(() => {
+    const card = document.querySelector(".kit-nudge");
+    if (!card) return null;
+    const r = card.getBoundingClientRect();
+    const t = document.getElementById("transport").getBoundingClientRect();
+    return {
+      text: card.innerText.replace(/\s+/g, " ").trim(),
+      buttons: [...card.querySelectorAll("button")].map((b) => b.innerText.trim() || b.getAttribute("aria-label")),
+      live: card.querySelector('[role="status"]') != null,
+      tookFocus: card.contains(document.activeElement),
+      onScreen: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= t.top + 1,
+      modal: !!document.querySelector(".modal-overlay"),
+    };
+  });
+  check("drum kit: the nudge appears when a pattern using bare drum names plays",
+    started && shown && /Dirt kit/.test(shown.text) && /strudel\.cc/.test(shown.text) && shown.buttons.length === 3 && shown.live,
+    JSON.stringify(shown));
+  check("drum kit: the nudge takes no focus, blocks nothing, sits above the transport",
+    shown && !shown.tookFocus && !shown.modal && shown.onScreen, JSON.stringify(shown));
+  await p.screenshot({ path: "out/10-drum-kit-nudge.png" });
+  // (Play has focus after the click that started playback.)
+  await p.click(".cm-content");
+  await p.keyboard.press("Control+End");
+  await p.keyboard.type(" // still typing");
+  check("drum kit: typing goes to the editor while the nudge is up",
+    await p.evaluate(() => window.editor.code.includes("// still typing")));
+
+  await p.click(".kit-nudge__btn--switch");
+  await p.waitForTimeout(300);
+  const switched = await kit();
+  check("drum kit: Switch puts the strudel.cc kit under bd and remembers it",
+    switched.kit === "strudel" && /uzu-drumkit/i.test(switched.bdSource ?? "") && !(await nudge()) &&
+      (await p.evaluate(() => localStorage.getItem("strasbeat:drum-kit"))) === "strudel" &&
+      (await p.evaluate(() => !!window.editor.repl.scheduler.started)),
+    JSON.stringify(switched));
+  await stop(p);
+  await playCode('s("bd*2, hh*4")');
+  check("drum kit: the nudge does not come back", !(await nudge()));
+  await stop(p);
+
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await p.waitForSelector(".shell.is-ready", { timeout: 90000 });
+  const reloaded = await kit();
+  check("drum kit: the choice is in force after a reload",
+    reloaded.kit === "strudel" && /uzu-drumkit/i.test(reloaded.bdSource ?? ""), JSON.stringify(reloaded));
+  await playCode('s("bd*2, hh*4")');
+  check("drum kit: no nudge after a reload either", !(await nudge()));
+  await stop(p);
+
+  const settingsTab = p.locator('.right-rail__tab[data-panel-id="settings"]');
+  if ((await settingsTab.getAttribute("aria-selected")) !== "true") await settingsTab.click();
+  await p.waitForSelector(".settings-panel__segment-input", { timeout: 10000 });
+  const before = await p.evaluate(() =>
+    [...document.querySelectorAll(".settings-panel__segment-input")].find((i) => i.checked)?.value);
+  await p.locator(".settings-panel__kit").scrollIntoViewIfNeeded();
+  await p.screenshot({ path: "out/10-drum-kit-setting.png" });
+  await p.locator('.settings-panel__segment:has(input[value="classic"])').click();
+  await p.waitForTimeout(300);
+  const back = await kit();
+  check("drum kit: the Settings control shows the choice and switches back",
+    before === "strudel" && back.kit === "classic" && /dirt-samples/i.test(back.bdSource ?? "") &&
+      (await p.evaluate(() => localStorage.getItem("strasbeat:drum-kit"))) === "classic",
+    JSON.stringify({ before, back }));
+  check("drum kit: no unexpected page errors", k.problems.length === 0, [...new Set(k.problems)].slice(0, 6).join(" || "));
+  await k.context.close();
+});
+
 // ── A stored working copy that does not transpile ──────────────────────────
 await step("broken working copy", async () => {
   // What autosave leaves when an edit session on a Demo ends mid-expression.
   const broken = '// my edits\n$: s("bd*2").gain(';
   const h = await open({ width: 1280, height: 800 }, {
     storage: {
+      ...KIT_NUDGE_SEEN,
       "strasbeat:pattern:01-hello": JSON.stringify({ code: broken, modified: "2026-01-01T00:00:00.000Z", isUserPattern: false }),
       "strasbeat:pattern-index": JSON.stringify({ lastOpen: "01-hello", userPatterns: [] }),
     },
