@@ -41,7 +41,7 @@ import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";
 import { mountRightRail } from "./ui/right-rail.js";
 import { registerPanels } from "./panels.js";
-import { renderRoll } from "./ui/piano-roll.js";
+import { createBottomCanvas } from "./ui/bottom-canvas.js";
 import { createScope } from "./ui/scope.js";
 import { mountScopeControls } from "./ui/scope-controls.js";
 import { createBottomPanelModes } from "./ui/bottom-panel-modes.js";
@@ -158,28 +158,12 @@ if (!/Mac|iPhone|iPad/.test(navigator.platform)) {
   if (modKey) modKey.textContent = "Ctrl";
 }
 
-// HiDPI piano roll — ResizeObserver handles window resize, right-rail
-// reflow, and DPR changes (e.g. dragging between monitors).
-let resizeTimer = null;
-const resizeCanvas = () => {
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(doResize, 50);
-};
-const doResize = () => {
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  const w = Math.round(rect.width * dpr);
-  const h = Math.round(rect.height * dpr);
-  if (w === 0 && h === 0) return; // collapsed — keep the old backing store
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-};
-resizeCanvas();
-new ResizeObserver(() => resizeCanvas()).observe(canvas);
-const drawCtx = canvas.getContext("2d");
-const drawTime = [-2, 2]; // seconds before / after now to render
+// The bottom canvas (piano roll / scope / Strudel draw functions). Sizing,
+// HiDPI and the "paint only what can be seen" rule live in
+// ui/bottom-canvas.js; it is created further down, once the editor exists.
+let bottomCanvas = null;
+const resizeCanvas = () => bottomCanvas?.refresh();
+const drawTime = [-2, 2]; // cycles before / after now to render
 // Phase 2 shader uniforms: wall-clock timestamp (ms) of the previous onDraw,
 // used to derive the per-frame dt the decay envelope needs. null until the
 // first frame.
@@ -346,13 +330,11 @@ const editor = new StrudelMirror({
   // evaluate here, so this one hook covers all play/stop/evaluate paths.
   onUpdateState: syncVisualsToRepl,
   onDraw: (haps, time) => {
-    const mode = bottomModes.getMode();
     // Phase 2: drive the shader node's uniforms from the haps the playhead
     // (`time`, in cycles) just reached. dt is wall-clock seconds between
     // draws, so the pulse decay is the same length at any tempo. This runs
     // every frame regardless of the bottom-panel mode — the shader paints its
-    // own canvas, so the feed must precede the beats/visuals early-return
-    // below. Purely additive.
+    // own canvas, so the feed never depends on what the bottom canvas shows.
     const shaderNode = _getShaderNode?.();
     if (shaderNode?.hasProgram?.()) {
       const _deriver = _getDeriver?.();
@@ -361,24 +343,9 @@ const editor = new StrudelMirror({
       lastDrawMs = nowMs;
       if (_deriver) shaderNode.setUniformMap(_deriver.frame(haps, time, dt));
     }
-    // Beat grid renders DOM over the canvas — no canvas paint to do, and
-    // keeping the renderer running underneath would just waste cycles.
-    if (mode === "beats" || mode === "visuals") return;
-    if (mode === "scope") {
-      const dpr = window.devicePixelRatio || 1;
-      scope.render(drawCtx, canvas.width / dpr, canvas.height / dpr);
-    } else if (mode === "custom") {
-      const customFn = bottomModes.getCustomDraw();
-      if (customFn) {
-        try {
-          customFn(drawCtx, haps, time);
-        } catch (err) {
-          console.warn("[strasbeat] custom draw error:", err);
-        }
-      }
-    } else {
-      renderRoll({ haps, time, ctx: drawCtx, drawTime, view: editor.editor });
-    }
+    // Roll / scope / the pattern's own draw functions — or nothing at all
+    // when the canvas is collapsed, covered or in a background tab.
+    bottomCanvas?.draw(haps, time);
   },
   prebake,
 });
@@ -437,16 +404,106 @@ function focusEditorLocation({ line, column } = {}) {
   view.focus();
 }
 
-// Strudel resets Drawer.drawTime to [0,0] after eval when the pattern has no
-// .onPaint()/.pianoroll() — intercept to preserve our 4-cycle window.
+bottomCanvas = createBottomCanvas({
+  canvas,
+  modes: bottomModes,
+  scope,
+  drawTime,
+  getView: () => editor.editor,
+  isPlaying: () => !!editor.repl?.scheduler?.started,
+  // A note in the roll belongs to the pattern that is playing, which may sit
+  // in another tab (or a closed one): bring it into the editor before the
+  // click moves the cursor.
+  beforeLocate: () => {
+    const playing = tabs?.getOrphanedPlaying() ?? tabs?.getPlayingItem();
+    if (playing && playing !== tabs.getActiveItem()) tabs.openOrFocus(playing);
+  },
+  isPlayingDocFocused: () => {
+    const playing = tabs?.getOrphanedPlaying() ?? tabs?.getPlayingItem();
+    return playing == null || playing === tabs.getActiveItem();
+  },
+});
+
+// The Drawer's window. It keeps — and re-filters on every frame — each hap
+// inside `drawTime`, so the window is the roll's full four cycles only while
+// something shows them: the roll itself, or draw functions the pattern
+// registered. Otherwise it shrinks to the present moment, which is all that
+// highlighting and the shader uniforms read, and what upstream uses for any
+// pattern without painters. (Upstream picks the window after every evaluate
+// through setDrawTime; that call is intercepted here.)
+const NOW_ONLY = [0, 0];
 const _setDrawTime = editor.drawer.setDrawTime.bind(editor.drawer);
-editor.drawer.setDrawTime = (dt) => {
-  if (Array.isArray(dt) && dt[0] === 0 && dt[1] === 0) {
-    _setDrawTime(drawTime);
-  } else {
-    _setDrawTime(dt);
+const _invalidate = editor.drawer.invalidate.bind(editor.drawer);
+let paintersWantWindow = false;
+// Returns whether the window changed.
+function applyDrawWindow(wide) {
+  const current = editor.drawer.drawTime;
+  const wasWide = current[0] !== 0 || current[1] !== 0;
+  if (wasWide === wide) return false;
+  _setDrawTime(wide ? drawTime : NOW_ONLY);
+  // The Drawer queries from its previous frame's right edge to the new one.
+  // After shrinking, that edge lies in the future; make the next frame
+  // re-anchor instead of querying backwards. After widening it lies behind
+  // the stretch the invalidate that follows is about to queue; move it to
+  // where a Drawer that had been wide all along would have it, or the next
+  // frame queues the end of that stretch a second time.
+  if (!wide) {
+    editor.drawer.lastFrame = null;
+  } else if (editor.drawer.lastFrame != null) {
+    const sched = editor.repl?.scheduler;
+    if (sched?.started) editor.drawer.lastFrame = sched.now() + drawTime[1];
   }
+  return true;
+}
+editor.drawer.setDrawTime = (dt) => {
+  // Upstream passes [0, 0] unless the evaluated pattern has painters.
+  paintersWantWindow = Array.isArray(dt) && (dt[0] !== 0 || dt[1] !== 0);
+  applyDrawWindow(paintersWantWindow || bottomCanvas.wantsHapWindow());
 };
+// Every evaluate (and the boot-time first frame) ends in an invalidate: the
+// one moment the pattern's painters and the code its haps point into are
+// both known. `refill` is for the invalidates below, which only query the
+// pattern on show again.
+function invalidateDrawer(scheduler, t, refill) {
+  _invalidate(scheduler, t);
+  bottomCanvas.afterInvalidate({
+    code: editor.repl.state.activeCode,
+    painters: editor.drawer.painters,
+    haps: editor.drawer.visibleHaps,
+    time: t ?? editor.drawer.scheduler?.now?.() ?? 0,
+    refill,
+  });
+}
+editor.drawer.invalidate = (scheduler, t) => invalidateDrawer(scheduler, t, false);
+// The roll came into view or went out of it (pane collapse, mode switch).
+bottomCanvas.setOnHapDemandChange((wide) => {
+  if (!applyDrawWindow(wide || paintersWantWindow)) return;
+  const sched = editor.repl?.scheduler;
+  if (!sched?.pattern) return;
+  if (!wide) {
+    // Drop the haps queued beyond the narrower window.
+    if (sched.started) invalidateDrawer(sched, undefined, true);
+    return;
+  }
+  // Stopped with nothing on the roll (the tab was switched): leave it empty.
+  if (!sched.started && !bottomCanvas.hasFrame()) return;
+  // Refill the window around the playhead (or, while stopped, around the
+  // frame the roll last showed) so the roll does not come back half empty.
+  const t = sched.started ? sched.now() : bottomCanvas.getLastTime();
+  try {
+    editor.drawer.visibleHaps =
+      t > 0
+        ? sched.pattern
+            .queryArc(Math.max(0, t + drawTime[0]), t)
+            .filter((hap) => hap.hasOnset())
+        : [];
+    invalidateDrawer(sched, t, true);
+    bottomCanvas.draw(editor.drawer.visibleHaps, t);
+  } catch (err) {
+    console.warn("[strasbeat] could not refill the piano roll:", err);
+  }
+});
+
 
 applyInitialSettings(editor, INITIAL_STORED_CM_SETTINGS);
 
@@ -1652,6 +1709,8 @@ document.addEventListener(
 );
 
 mountPianoRollResize({ shellEl, rollToggleBtn, rollDivider, resizeCanvas });
+// A tab swap replaces the document the roll's last frame described.
+docSync.subscribe(({ immediate }) => immediate && bottomCanvas.handleDocSwap());
 mountTrackBar({
   container: document.getElementById("track-bar"),
   view: editor.editor,

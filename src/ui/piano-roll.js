@@ -4,9 +4,10 @@
 // system: dark background, subtle beat/cycle gridlines, accent playhead,
 // per-layer note coloring, and click-to-locate via the CM6 EditorView.
 //
-// Called from main.js's onDraw callback every animation frame:
+// Called by src/ui/bottom-canvas.js, once per animation frame while the
+// roll is on screen and playing, and once per repaint while stopped:
 //
-//   renderRoll({ haps, time, ctx, drawTime, view })
+//   renderRoll({ haps, time, ctx, drawTime, view, width, height, dpr })
 //
 // `time` and `drawTime` are in the same units as `hap.whole.begin/end`
 // (Strudel cycles, not seconds — see strudel-source/packages/draw/draw.mjs
@@ -25,6 +26,16 @@
 // (in CSS pixel coords). A single click listener bound on the first call
 // hit-tests against the latest map and dispatches a CM6 selection range
 // to the supplied EditorView, scrolling it into view.
+//
+// Source offsets belong to the code that was evaluated, not to whatever is
+// in the editor now. setRollSource() records that code on every evaluate;
+// label colours are read from it, and a click maps its offsets through the
+// edits made since (or does nothing when the note's source was edited away).
+//
+// Per-frame cost: everything derived from a hap alone — its times, row
+// value, colour, dynamics, source range — is computed once and kept in a
+// WeakMap, since the Drawer hands over the same hap objects every frame
+// until they scroll off. The frame loop itself allocates nothing.
 //
 // Track mute/solo legend is handled by src/ui/track-bar.js — a persistent
 // DOM strip that lives in the shell grid above the roll pane. The canvas no
@@ -58,12 +69,36 @@ function ensureState(canvas) {
   let s = stateByCanvas.get(canvas);
   if (!s) {
     s = {
+      // Hit rectangles for this frame, pooled: only the first `hitCount`
+      // entries are live.
       hits: [],
+      hitCount: 0,
       view: null,
-      doc: null,
-      code: "",
-      labels: [],
       clickBound: false,
+      // The evaluated code the current haps' source offsets refer to, with
+      // its parsed labels: { code, labels }. Set by setRollSource(); until
+      // the first evaluate the live document stands in (see liveSource).
+      source: null,
+      liveDoc: null,
+      liveSource: null,
+      // hap → derived per-hap data (see hapInfo).
+      infoByHap: new WeakMap(),
+      // Scratch list of the haps visible this frame, reused across frames.
+      frame: [],
+      // Rows of the fold layout, bottom to top, rebuilt only when a value
+      // appears or decays — see the fold-layout note in renderRoll.
+      rows: [],
+      rowLabels: [],
+      rowIndex: new Map(),
+      rowsDirty: true,
+      activeRows: new Set(),
+      // Playhead glow gradient, valid for one x position and accent colour.
+      glow: null,
+      glowX: NaN,
+      glowAccent: "",
+      // Host hooks, refreshed on every render call.
+      beforeLocate: null,
+      requestRepaint: null,
       // First-sight → palette index. Persistent across frames so a layer's
       // color never re-flips when other layers appear or disappear.
       colorForKey: new Map(),
@@ -182,6 +217,11 @@ function readTokens(canvas) {
     fontMono: get("--font-mono", "ui-monospace, monospace"),
     textXs: get("--text-xs", "11px"),
   };
+  // Derived once per token read rather than once per frame.
+  _tokenCache.fontSize = parseInt(_tokenCache.textXs, 10) || 11;
+  _tokenCache.cycleFont = `500 ${_tokenCache.fontSize}px ${_tokenCache.fontSans}`;
+  _tokenCache.gutterFontSize = 0;
+  _tokenCache.gutterFont = "";
   clearTimeout(_tokenTimer);
   _tokenTimer = setTimeout(() => {
     _tokenCache = null;
@@ -197,14 +237,175 @@ function colorForKey(state, key) {
   return map.get(key);
 }
 
-function syncEditorState(state, view) {
-  if (!view) return;
-  if (state.doc === view.state.doc) return;
-  state.doc = view.state.doc;
-  state.code = view.state.doc.toString();
-  state.labels = parseLabels(state.code);
+/**
+ * Record the code a fresh evaluate just installed. Haps created from now on
+ * carry source offsets into this text, so their label colours and
+ * click-to-locate targets are resolved against it. Haps already on screen
+ * keep the source they were first drawn with.
+ */
+export function setRollSource(canvas, code) {
+  const state = ensureState(canvas);
+  if (typeof code !== "string") return;
+  if (state.source && state.source.code === code) return;
+  state.source = { code, labels: parseLabels(code) };
+  // Fallback colours are keyed by source offset, which means nothing across
+  // two different texts: start the assignment over rather than let the map
+  // grow by a key per offset per edit.
+  state.colorForKey.clear();
 }
 
+/**
+ * Forget everything on screen: rows, hit map, hover. For when the canvas is
+ * about to show nothing (the document it described was swapped out).
+ */
+export function resetRoll(canvas) {
+  const state = ensureState(canvas);
+  state.valueLastSeen.clear();
+  state.rowsDirty = true;
+  state.lastT1 = -Infinity;
+  state.hitCount = 0;
+  if (canvas.style && canvas.style.cursor) canvas.style.cursor = "";
+}
+
+// The source for haps seen before any evaluate was recorded: the live
+// document, re-read only when it changes.
+function liveSource(state) {
+  const doc = state.view?.state?.doc;
+  if (!doc) return EMPTY_SOURCE;
+  if (state.liveDoc !== doc) {
+    state.liveDoc = doc;
+    const code = doc.toString();
+    state.liveSource = { code, labels: parseLabels(code) };
+  }
+  return state.liveSource;
+}
+const EMPTY_SOURCE = { code: "", labels: [] };
+
+/**
+ * Where a range of `from` sits in `to`, given that `to` is `from` after
+ * some edits. Exact for anything outside the edited stretch (the text
+ * between the first and the last changed character); null for a range the
+ * edit touched, since its text is no longer there to point at.
+ *
+ * @returns {{ start: number, end: number } | null}
+ */
+export function mapRangeThroughEdit(from, to, start, end) {
+  if (!(start >= 0) || !(end >= start) || end > from.length) return null;
+  if (from === to) return { start, end };
+  const max = Math.min(from.length, to.length);
+  let prefix = 0;
+  while (prefix < max && from.charCodeAt(prefix) === to.charCodeAt(prefix)) {
+    prefix++;
+  }
+  if (end <= prefix) return { start, end };
+  let suffix = 0;
+  const maxSuffix = max - prefix;
+  while (
+    suffix < maxSuffix &&
+    from.charCodeAt(from.length - 1 - suffix) ===
+      to.charCodeAt(to.length - 1 - suffix)
+  ) {
+    suffix++;
+  }
+  if (start >= from.length - suffix) {
+    const shift = to.length - from.length;
+    return { start: start + shift, end: end + shift };
+  }
+  return null;
+}
+
+// A colour set on the hap itself (`.color("cyan")`) wins over the layer
+// colour. Canvas ignores a fillStyle it cannot parse and silently keeps the
+// previous one, which would paint the pill in a neighbour's colour — so each
+// distinct string is checked once against a context and remembered.
+const colorValidity = new Map();
+function isUsableColor(ctx, color) {
+  let ok = colorValidity.get(color);
+  if (ok === undefined) {
+    const before = ctx.fillStyle;
+    ctx.fillStyle = "#000";
+    ctx.fillStyle = color;
+    const onBlack = ctx.fillStyle;
+    ctx.fillStyle = "#fff";
+    ctx.fillStyle = color;
+    ok = onBlack === ctx.fillStyle;
+    ctx.fillStyle = before;
+    if (colorValidity.size > 256) colorValidity.clear();
+    colorValidity.set(color, ok);
+  }
+  return ok;
+}
+
+// Everything the frame loop needs from a hap that does not change while the
+// hap lives. Times are plain numbers: reading them off the hap's Fractions
+// (and `endClipped`, which builds three new Fractions per read) is the bulk
+// of the per-note cost otherwise.
+function hapInfo(state, ctx, hap) {
+  let info = state.infoByHap.get(hap);
+  if (info) return info;
+  const begin = Number(hap.whole.begin);
+  const end = Number(hap.whole.end);
+  if (!Number.isFinite(begin) || !Number.isFinite(end)) {
+    info = SKIP;
+  } else {
+    const source = state.source ?? liveSource(state);
+    const loc = getFirstLocation(hap);
+    const label = loc ? findLabelByOffset(source.labels, loc[0]) : null;
+    const own = hap.value?.color;
+    const color =
+      typeof own === "string" && own && isUsableColor(ctx, own)
+        ? own
+        : label
+          ? PALETTE[source.labels.indexOf(label) % PALETTE.length]
+          : colorForKey(state, getGroupKey(hap));
+    const { velocity = 1, gain = 1 } = hap.value || {};
+    info = {
+      begin,
+      end,
+      endClipped: Number(hap.endClipped),
+      val: getValue(hap),
+      color,
+      dynAlpha: Math.min(1, velocity * gain), // clamp — gain can exceed 1
+      locStart: loc ? loc[0] : -1,
+      locEnd: loc ? loc[1] : -1,
+      source,
+    };
+  }
+  state.infoByHap.set(hap, info);
+  return info;
+}
+const SKIP = Object.freeze({ skip: true });
+
+// strings (drum sounds) sort first so they anchor at the bottom of the
+// canvas after y-inversion; numbers (pitched notes) sort after, ascending.
+export function compareRowValues(a, b) {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "number") return 1; // numbers sort AFTER strings
+  if (typeof b === "number") return -1; // strings sort BEFORE numbers
+  return String(a).localeCompare(String(b));
+}
+
+function rebuildRows(state) {
+  const rows = state.rows;
+  rows.length = 0;
+  for (const val of state.valueLastSeen.keys()) rows.push(val);
+  rows.sort(compareRowValues);
+  state.rowIndex.clear();
+  state.rowLabels.length = rows.length;
+  for (let i = 0; i < rows.length; i++) {
+    const val = rows[i];
+    state.rowIndex.set(val, i);
+    state.rowLabels[i] =
+      typeof val === "number"
+        ? midi2note(Math.round(val)) // 60 → "C4", 69 → "A4"
+        : String(val).replace(/^_/, ""); // "_bd" → "bd"
+  }
+  state.rowsDirty = false;
+}
+
+// applyPatternTransforms() writes the label id into query-state controls,
+// but the haps arriving at onDraw do not surface that state, so a hap is
+// mapped back to its owning label via source offsets instead.
 function findLabelByOffset(labels, offset) {
   for (const label of labels) {
     if (offset >= label.blockStart && offset < label.blockEnd) {
@@ -214,34 +415,40 @@ function findLabelByOffset(labels, offset) {
   return null;
 }
 
-function getLabelForHap(hap, labels) {
-  // applyPatternTransforms() writes the label id into query-state controls,
-  // but the haps arriving at onDraw do not surface that state, so we map
-  // back to the owning label via source offsets instead.
-  const loc = getFirstLocation(hap);
-  if (!loc) return null;
-  return findLabelByOffset(labels, loc[0]);
-}
-
-export function renderRoll({ haps, time, ctx, drawTime, view }) {
+export function renderRoll({
+  haps,
+  time,
+  ctx,
+  drawTime,
+  view,
+  width,
+  height,
+  dpr,
+  beforeLocate = null,
+  requestRepaint = null,
+}) {
   const canvas = ctx.canvas;
   const state = ensureState(canvas);
   // Refresh the view ref every frame so the click handler always sees the
   // current EditorView (cheap; the click closure reads from `state`).
   state.view = view ?? state.view;
-  syncEditorState(state, state.view);
+  state.beforeLocate = beforeLocate;
+  state.requestRepaint = requestRepaint;
 
   if (!state.clickBound) {
     bindInteraction(canvas, state);
     state.clickBound = true;
   }
 
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.width / dpr;
-  const h = canvas.height / dpr;
+  // The caller sizes the backing store and tells us the ratio it used, so a
+  // display change can never leave the two out of step. Standalone callers
+  // fall back to the window's current ratio.
+  if (!(dpr > 0)) dpr = window.devicePixelRatio || 1;
+  const w = width ?? canvas.width / dpr;
+  const h = height ?? canvas.height / dpr;
 
-  // The backing store is sized in device pixels by main.js's resizeCanvas;
-  // reset the transform every frame so the renderer can think in CSS px.
+  // The backing store is sized in device pixels; reset the transform every
+  // frame so the renderer can think in CSS px.
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const tokens = readTokens(canvas);
@@ -255,20 +462,18 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   const t1 = time + drawTime[1];
   const span = t1 - t0;
   if (span <= 0 || w <= 0 || h <= 0) {
-    state.hits.length = 0;
+    state.hitCount = 0;
     return;
   }
 
-  const labels = state.labels;
-
   // Reserve a strip at the bottom for cycle labels and one on the left for
   // row labels. Every x-coord (gridlines, pills, playhead, hit map, cycle
-  // labels) flows through `timeToX`, so the note area shifts in lockstep.
+  // labels) is `noteAreaX + ((t - t0) / span) * noteAreaW`, so the note area shifts
+  // in lockstep.
   const noteAreaY = 0;
   const noteAreaH = Math.max(0, h - BOTTOM_LABEL_H);
   const noteAreaX = LEFT_GUTTER_W;
   const noteAreaW = Math.max(0, w - noteAreaX);
-  const timeToX = (t) => noteAreaX + ((t - t0) / span) * noteAreaW;
 
   // Clip everything that draws inside the note area (gridlines, pills,
   // playhead glow, cycle labels) to the region right of the gutter so it
@@ -293,7 +498,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     for (let bt = firstBeat; bt <= t1 + 1e-9; bt += beatStep) {
       // Skip beats that coincide with cycle lines (drawn heavier below).
       if (Math.abs(bt - Math.round(bt)) < 1e-9) continue;
-      const x = Math.round(timeToX(bt)) + 0.5;
+      const x = Math.round(noteAreaX + ((bt - t0) / span) * noteAreaW) + 0.5;
       ctx.moveTo(x, noteAreaY);
       ctx.lineTo(x, noteAreaY + noteAreaH);
     }
@@ -305,7 +510,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   ctx.beginPath();
   const firstCycle = Math.ceil(t0);
   for (let c = firstCycle; c <= t1 + 1e-9; c += 1) {
-    const x = Math.round(timeToX(c)) + 0.5;
+    const x = Math.round(noteAreaX + ((c - t0) / span) * noteAreaW) + 0.5;
     ctx.moveTo(x, noteAreaY);
     ctx.lineTo(x, noteAreaY + noteAreaH);
   }
@@ -314,120 +519,144 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   // Cycle labels in the bottom strip. Numeric-only ("1", "2", …) —
   // cycles are the only horizontal unit on the roll, so a "cyc" prefix
   // would just be visual noise next to the pills.
-  const fontSize = parseInt(tokens.textXs, 10) || 11;
+  const fontSize = tokens.fontSize;
   ctx.fillStyle = tokens.textDim;
-  ctx.font = `500 ${fontSize}px ${tokens.fontSans}`;
+  ctx.font = tokens.cycleFont;
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
   const labelY = h - 3;
   for (let c = firstCycle; c <= t1 + 1e-9; c += 1) {
-    const x = Math.round(timeToX(c));
+    const x = Math.round(noteAreaX + ((c - t0) / span) * noteAreaW);
     if (x < -20 || x > w) continue;
     ctx.fillText(String(c), x + 4, labelY);
   }
 
   // ── Note pills ───────────────────────────────────────────────────────
-  // First pass: collect visible haps.
-  const visibleHaps = [];
-  for (const hap of haps) {
-    if (!hap || !hap.whole) continue;
-    const begin = Number(hap.whole.begin);
-    const end = Number(hap.whole.end);
-    if (!Number.isFinite(begin) || !Number.isFinite(end)) continue;
-    if (end < t0 || begin > t1) continue; // off-screen
-    const val = getValue(hap);
-    visibleHaps.push({ hap, begin, end, val });
-  }
-
   // Fold layout: rows are derived from a per-canvas cache that persists
-  // across frames. Without this, the row set rebuilds from `visibleHaps`
+  // across frames. Without this, the row set rebuilds from the visible haps
   // every frame, which is unstable: the framer's slice is ~4 cycles wide,
   // patterns with masks or long periods don't show every value every frame,
   // and the labels would shuffle as values come and go. The cache holds the
   // most recent t1 each value was seen at; values not seen for
   // ROW_STABILITY_CYCLES are dropped, so genuinely-removed rows still decay
   // (e.g. after a pattern edit) without per-frame churn.
+  const lastSeen = state.valueLastSeen;
   if (t1 < state.lastT1 - 0.5) {
     // Time jumped backward: stop+play, scrub, or pattern eval reset.
     // Dropping the cache prevents stale rows from a previous run.
-    state.valueLastSeen.clear();
+    if (lastSeen.size > 0) state.rowsDirty = true;
+    lastSeen.clear();
   }
   state.lastT1 = t1;
-  for (const item of visibleHaps) {
-    if (item.val != null) state.valueLastSeen.set(item.val, t1);
+
+  // First pass: collect visible haps and mark their rows as seen.
+  const frame = state.frame;
+  frame.length = 0;
+  for (let i = 0; i < haps.length; i++) {
+    const hap = haps[i];
+    if (!hap || !hap.whole) continue;
+    const info = hapInfo(state, ctx, hap);
+    if (info === SKIP) continue;
+    if (info.end < t0 || info.begin > t1) continue; // off-screen
+    frame.push(info);
+    const val = info.val;
+    if (val != null) {
+      if (!lastSeen.has(val)) state.rowsDirty = true;
+      lastSeen.set(val, t1);
+    }
   }
   const decayCutoff = t1 - ROW_STABILITY_CYCLES;
-  for (const [val, lastT] of state.valueLastSeen) {
-    if (lastT < decayCutoff) state.valueLastSeen.delete(val);
+  for (const [val, lastT] of lastSeen) {
+    if (lastT < decayCutoff) {
+      lastSeen.delete(val);
+      state.rowsDirty = true;
+    }
   }
-  const uniqueValues = Array.from(state.valueLastSeen.keys());
-  // strings (drum sounds) sort first so they anchor at the bottom of the
-  // canvas after y-inversion; numbers (pitched notes) sort after, ascending.
-  uniqueValues.sort((a, b) => {
-    if (typeof a === "number" && typeof b === "number") return a - b;
-    if (typeof a === "number") return 1; // numbers sort AFTER strings
-    if (typeof b === "number") return -1; // strings sort BEFORE numbers
-    return String(a).localeCompare(String(b));
-  });
+  if (state.rowsDirty) rebuildRows(state);
+  const rows = state.rows;
+  const rowIndex = state.rowIndex;
 
-  const slotCount = Math.max(1, uniqueValues.length);
+  const slotCount = Math.max(1, rows.length);
   const rowH = noteAreaH / slotCount;
   const pillH = Math.max(2, rowH - 2);
 
-  // Build O(1) lookup for value → slot index (avoids indexOf per hap).
-  const valueIndex = new Map();
-  for (let i = 0; i < uniqueValues.length; i++) {
-    valueIndex.set(uniqueValues[i], i);
-  }
-
-  const valueToY = (val) => {
-    const idx = valueIndex.get(val) ?? 0;
-    // Higher pitch = higher on screen → invert the slot index.
-    const slot = slotCount - 1 - idx;
-    return noteAreaY + (slot / slotCount) * noteAreaH;
-  };
-
-  // Reset hit map for this frame.
-  state.hits.length = 0;
-
   // Track which row values have a currently-playing pill so the gutter
   // label loop (drawn after the clip block) can wash matching rows.
-  const activeValues = new Set();
+  const activeRows = state.activeRows;
+  activeRows.clear();
 
-  for (const item of visibleHaps) {
-    const { hap, begin, end, val } = item;
+  // Reset hit map for this frame.
+  const hits = state.hits;
+  let hitCount = 0;
+
+  const hasRoundRect = typeof ctx.roundRect === "function";
+  // Canvas state the pill loop sets, tracked so a run of same-coloured
+  // pills doesn't re-assign (and re-parse) an identical style string.
+  let fillColor = null;
+  let strokeColor = null;
+  ctx.lineWidth = 1;
+
+  for (let i = 0; i < frame.length; i++) {
+    const info = frame[i];
+    const val = info.val;
     if (val == null) continue; // truly empty haps have nowhere to land
 
-    const xRaw = timeToX(begin);
-    const wRaw = timeToX(end) - xRaw;
-    const yRaw = valueToY(val);
+    const xRaw = noteAreaX + ((info.begin - t0) / span) * noteAreaW;
+    const wRaw = noteAreaX + ((info.end - t0) / span) * noteAreaW - xRaw;
+    // Higher pitch = higher on screen → invert the slot index.
+    const slot = slotCount - 1 - (rowIndex.get(val) ?? 0);
+    const yRaw = noteAreaY + (slot / slotCount) * noteAreaH;
 
     const x = Math.round(xRaw) + 0.5;
     const y = Math.round(yRaw) + 0.5;
     const pillW = Math.max(2, Math.round(wRaw) - 1);
 
-    const label = getLabelForHap(hap, labels);
-    const color = label
-      ? PALETTE[labels.indexOf(label) % PALETTE.length]
-      : colorForKey(state, getGroupKey(hap));
-    const isActive = hap.whole.begin <= time && hap.endClipped > time;
-    if (isActive) activeValues.add(val);
-    const { velocity = 1, gain = 1 } = hap.value || {};
-    const dynAlpha = Math.min(1, velocity * gain); // clamp — gain can exceed 1
-    drawNotePill(ctx, x, y, pillW, pillH, color, isActive, dynAlpha);
+    const isActive = info.begin <= time && info.endClipped > time;
+    if (isActive) activeRows.add(val);
+    const color = info.color;
+    const dynAlpha = info.dynAlpha;
 
-    const loc = getFirstLocation(hap);
-    if (loc) {
-      state.hits.push({
-        x: x - 0.5,
-        y: y - 0.5,
-        w: pillW + 1,
-        h: pillH + 1,
-        start: loc[0],
-        end: loc[1],
-      });
+    const r = Math.max(0, Math.min(PILL_RADIUS, pillH / 2, pillW / 2));
+    ctx.beginPath();
+    if (hasRoundRect) {
+      ctx.roundRect(x, y, pillW, pillH, r);
+    } else {
+      // Defensive fallback — every modern target supports roundRect, but
+      // failing back to a sharp rect is preferable to throwing.
+      ctx.rect(x, y, pillW, pillH);
+    }
+    ctx.globalAlpha = (isActive ? 0.92 : 0.35) * dynAlpha;
+    if (fillColor !== color) ctx.fillStyle = fillColor = color;
+    ctx.fill();
+    ctx.globalAlpha = (isActive ? 1.0 : 0.5) * dynAlpha;
+    if (strokeColor !== color) ctx.strokeStyle = strokeColor = color;
+    ctx.stroke();
+
+    // Active pill: subtle bright top-edge highlight to reinforce "playing
+    // now" beyond the opacity change alone. Thin white line across the top
+    // of the pill, low opacity so it reads as a sheen, not an outline.
+    if (isActive && pillH >= 4 && pillW >= 4) {
+      ctx.globalAlpha = 0.35 * dynAlpha;
+      ctx.strokeStyle = strokeColor = "#fff";
+      ctx.beginPath();
+      ctx.moveTo(x + r, y + 0.5);
+      ctx.lineTo(x + pillW - r, y + 0.5);
+      ctx.stroke();
+    }
+
+    if (info.locStart >= 0) {
+      let hit = hits[hitCount];
+      if (!hit) hit = hits[hitCount] = { x: 0, y: 0, w: 0, h: 0, info: null };
+      hit.x = x - 0.5;
+      hit.y = y - 0.5;
+      hit.w = pillW + 1;
+      hit.h = pillH + 1;
+      hit.info = info;
+      hitCount++;
     }
   }
+  state.hitCount = hitCount;
+  ctx.globalAlpha = 1;
 
   // ── Hover highlight ───────────────────────────────────────────────────
   // Re-hit-test against this frame's pills so the ring tracks whichever
@@ -435,7 +664,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   // pointer, so a cached screen-space hit would anchor the ring to a
   // dead rectangle.
   const hoveredHit = state.mousePos
-    ? hitTest(state, state.mousePos.x, state.mousePos.y)
+    ? hitTest(hits, hitCount, state.mousePos.x, state.mousePos.y)
     : null;
   // Sync cursor against the fresh hit so a stationary pointer over a
   // scrolling pill still shows the pointer affordance.
@@ -453,7 +682,7 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     ctx.strokeStyle = tokens.text;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    if (typeof ctx.roundRect === "function") {
+    if (hasRoundRect) {
       ctx.roundRect(hh.x - 1, hh.y - 1, hh.w + 2, hh.h + 2, r);
     } else {
       ctx.rect(hh.x - 1, hh.y - 1, hh.w + 2, hh.h + 2);
@@ -471,17 +700,27 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     ctx.fillStyle = tokens.accent;
     ctx.fillRect(noteAreaX, noteAreaY, noteAreaW, noteAreaH);
     ctx.globalAlpha = 1;
+    // Nothing else redraws the roll while stopped, so the fade has to ask
+    // for its own next frame (a no-op while frames are already coming).
+    requestRepaint?.();
   }
 
   // ── Playhead ─────────────────────────────────────────────────────────
-  const px = Math.round(timeToX(time)) + 0.5;
-  // Subtle accent glow behind the line.
-  const glow = ctx.createLinearGradient(px - 6, 0, px + 6, 0);
-  glow.addColorStop(0, "transparent");
-  glow.addColorStop(0.5, tokens.accent);
-  glow.addColorStop(1, "transparent");
+  const px = Math.round(noteAreaX + ((time - t0) / span) * noteAreaW) + 0.5;
+  // Subtle accent glow behind the line. The playhead sits at the same x
+  // every frame, so the gradient is rebuilt only when that x (a resize) or
+  // the accent colour changes.
+  if (state.glowX !== px || state.glowAccent !== tokens.accent) {
+    const glow = ctx.createLinearGradient(px - 6, 0, px + 6, 0);
+    glow.addColorStop(0, "transparent");
+    glow.addColorStop(0.5, tokens.accent);
+    glow.addColorStop(1, "transparent");
+    state.glow = glow;
+    state.glowX = px;
+    state.glowAccent = tokens.accent;
+  }
   ctx.globalAlpha = 0.18;
-  ctx.fillStyle = glow;
+  ctx.fillStyle = state.glow;
   ctx.fillRect(px - 6, noteAreaY, 12, noteAreaH);
   ctx.globalAlpha = 1;
   ctx.strokeStyle = tokens.accent;
@@ -501,32 +740,32 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
     fontSize,
     Math.max(8, Math.floor(rowH * 0.65)),
   );
-  ctx.font = `500 ${gutterFontSize}px ${tokens.fontMono}`;
+  if (tokens.gutterFontSize !== gutterFontSize) {
+    tokens.gutterFontSize = gutterFontSize;
+    tokens.gutterFont = `500 ${gutterFontSize}px ${tokens.fontMono}`;
+  }
+  ctx.font = tokens.gutterFont;
   ctx.textBaseline = "middle";
   ctx.textAlign = "right";
   ctx.globalAlpha = 1;
 
-  for (let i = 0; i < uniqueValues.length; i++) {
-    const val = uniqueValues[i];
-    const y = valueToY(val);
+  const rowLabels = state.rowLabels;
+  for (let i = 0; i < rows.length; i++) {
+    const slot = slotCount - 1 - i;
+    const y = noteAreaY + (slot / slotCount) * noteAreaH;
     const cy = y + rowH / 2;
 
     // Faint accent wash behind currently-playing rows so the "bright pill
     // = now" cue extends to the label axis.
-    if (activeValues.has(val)) {
+    if (activeRows.has(rows[i])) {
       ctx.fillStyle = tokens.accent;
       ctx.globalAlpha = 0.12;
       ctx.fillRect(0, y, LEFT_GUTTER_W, rowH);
       ctx.globalAlpha = 1;
     }
 
-    const label =
-      typeof val === "number"
-        ? midi2note(Math.round(val)) // 60 → "C4", 69 → "A4"
-        : String(val).replace(/^_/, ""); // "_bd" → "bd"
-
     ctx.fillStyle = tokens.textDim;
-    ctx.fillText(label, LEFT_GUTTER_W - 4, cy);
+    ctx.fillText(rowLabels[i], LEFT_GUTTER_W - 4, cy);
   }
 
   // Subtle separator between gutter and note area (matches beat gridline weight).
@@ -540,43 +779,13 @@ export function renderRoll({ haps, time, ctx, drawTime, view }) {
   ctx.globalAlpha = 1;
 }
 
-function drawNotePill(ctx, x, y, w, h, color, isActive, dynAlpha = 1) {
-  const r = Math.max(0, Math.min(PILL_RADIUS, h / 2, w / 2));
-  ctx.beginPath();
-  if (typeof ctx.roundRect === "function") {
-    ctx.roundRect(x, y, w, h, r);
-  } else {
-    // Defensive fallback — every modern target supports roundRect, but
-    // failing back to a sharp rect is preferable to throwing.
-    ctx.rect(x, y, w, h);
-  }
-  ctx.globalAlpha = (isActive ? 0.92 : 0.35) * dynAlpha;
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.globalAlpha = (isActive ? 1.0 : 0.5) * dynAlpha;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // Active pill: subtle bright top-edge highlight to reinforce "playing now"
-  // beyond the opacity change alone. Thin white line across the top of the
-  // pill, low opacity so it reads as a sheen, not an outline.
-  if (isActive && h >= 4 && w >= 4) {
-    ctx.globalAlpha = 0.35 * dynAlpha;
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x + r, y + 0.5);
-    ctx.lineTo(x + w - r, y + 0.5);
-    ctx.stroke();
-  }
-}
-
-// Hit-test helper shared by click and mousemove. Returns the matched hit
-// entry or null.
-function hitTest(state, cx, cy) {
-  for (let i = state.hits.length - 1; i >= 0; i--) {
-    const hit = state.hits[i];
+/**
+ * Topmost hit rectangle containing the point, or null. `hits` is a pooled
+ * array; only its first `count` entries belong to the current frame.
+ */
+export function hitTest(hits, count, cx, cy) {
+  for (let i = count - 1; i >= 0; i--) {
+    const hit = hits[i];
     if (
       cx >= hit.x &&
       cx <= hit.x + hit.w &&
@@ -592,14 +801,29 @@ function hitTest(state, cx, cy) {
 function bindInteraction(canvas, state) {
   // Click → jump to source location in the editor.
   canvas.addEventListener("click", (e) => {
-    const view = state.view;
-    if (!view) return;
-    const rect = canvas.getBoundingClientRect();
-    const hit = hitTest(state, e.clientX - rect.left, e.clientY - rect.top);
+    if (!state.view) return;
+    const hit = hitTest(state.hits, state.hitCount, e.offsetX, e.offsetY);
     if (!hit) return;
+    const { source, locStart, locEnd } = hit.info;
     try {
+      // The note may belong to a pattern playing from another tab; let the
+      // host bring that document into the editor first. It answers false
+      // when the note's document cannot be shown, and the click is dropped.
+      if (state.beforeLocate?.() === false) return;
+      const view = state.view;
+      const range = mapRangeThroughEdit(
+        source.code,
+        view.state.doc.toString(),
+        locStart,
+        locEnd,
+      );
+      if (!range) {
+        // The code this note came from has been edited since it was
+        // evaluated — there is no honest place to put the cursor.
+        throw new Error("the source of this note was edited since the last evaluate");
+      }
       view.dispatch({
-        selection: { anchor: hit.start, head: hit.end },
+        selection: { anchor: range.start, head: range.end },
         scrollIntoView: true,
       });
       view.focus?.();
@@ -607,24 +831,44 @@ function bindInteraction(canvas, state) {
       console.warn("[strasbeat/piano-roll] dispatch failed:", err);
       // Visual flash so the user knows the click didn't just vanish.
       state.errorFlashUntil = performance.now() + 400;
+      state.requestRepaint?.();
     }
   });
 
   // Mousemove → stash the pointer position so the renderer can re-hit-test
   // against the live pill layout each frame. The cursor flip happens here
   // against the most recent hits — good enough between frames, and the
-  // next frame's render snaps the ring back into alignment.
+  // next frame's render snaps the ring back into alignment. The canvas has
+  // no border or padding, so offsetX/Y are already canvas CSS px (and cost
+  // no layout read, unlike getBoundingClientRect).
+  // Identified by the note, not the rectangle: hit entries are pooled.
+  let hovered = null;
   canvas.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    state.mousePos = { x, y };
-    const hit = hitTest(state, x, y);
-    canvas.style.cursor = hit ? "pointer" : "";
+    const x = e.offsetX;
+    const y = e.offsetY;
+    if (state.mousePos) {
+      state.mousePos.x = x;
+      state.mousePos.y = y;
+    } else {
+      state.mousePos = { x, y };
+    }
+    const hit = hitTest(state.hits, state.hitCount, x, y);
+    const cursor = hit ? "pointer" : "";
+    if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
+    // While stopped no frame is coming to move the hover ring.
+    const info = hit ? hit.info : null;
+    if (info !== hovered) {
+      hovered = info;
+      state.requestRepaint?.();
+    }
   });
 
   canvas.addEventListener("mouseleave", () => {
     state.mousePos = null;
     canvas.style.cursor = "";
+    if (hovered) {
+      hovered = null;
+      state.requestRepaint?.();
+    }
   });
 }

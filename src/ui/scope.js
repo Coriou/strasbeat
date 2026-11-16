@@ -55,6 +55,11 @@ export function createScope() {
 
   const config = { ...DEFAULTS };
   let needsClear = true;
+  // The smear fill colour, rebuilt only when the background token or the
+  // smear amount changes rather than on every frame.
+  let smearBg = null;
+  let smearAmount = NaN;
+  let smearFill = "";
 
   function readTokens(canvas) {
     if (canvas === cachedTokenCanvas && cachedTokens) return cachedTokens;
@@ -147,10 +152,12 @@ export function createScope() {
     needsClear = true;
   }
 
-  function render(ctx, width, height) {
+  // `dpr` is the ratio the caller sized the backing store with (see
+  // bottom-canvas.js); reading the window's own here could disagree with it
+  // for a frame after the window moves to another display.
+  function render(ctx, width, height, dpr = window.devicePixelRatio || 1) {
     const t = readTokens(ctx.canvas);
-    const dpr = window.devicePixelRatio || 1;
-    // Canvas backing store is device-pixel-sized (see main.js resizeCanvas).
+    // Canvas backing store is device-pixel-sized.
     // Set the transform every frame so we can think in CSS pixels and stay
     // robust to whatever the previous renderer (Roll / custom) left on ctx.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -162,7 +169,12 @@ export function createScope() {
       needsClear = false;
     } else {
       // Alpha-fill the bg so older frames fade at geometric rate (1-smear)^n.
-      ctx.fillStyle = bgWithAlpha(t.bg, 1 - smear);
+      if (smearBg !== t.bg || smearAmount !== smear) {
+        smearBg = t.bg;
+        smearAmount = smear;
+        smearFill = bgWithAlpha(t.bg, 1 - smear);
+      }
+      ctx.fillStyle = smearFill;
       ctx.fillRect(0, 0, width, height);
     }
 
