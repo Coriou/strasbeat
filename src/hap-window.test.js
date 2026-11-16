@@ -398,3 +398,17 @@ test("a new pattern's note already under way at the evaluate is shown from its s
   window.invalidate(drone, 1.5, 0.5);
   assert.equal(window.visibleHaps.filter((h) => h.value === "x").length, 1);
 });
+
+test("a stopped clock (setcps(0)) is not an error", () => {
+  const pattern = mini("a b c d");
+  const window = new HapWindow();
+  window.invalidate(pattern, 0.3, 0);
+  assert.ok(window.visibleHaps.some((h) => h.value === "b"));
+  // Time stands still: frames come and go, nothing moves, nothing throws.
+  const snapshot = window.visibleHaps;
+  for (let frame = 0; frame < 10; frame++) window.advance(pattern, 0.3, 0);
+  assert.equal(window.visibleHaps, snapshot);
+  // And it picks up again when the tempo does.
+  window.advance(pattern, 0.4, 0.5);
+  assert.ok(window.activeHaps.some((h) => h.value === "b"));
+});

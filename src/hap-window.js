@@ -20,11 +20,10 @@ export class HapWindow {
 
   // One slice is 1/6 second at the current tempo. A tempo change takes
   // effect at the next query; the already queried boundary stays untouched.
+  // A clock that stands still (`setcps(0)`) has no sixth of a second in
+  // cycles; any small slice will do, since time is not advancing into it.
   slice(cps) {
-    if (!(cps > 0) || !Number.isFinite(cps)) {
-      throw new Error("Playback window needs a positive, finite cps");
-    }
-    return cps / 6;
+    return cps > 0 && Number.isFinite(cps) ? cps / 6 : 1 / 12;
   }
 
   setDrawTime(dt) {
