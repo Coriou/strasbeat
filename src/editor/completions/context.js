@@ -245,13 +245,12 @@ export const bufferContextPlugin = ViewPlugin.fromClass(
  * @returns {Map<"sound" | "bank" | "chord" | "function", Set<string>>}
  */
 export function extractFromState(state) {
-  const text = state.doc.toString();
   try {
     const tree = syntaxTree(state);
     // If the parser hasn't produced a real tree yet (first paint, or the
     // language extension wasn't installed), fall back to the regex walker.
-    if (!tree || tree.length < text.length) {
-      return extractBufferTokens(text);
+    if (!tree || tree.length < state.doc.length) {
+      return extractBufferTokens(state.doc.toString());
     }
     return extractFromTree(tree, (from, to) => state.sliceDoc(from, to));
   } catch (err) {
@@ -259,7 +258,7 @@ export function extractFromState(state) {
       "[strasbeat/completions] syntax-tree buffer extract failed; using regex fallback:",
       err,
     );
-    return extractBufferTokens(text);
+    return extractBufferTokens(state.doc.toString());
   }
 }
 

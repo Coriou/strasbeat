@@ -9,7 +9,7 @@
 import { hoverTooltip } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { completionStatus } from "@codemirror/autocomplete";
-import docs from "./strudel-docs.json";
+import docs from "./strudel-docs.json" with { type: "json" };
 
 /**
  * Escape user-facing text for safe HTML insertion.
@@ -112,7 +112,13 @@ function renderTooltip(entry, name, onOpenReference) {
     link.type = "button";
     link.className = "hover-docs-ref-link";
     link.textContent = "→ Reference";
+    // mousedown is only cancelled (keeps focus in the editor); the action
+    // runs on click so the button also works from the keyboard.
     link.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    link.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       try {
@@ -154,7 +160,9 @@ function makeStrudelHover(onOpenReference) {
     }
 
     const text = view.state.sliceDoc(node.from, node.to);
-    const entry = docs[text];
+    // hasOwn: `docs` is a plain object, so a bare `docs[text]` also finds
+    // `constructor`, `toString`, … on Object.prototype.
+    const entry = Object.hasOwn(docs, text) ? docs[text] : null;
     if (!entry) return null;
 
     return {

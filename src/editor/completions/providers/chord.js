@@ -1,5 +1,6 @@
 // src/editor/completions/providers/chord.js
 
+import { insertCompletionText, pickedCompletion } from "@codemirror/autocomplete";
 import { complex } from "@strudel/tonal";
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
@@ -13,7 +14,27 @@ const PITCH_NAMES = [
   "B", "B#", "Cb",
 ];
 
-const CHORD_SYMBOLS = ["", ...Object.keys(complex)].sort();
+// The chord qualities @strudel/tonal's voicing dictionaries know. `complex`
+// already contains the empty symbol (a bare root is a major triad), so it is
+// not added by hand — that listed the major row twice.
+//
+// The empty symbol can't be shown as an empty row, so it is labelled "major"
+// — but "major" is NOT a symbol the dictionaries accept (`chord("Cmajor")` is
+// an unknown chord → silence). `insert` is what accepting the row writes.
+const CHORD_QUALITIES = Object.keys(complex)
+  .sort()
+  .map((symbol) => ({ insert: symbol, label: symbol === "" ? "major" : symbol }));
+
+// CodeMirror falls back to the label when `apply` is an empty string, so the
+// major row needs a function to really insert nothing.
+function applyInsert(insert) {
+  return (view, completion, from, to) => {
+    view.dispatch({
+      ...insertCompletionText(view.state, insert, from, to),
+      annotations: pickedCompletion.of(completion),
+    });
+  };
+}
 
 const CHORD_NO_QUOTES = /\bchord\(\s*$/;
 const CHORD_WITH_QUOTES = /\bchord\(\s*['"][^'"]*$/;
@@ -47,14 +68,14 @@ export function chordProvider({ recency }) {
     const buffer = getBufferTokens().get("chord");
 
     if (rootMatch) {
-      const ranked = scoreList(CHORD_SYMBOLS, symbolFragment, buffer, recency);
+      const ranked = scoreList(CHORD_QUALITIES, symbolFragment, buffer, recency);
       return {
         from: ctx.to - symbolFragment.length,
         to: ctx.to,
         filter: false,
         options: ranked.map((r) => ({
-          label: r.label === "" ? "major" : r.label,
-          apply: r.label,
+          label: r.label,
+          apply: r.insert === "" ? applyInsert("") : r.insert,
           type: "type",
           detail: "chord quality",
           boost: r.finalScore,
@@ -62,7 +83,12 @@ export function chordProvider({ recency }) {
       };
     }
 
-    const ranked = scoreList(PITCH_NAMES, fragment, buffer, recency);
+    const ranked = scoreList(
+      PITCH_NAMES.map((name) => ({ insert: name, label: name })),
+      fragment,
+      buffer,
+      recency,
+    );
     return {
       from: ctx.to - fragment.length,
       to: ctx.to,
@@ -78,15 +104,15 @@ export function chordProvider({ recency }) {
 
 function scoreList(items, fragment, buffer, recency) {
   const out = [];
-  for (const name of items) {
-    const m = fragment ? score(fragment, name) : { score: 0.3, matched: [] };
+  for (const { insert, label } of items) {
+    const m = fragment ? score(fragment, label) : { score: 0.3, matched: [] };
     if (!m) continue;
     const finalScore =
       m.score +
-      (buffer.has(name) ? BUFFER_BOOST : 0) +
-      recency.score("chord", name) +
+      (buffer.has(label) ? BUFFER_BOOST : 0) +
+      recency.score("chord", label) +
       CATEGORY_BASE;
-    out.push({ label: name, finalScore });
+    out.push({ label, insert, finalScore });
   }
   out.sort((a, b) => b.finalScore - a.finalScore);
   return out;

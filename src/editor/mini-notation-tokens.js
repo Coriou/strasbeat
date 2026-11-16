@@ -12,10 +12,35 @@
  */
 
 /**
+ * One character that ends a mini-notation token. Parentheses are included so
+ * the name in a Euclidean step like `hh(3,8)` is the token `hh`, not `hh(3`.
+ */
+export const MINI_SEPARATOR = /[\s[\]<>{}(),|!@?*/:~]/;
+
+/**
+ * True when the token starting at `tokFrom` is a number the surrounding
+ * operator consumes — the `8` in `hh*8`, the `3` and `8` in `bd(3,8)`, the
+ * `0.5` in `bd?0.5` — rather than a sound or note name.
+ *
+ * @param {string} text - The mini-notation string content.
+ * @param {number} tokFrom - Offset of the token's first character.
+ */
+export function isOperatorOperand(text, tokFrom) {
+  if (tokFrom <= 0) return false;
+  if ("*/@!?(".includes(text[tokFrom - 1])) return true;
+  // Inside an unclosed `( … )` every comma-separated token is an operand.
+  for (let i = tokFrom - 1; i >= 0; i--) {
+    if (text[i] === ")") return false;
+    if (text[i] === "(") return true;
+  }
+  return false;
+}
+
+/**
  * Find the current token at `offset` inside `text`.
  *
  * Tokens are separated by whitespace and mini-notation operators like
- * `[`, `]`, `<`, `>`, `{`, `}`, `,`, `|`, `!`, `@`, `?`.
+ * `[`, `]`, `<`, `>`, `{`, `}`, `(`, `)`, `,`, `|`, `!`, `@`, `?`.
  *
  * Returns null if the cursor is at a separator or the string is empty.
  *
@@ -31,7 +56,7 @@
  */
 export function tokenAtOffset(text, offset) {
   if (text == null || offset < 0 || offset > text.length) return null;
-  const SEP = /[\s[\]<>{},|!@?*/:~]/;
+  const SEP = MINI_SEPARATOR;
 
   // Special: empty fragment after a colon — surface for variant completion.
   // (cursor sits immediately after a `:` with no following token char yet.)

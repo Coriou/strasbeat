@@ -36,7 +36,7 @@ import {
   extractErrorLine,
   setError,
 } from "./editor/error-marks.js";
-import strudelDocs from "./editor/strudel-docs.json";
+import strudelDocs from "./editor/strudel-docs.json" with { type: "json" };
 import { hydrateIcons } from "./ui/icons.js";
 import { mount as mountLeftRail } from "./ui/left-rail.js";
 import { mountTransport } from "./ui/transport.js";

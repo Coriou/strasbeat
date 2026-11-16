@@ -2,7 +2,12 @@
 
 import { syntaxTree } from "@codemirror/language";
 import { soundMap } from "@strudel/webaudio";
-import { tokenAtOffset, miniContext } from "../../mini-notation-tokens.js";
+import {
+  MINI_SEPARATOR,
+  tokenAtOffset,
+  miniContext,
+  isOperatorOperand,
+} from "../../mini-notation-tokens.js";
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
 import { buildAuditionInfo } from "../info.js";
@@ -56,6 +61,20 @@ export function miniNotationProvider({ recency, audition }) {
     const fragment = tok ? tok.token : "";
     const from = tok ? ctx.contentFrom + tok.from : context.pos;
     const to = tok ? ctx.contentFrom + tok.to : context.pos;
+
+    // A number being typed is not a name: the multiplier in `hh*8`, the
+    // Euclid arguments in `bd(3,8)`, the scale degrees in `n("0 2 4")`.
+    // Reserve the position with an empty result so no later provider pops
+    // up over it either.
+    if (tok && tok.prevSeparator !== ":") {
+      const numeric = /^-?\d[\d.]*$/.test(fragment);
+      if (
+        isOperatorOperand(ctx.content, tok.from) ||
+        (numeric && kind === "note")
+      ) {
+        return { from, to, filter: false, options: [] };
+      }
+    }
 
     // Variant fragment (after a colon) — emit numeric variants of the
     // prior sound. The bank-in-scope lookup uses the syntax tree to find
@@ -155,7 +174,7 @@ function computeVariants({ content, tokFrom, fragment, bankInScope, audition }) 
   let i = tokFrom - 1;
   if (i < 0 || content[i] !== ":") return null;
   i--;
-  const SEP = /[\s[\]<>{},|!@?*/:~]/;
+  const SEP = MINI_SEPARATOR;
   const priorEnd = i + 1;
   while (i >= 0 && !SEP.test(content[i])) i--;
   const priorStart = i + 1;
@@ -221,10 +240,10 @@ function buildVariantInfo(bareName, resolvedName, n, audition, bank) {
   btn.textContent = "▶";
   btn.title = `Preview ${resolvedName}:${n}`;
   btn.setAttribute("aria-label", `Preview ${resolvedName}:${n}`);
-  btn.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    audition(bareName, { n, bank });
-  });
+  // mousedown is only cancelled (so the editor keeps focus and the popup
+  // stays open); the audition fires on click so keyboard activation works.
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", () => audition(bareName, { n, bank }));
   wrap.appendChild(btn);
   return wrap;
 }

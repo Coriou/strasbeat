@@ -5,7 +5,8 @@
 // fragment. Snippets for known function templates land in Phase 2.
 
 import { snippet } from "@codemirror/autocomplete";
-import docs from "../../strudel-docs.json";
+import { syntaxTree } from "@codemirror/language";
+import docs from "../../strudel-docs.json" with { type: "json" };
 import { score } from "../score.js";
 import { getBufferTokens } from "../context.js";
 import { renderCompletionInfo } from "../info.js";
@@ -27,6 +28,43 @@ const SNIPPET_TEMPLATES = {
   cat: "cat(${1})",
 };
 
+// Syntax nodes whose contents are prose or data, never an identifier being
+// typed. This provider is the chain's fallback for every cursor position, so
+// without this gate it would pop up over comments and plain strings — and
+// Enter (meant as a newline) would replace the word with a function name.
+const NON_CODE_NODES = new Set([
+  "LineComment",
+  "BlockComment",
+  "String",
+  "TemplateString",
+  "RegExp",
+]);
+
+// True when `pos` sits inside a comment, string or regex. An interpolation
+// inside a template literal is code again, so the walk stops there.
+export function isNonCodePosition(state, pos) {
+  for (
+    let node = syntaxTree(state).resolveInner(pos, -1);
+    node;
+    node = node.parent
+  ) {
+    if (node.name === "Interpolation") return false;
+    if (NON_CODE_NODES.has(node.name)) {
+      // Just past the closing delimiter of a string/regex/block comment the
+      // cursor is back in code. A line comment has no closing delimiter.
+      return node.name === "LineComment" || pos < node.to || isUnterminated(state, node);
+    }
+  }
+  return false;
+}
+
+function isUnterminated(state, node) {
+  const text = state.sliceDoc(node.from, node.to);
+  if (node.name === "BlockComment") return !text.endsWith("*/");
+  if (node.name === "RegExp") return false;
+  return text.length < 2 || text[text.length - 1] !== text[0];
+}
+
 let functionList = [];
 
 /**
@@ -41,9 +79,15 @@ export function buildFunctionList(liveExports) {
   const out = [];
   const consider = (name) => {
     if (seen.has(name)) return;
-    if (!/^[a-z]/.test(name) || name.length < 2) return;
+    if (!/^[a-z]/.test(name)) return;
+    // `docs` is a plain object: look keys up with hasOwn so inherited names
+    // (`constructor`, `toString`, …) don't masquerade as documented
+    // functions.
+    const entry = Object.hasOwn(docs, name) ? docs[name] : null;
+    // One-letter names are noise unless they are real, documented functions
+    // (`s`, `n`).
+    if (name.length < 2 && !entry) return;
     seen.add(name);
-    const entry = docs[name];
     if (entry) {
       out.push({ label: name, type: "function", entry });
     } else {
@@ -60,6 +104,10 @@ export function functionsProvider({ recency }) {
     const word = context.matchBefore(/\w*/);
     if (!word) return null;
     if (word.from === word.to && !context.explicit) return null;
+    // A fragment that starts with a digit is a number literal being typed
+    // (`gain(0.8)`, `range(200, 2000)`), not an identifier.
+    if (/^\d/.test(word.text)) return null;
+    if (isNonCodePosition(context.state, context.pos)) return null;
 
     const fragment = word.text;
     const buffer = getBufferTokens().get("function");
@@ -92,8 +140,9 @@ function completionFor(fn, finalScore) {
     type: "function",
     boost: finalScore,
   };
-  const tpl = SNIPPET_TEMPLATES[fn.label];
-  if (tpl) opt.apply = snippet(tpl);
+  if (Object.hasOwn(SNIPPET_TEMPLATES, fn.label)) {
+    opt.apply = snippet(SNIPPET_TEMPLATES[fn.label]);
+  }
   if (fn.entry) {
     if (fn.entry.doc) {
       const first = fn.entry.doc.split(/[.!?]\s/)[0];

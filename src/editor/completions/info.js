@@ -82,8 +82,9 @@ export function renderCompletionInfo(label, entry) {
  * sound-typed completions, so the docs panel doubles as a one-click
  * preview affordance.
  *
- * The button uses `mousedown` + `e.preventDefault()` to avoid blurring
- * the autocomplete popup (which would close it on click). The audition
+ * The button cancels `mousedown` so the editor keeps focus (and the
+ * autocomplete popup stays open); the audition itself fires on `click`, so
+ * it also works from the keyboard. The audition
  * callback is invoked with `(label, opts)` — Phase 3 (Task 18) extends
  * the opts to pass `n`/`bank` for sample variants and Task 19 passes
  * `bank` for bank-aware sound completions.
@@ -108,10 +109,8 @@ export function buildAuditionInfo(label, audition, opts = undefined) {
   btn.setAttribute("aria-label", `Preview ${resolved}`);
   btn.title = "Preview sound";
   btn.textContent = "▶";
-  btn.addEventListener("mousedown", (e) => {
-    e.preventDefault(); // don't blur the autocomplete popup
-    audition(label, opts || {});
-  });
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", () => audition(label, opts || {}));
   wrap.appendChild(btn);
 
   const meta = document.createElement("div");

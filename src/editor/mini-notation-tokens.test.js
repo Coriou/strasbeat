@@ -2,7 +2,11 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { tokenAtOffset, miniContext } from "./mini-notation-tokens.js";
+import {
+  tokenAtOffset,
+  miniContext,
+  isOperatorOperand,
+} from "./mini-notation-tokens.js";
 
 describe("tokenAtOffset", () => {
   test("returns null for empty string", () => {
@@ -61,5 +65,26 @@ describe("miniContext", () => {
   test("everything else is other", () => {
     assert.equal(miniContext("chord"), "other");
     assert.equal(miniContext("xyz"), "other");
+  });
+});
+
+describe("Euclid parentheses", () => {
+  test("the sound name before `(` is its own token", () => {
+    assert.deepEqual(tokenAtOffset("hh(3,8)", 2), {
+      token: "hh",
+      from: 0,
+      to: 2,
+      prevSeparator: null,
+    });
+  });
+
+  test("arguments inside the parens are operands, names outside are not", () => {
+    const text = "bd(3,8) hh*4 sd";
+    assert.equal(isOperatorOperand(text, text.indexOf("3")), true);
+    assert.equal(isOperatorOperand(text, text.indexOf("8")), true);
+    assert.equal(isOperatorOperand(text, text.indexOf("4")), true);
+    assert.equal(isOperatorOperand(text, text.indexOf("hh")), false);
+    assert.equal(isOperatorOperand(text, text.indexOf("sd")), false);
+    assert.equal(isOperatorOperand(text, 0), false);
   });
 });
