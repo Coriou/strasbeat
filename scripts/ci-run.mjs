@@ -34,7 +34,7 @@ export function parseArgs(args) {
     const arg = args[i];
     if (arg === "--keep") options.keep = true;
     else if (["--ref", "--timeout", "--base", "--scenarios"].includes(arg)) {
-      if (args[i + 1] == null || args[i + 1].startsWith("--"))
+      if (!args[i + 1] || args[i + 1].startsWith("--"))
         throw new Error(`Missing value for ${arg}`);
       options[arg.slice(2)] = args[++i];
     } else if (!arg.startsWith("-") && !options.name) options.name = arg;
@@ -107,9 +107,14 @@ export function command(program, args, { allowFailure = false } = {}) {
       stderr += s;
     });
     child.on("error", reject);
-    child.on("close", (code) => {
-      if (code && !allowFailure)
-        reject(new Error(`${program} ${args[0]} failed (${code}): ${stderr}`));
+    child.on("close", (code, signal) => {
+      // `code` is null when a signal killed the child: not a success either.
+      if (code !== 0 && !allowFailure)
+        reject(
+          new Error(
+            `${program} ${args[0]} failed (${code ?? signal}): ${stderr}`,
+          ),
+        );
       else resolve({ stdout: stdout.trim(), stderr: stderr.trim(), code });
     });
   });
@@ -146,6 +151,26 @@ export async function main(args, exec = command) {
     throw new Error(
       `Remote branch already exists: ${branch}; choose another name`,
     );
+  // GitHub keeps a deleted branch's runs. An earlier invocation for this
+  // commit under the same branch name left some; they are not this one's.
+  const listRuns = async () =>
+    JSON.parse(
+      await gh(
+        "run",
+        "list",
+        "--branch",
+        branch,
+        "--commit",
+        sha,
+        "--json",
+        "databaseId,workflowName,event,status,conclusion,url",
+        "--limit",
+        "100",
+      ),
+    );
+  const earlier = new Set((await listRuns()).map((r) => r.databaseId));
+  const ourRuns = async () =>
+    (await listRuns()).filter((r) => !earlier.has(r.databaseId));
   const push = (...a) =>
     exec("git", [
       "-c",
@@ -162,7 +187,7 @@ export async function main(args, exec = command) {
   const cleanup = () =>
     (cleanupPromise ??= (async () => {
       if (pushed && !o.keep) {
-        await push("--delete", branch);
+        await push("--delete", remoteRef);
         console.log(`Deleted ${branch}`);
       }
     })());
@@ -189,20 +214,7 @@ export async function main(args, exec = command) {
       const until = Date.now() + 120000;
       let pushPerf;
       while (!pushPerf && Date.now() < until && !interrupted) {
-        const runs = JSON.parse(
-          await gh(
-            "run",
-            "list",
-            "--branch",
-            branch,
-            "--commit",
-            sha,
-            "--json",
-            "databaseId,workflowName,event,status",
-            "--limit",
-            "100",
-          ),
-        );
+        const runs = await ourRuns();
         pushPerf = runs.find(
           (r) => r.workflowName === "Perf" && r.event === "push",
         );
@@ -234,20 +246,7 @@ export async function main(args, exec = command) {
     let finished = [],
       settled = 0;
     while (Date.now() < deadline && !interrupted) {
-      const all = JSON.parse(
-        await gh(
-          "run",
-          "list",
-          "--branch",
-          branch,
-          "--commit",
-          sha,
-          "--json",
-          "databaseId,workflowName,event,status,conclusion,url",
-          "--limit",
-          "100",
-        ),
-      );
+      const all = await ourRuns();
       // Only the explicitly superseded push Perf run is excluded; all other
       // runs for this SHA and branch must finish successfully.
       const runs = all.filter(

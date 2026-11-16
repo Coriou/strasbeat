@@ -18,6 +18,7 @@ test("arguments and branch names", () => {
   assert.throws(() => parseArgs(["perf", "../bad"]));
   assert.throws(() => parseArgs(["test", "--base", "main"]));
   assert.throws(() => parseArgs(["perf", "--timeout", "0"]));
+  assert.throws(() => parseArgs(["perf", "--base", ""]));
   assert.equal(
     parseArgs(["perf", "--scenarios", "sweep,typing"]).scenarios,
     "sweep,typing",
@@ -100,7 +101,8 @@ test("failure after push still checks deployments and deletes the branch", async
   await assert.rejects(
     main(["test", "--ref", "HEAD"], async (program, args) => {
       calls.push([program, args]);
-      if (program === "gh" && args[0] === "run")
+      const pushed = calls.some(([p, a]) => p === "git" && a.includes("push"));
+      if (program === "gh" && args[0] === "run" && pushed)
         throw new Error("network failed");
       const stdout =
         program === "git"
@@ -124,7 +126,12 @@ test("failure after push still checks deployments and deletes the branch", async
         p === "gh" && a.some((s) => s.includes("deployments?sha=abc123")),
     ),
   );
-  assert.ok(calls.some(([p, a]) => p === "git" && a.includes("--delete")));
+  assert.deepEqual(
+    calls
+      .find(([p, a]) => p === "git" && a.includes("--delete"))?.[1]
+      .slice(-2),
+    ["--delete", "refs/heads/ci/abc123"],
+  );
 });
 test("a deployment the commit already had is not blamed on the push", async () => {
   // main's commit has its production deployment; pushing it to a ci/ branch
@@ -143,13 +150,21 @@ test("a deployment the commit already had is not blamed on the push", async () =
       stdout = JSON.stringify(respond.pushed ? after : [{ id: 1 }]);
     } else if (args[0] === "run" && args[1] === "list")
       stdout = JSON.stringify([
+        // Left by an earlier invocation for this commit: never ours.
         {
+          databaseId: 3,
+          workflowName: "CI",
+          status: "completed",
+          conclusion: "failure",
+          url: "old",
+        },
+        ...(respond.pushed ? [0] : []).map(() => ({
           databaseId: 7,
           workflowName: "CI",
           status: "completed",
           conclusion: "success",
           url: "u",
-        },
+        })),
       ]);
     if (program === "git" && args.includes("push")) respond.pushed = true;
     return { stdout, stderr: "", code: 0 };
@@ -188,8 +203,10 @@ test("tracked changes require an explicit ref", async () => {
 test("chosen journeys run as a dispatch that replaces the push run", async () => {
   const calls = [];
   let dispatched = false;
+  let pushed = false;
   const respond = async (program, args) => {
     calls.push([program, ...args].join(" "));
+    if (program === "git" && args.includes("push")) pushed = true;
     let stdout = "";
     if (program === "git") {
       if (args[0] === "rev-parse") stdout = "abc123";
@@ -210,9 +227,14 @@ test("chosen journeys run as a dispatch that replaces the push run", async () =>
         url: "u",
       });
       stdout = JSON.stringify([
-        run(7, "CI", "push", true),
+        // An earlier invocation's push run for this commit and branch name:
+        // not the one to cancel, and no part of the verdict.
+        run(2, "Perf", "push", true),
+        ...(pushed ? [run(7, "CI", "push", true)] : []),
         // Cancelled once the dispatch replaces it, and left out of the verdict.
-        { ...run(8, "Perf", "push", dispatched), conclusion: "cancelled" },
+        ...(pushed
+          ? [{ ...run(8, "Perf", "push", dispatched), conclusion: "cancelled" }]
+          : []),
         ...(dispatched ? [run(9, "Perf", "workflow_dispatch", true)] : []),
       ]);
     }
