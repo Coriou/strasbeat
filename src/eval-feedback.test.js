@@ -215,8 +215,43 @@ describe("stop / cancel", () => {
     assert.equal(repl.scheduler.started, false);
   });
 
-  test("a cancelled evaluate that finishes late cannot replace a newer pattern", async () => {
+  test("play right after a stop does not evaluate beside the abandoned one", async () => {
+    // Two evaluates inside the repl share its `$:` table: the one that
+    // resumes second would stack both sets of layers (4 onsets, not 2).
     const { editor, repl } = setup();
+    editor.code = SLOW(60, `$: s("bd")\n$: s("hh")`);
+    const first = editor.evaluate();
+    await sleep(15);
+    editor.stop(); // the first is still awaiting inside the repl
+    const second = await editor.evaluate();
+    assert.equal(second.status, "ok");
+    assert.equal((await first).status, "cancelled");
+    assert.equal(onsetsPerCycle(repl), 2, "each $: layer plays once");
+    assert.equal(repl.scheduler.started, true);
+  });
+
+  test("a play during the first-frame evaluate waits for it", async () => {
+    // StrudelMirror paints its first frame with repl.evaluate(code, false),
+    // outside the patched evaluate; the sequencer is handed that promise.
+    let repl;
+    const code = SLOW(60, `$: s("bd")\n$: s("hh")`);
+    let startFirstFrame;
+    const firstFrame = new Promise((resolve) => {
+      startFirstFrame = resolve;
+    }).then(() => repl.evaluate(code, false));
+    const ctx = setup({ deps: { firstFrame } });
+    repl = ctx.repl;
+    ctx.editor.code = code;
+    startFirstFrame();
+    await sleep(15);
+    const outcome = await ctx.editor.evaluate();
+    assert.equal(outcome.status, "ok");
+    assert.equal(onsetsPerCycle(repl), 2, "each $: layer plays once");
+  });
+
+  test("a cancelled evaluate that finishes late cannot replace a newer pattern", async () => {
+    // (a short bound, so the newer evaluate really does overtake the slow one)
+    const { editor, repl } = setup({ deps: { abandonWaitMs: 5 } });
     editor.code = SLOW(80, `s("bd")`);
     const slow = editor.evaluate();
     await sleep(15);

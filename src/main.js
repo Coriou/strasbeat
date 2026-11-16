@@ -337,7 +337,9 @@ const editor = new StrudelMirror({
   root: editorRoot,
   initialCode,
   drawTime,
-  autodraw: true,
+  // The first frame is requested below instead (`firstFrame`), so its
+  // promise can be handed to the evaluate sequencer.
+  autodraw: false,
   // Eval failures routed into eval-feedback.js via forward-ref.
   onEvalError: (err) => evalFeedback?.handleEvalError(err),
   // Visuals exist iff the evaluated code asked for them and the scheduler is
@@ -364,6 +366,11 @@ const editor = new StrudelMirror({
   },
   prebake,
 });
+// Paint the first frame (what `autodraw` would have done in the constructor).
+// It evaluates the buffer inside the repl once boot is through, without going
+// through the patched evaluate — so the sequencer is told about it, and a play
+// pressed during boot waits for it instead of evaluating alongside it.
+const firstFrame = editor.drawFirstFrame();
 
 // ─── Phase 1.5 — full-window visuals behind the editor ───────────────────
 // A toggle (NOT in the share codec — spec §"Phase 1.5") that un-clips the
@@ -1658,6 +1665,7 @@ evalFeedback = installEvalFeedback({
   getCurrentName: () => currentName,
   getEvalOwner: () => tabs?.getActiveItem() ?? null,
   getBootFailures,
+  firstFrame,
 });
 
 // Tab playing-ownership: an autostart evaluate transfers scheduler ownership to

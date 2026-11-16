@@ -13,17 +13,38 @@
  * request can tell "replaced by a newer evaluate" from "the user cancelled".
  *
  * Requests also run one at a time: `enter()` resolves when the previous
- * evaluate has finished. Two evaluates inside the repl at once would share
- * its `$:` pattern table and the arrange registry and corrupt both. A stop
- * abandons whatever is still in flight and wakes every request waiting for
- * its turn (see `stop()`), so an evaluate whose top-level `await` never
- * settles cannot lock the transport — or anything queued behind it, such as
- * the WAV export's compile-only evaluate.
+ * evaluate has finished. Two evaluates inside the repl at once share its
+ * `$:` pattern table and the arrange registry and corrupt both — the one
+ * that resumes second stacks both sets of layers, so every `$:` line plays
+ * twice.
+ *
+ * A stop abandons whatever is still in flight and wakes every request
+ * waiting for its turn (see `stop()`), so an evaluate whose top-level
+ * `await` never settles cannot lock the transport — or anything queued
+ * behind it, such as the WAV export's compile-only evaluate. The abandoned
+ * evaluate is still inside the repl, though, so the next request gives it
+ * `abandonWaitMs` to get out before going in beside it: long enough for a
+ * chunk or a sample manifest that was merely slow, short enough that a fetch
+ * that never returns costs one pause and not the transport.
+ *
+ * @param {object} [options]
+ * @param {Promise<unknown>} [options.after]  an evaluate that is already
+ *   under way outside the sequencer (the editor's first-frame evaluate at
+ *   boot); the first request waits for it the same bounded way
+ * @param {number} [options.abandonWaitMs]
+ * @param {(fn: () => void, ms: number) => unknown} [options.setTimer]
  */
-export function createEvalSequencer() {
+export function createEvalSequencer({
+  after = null,
+  abandonWaitMs = ABANDON_WAIT_MS,
+  setTimer = defaultTimer,
+} = {}) {
   let generation = 0;
   let stopGeneration = 0;
-  let tail = Promise.resolve();
+  let tail = after ? Promise.resolve(after).catch(() => {}) : Promise.resolve();
+  // Is the tail an evaluate nobody is waiting out in full — abandoned by a
+  // stop, or started outside the sequencer? Then the wait for it is bounded.
+  let tailAbandoned = Boolean(after);
   let tailOpen = false; // is the tail an evaluate that has not finished?
   // Resolved (and replaced) by every stop; `enter()` races it so requests
   // already waiting behind a stalled evaluate are let go as well.
@@ -31,6 +52,11 @@ export function createEvalSequencer() {
   let stopped = new Promise((resolve) => {
     wakeWaiters = resolve;
   });
+  const bounded = (promise) =>
+    Promise.race([
+      promise,
+      new Promise((resolve) => setTimer(resolve, abandonWaitMs)),
+    ]);
 
   return {
     /** Register a new evaluate request and return its token. */
@@ -40,9 +66,11 @@ export function createEvalSequencer() {
     /** Register a stop. Supersedes every request made so far. */
     stop() {
       stopGeneration = ++generation;
-      // Don't make the next play wait behind an evaluate the user just
-      // cancelled — it may be stuck on a fetch that never returns.
-      tail = Promise.resolve();
+      // Don't make the next play wait for good behind an evaluate the user
+      // just cancelled — it may be stuck on a fetch that never returns. The
+      // tail stays (the evaluate is still inside the repl); the next request
+      // waits for it only so long.
+      if (tailOpen) tailAbandoned = true;
       tailOpen = false;
       // Requests already waiting hold the old tail; wake them too. They are
       // no longer current, so their callers drop them as cancelled.
@@ -66,17 +94,25 @@ export function createEvalSequencer() {
      * `isCurrent()` before doing anything.
      */
     async enter() {
-      const previous = tail;
+      const previous = tailAbandoned ? bounded(tail) : tail;
       let finish;
       const mine = new Promise((resolve) => {
         finish = resolve;
       });
       tail = mine;
+      tailAbandoned = false;
       tailOpen = true;
-      await Promise.race([previous, stopped]);
+      const woken = await Promise.race([
+        previous.then(() => false),
+        stopped.then(() => true),
+      ]);
       return () => {
-        finish();
-        if (tail === mine) tailOpen = false;
+        // A request woken by a stop never went into the repl, so its turn
+        // ending says nothing about the evaluate it was waiting behind:
+        // whoever comes next still has that one ahead of it.
+        if (woken) previous.then(finish);
+        else finish();
+        if (tail === mine && !tailAbandoned) tailOpen = false;
       };
     },
     /** True while a new request would have to wait for an earlier one. */
@@ -84,6 +120,15 @@ export function createEvalSequencer() {
       return tailOpen;
     },
   };
+}
+
+// How long a request waits for an evaluate that a stop abandoned (or that
+// began outside the sequencer) before entering the repl alongside it.
+export const ABANDON_WAIT_MS = 3000;
+
+function defaultTimer(fn, ms) {
+  // (unref: under node a pending timer must not keep a test process alive)
+  setTimeout(fn, ms)?.unref?.();
 }
 
 /**

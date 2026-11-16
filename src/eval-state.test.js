@@ -58,7 +58,7 @@ describe("createEvalSequencer()", () => {
   });
 
   test("a stop lets the next request in past an evaluate that never finishes", async () => {
-    const seq = createEvalSequencer();
+    const seq = createEvalSequencer({ abandonWaitMs: 5 });
     await seq.enter(); // never released — a hung top-level await
     seq.stop();
     const entered = await Promise.race([
@@ -66,6 +66,94 @@ describe("createEvalSequencer()", () => {
       new Promise((r) => setTimeout(() => r(false), 50)),
     ]);
     assert.equal(entered, true);
+  });
+
+  test("after a stop the next request waits for the abandoned evaluate to get out", async () => {
+    // Long bound: only the abandoned evaluate finishing can let it in.
+    const seq = createEvalSequencer({ abandonWaitMs: 60_000, setTimer: () => {} });
+    const order = [];
+    const abandoned = await seq.enter(); // still inside the repl
+    seq.stop();
+    const next = seq.enter().then((release) => {
+      order.push("next in");
+      release();
+    });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.deepEqual(order, [], "not in beside the abandoned evaluate");
+    order.push("abandoned out");
+    abandoned();
+    await next;
+    assert.deepEqual(order, ["abandoned out", "next in"]);
+  });
+
+  test("the wait for an abandoned evaluate is bounded", async () => {
+    let fire;
+    const delays = [];
+    const seq = createEvalSequencer({
+      abandonWaitMs: 1234,
+      setTimer: (fn, ms) => {
+        delays.push(ms);
+        fire = fn;
+      },
+    });
+    await seq.enter(); // hung for good
+    seq.stop();
+    let entered = false;
+    const next = seq.enter().then(() => {
+      entered = true;
+    });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(entered, false);
+    assert.deepEqual(delays, [1234]);
+    fire();
+    await next;
+    assert.equal(entered, true);
+  });
+
+  test("requests woken by a stop do not hide the evaluate they were behind", async () => {
+    const seq = createEvalSequencer({ abandonWaitMs: 60_000, setTimer: () => {} });
+    const abandoned = await seq.enter();
+    const waiters = [seq.enter(), seq.enter()];
+    seq.stop();
+    for (const release of await Promise.all(waiters)) release();
+    let entered = false;
+    const next = seq.enter().then(() => {
+      entered = true;
+    });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(entered, false, "the abandoned evaluate is still ahead");
+    abandoned();
+    await next;
+    assert.equal(entered, true);
+  });
+
+  test("the first request waits for an evaluate started outside the sequencer", async () => {
+    let finishFirstFrame;
+    const firstFrame = new Promise((resolve) => {
+      finishFirstFrame = resolve;
+    });
+    const seq = createEvalSequencer({
+      after: firstFrame,
+      abandonWaitMs: 60_000,
+      setTimer: () => {},
+    });
+    assert.equal(seq.isBusy(), false);
+    let entered = false;
+    const first = seq.enter().then((release) => {
+      entered = true;
+      release();
+    });
+    await new Promise((r) => setTimeout(r, 15));
+    assert.equal(entered, false);
+    finishFirstFrame();
+    await first;
+    // …and only the first: nothing is left to wait for afterwards.
+    (await seq.enter())();
+  });
+
+  test("an outside evaluate that rejects still lets requests in", async () => {
+    const seq = createEvalSequencer({ after: Promise.reject(new Error("x")) });
+    (await seq.enter())();
   });
 
   test("a stop releases requests already waiting behind an evaluate that never finishes", async () => {
@@ -105,7 +193,7 @@ describe("createEvalSequencer()", () => {
   });
 
   test("requests made after a stop queue normally again", async () => {
-    const seq = createEvalSequencer();
+    const seq = createEvalSequencer({ abandonWaitMs: 5 });
     await seq.enter(); // hung
     seq.stop();
     const order = [];

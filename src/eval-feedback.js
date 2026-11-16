@@ -54,6 +54,11 @@ export function installEvalFeedback({
   getEvalOwner = () => null,
   getBootFailures = () => [],
   isExportRunning = defaultIsExportRunning,
+  // The editor's first-frame evaluate (StrudelMirror.drawFirstFrame), which
+  // goes into the repl at boot without passing through the patched evaluate.
+  firstFrame = null,
+  // Injectable for tests; see createEvalSequencer.
+  abandonWaitMs,
 }) {
   // ─── State ───────────────────────────────────────────────────────────────
   let _firstEvalDone = false;
@@ -68,7 +73,7 @@ export function installEvalFeedback({
   // onEvalError + inline marks), not runtime errors.
   let activeRun = null;
   // Which evaluate / stop request is the latest, and whose turn it is.
-  const sequencer = createEvalSequencer();
+  const sequencer = createEvalSequencer({ after: firstFrame, abandonWaitMs });
   // Newest evaluate whose pattern reached the scheduler — see the
   // out-of-order guard in patchedEvaluate.
   let lastInstalled = null;
