@@ -1,15 +1,20 @@
 /**
- * Signature hint: shows a thin pill above the cursor with the function
- * signature when the cursor is inside a CallExpression's arguments.
+ * Signature hint: a thin pill showing the signature of the function call
+ * the cursor is inside, with the active parameter highlighted.
  *
- * Uses the CM6 syntax tree to detect when the cursor sits between the
- * opening `(` and closing `)` of a known function call, then positions
- * a floating DOM element above the cursor line.
+ * The pill is a CodeMirror tooltip driven by a StateField, anchored to the
+ * call's opening paren and placed above that line. Letting CodeMirror own
+ * the positioning is what keeps it glued to the code: it follows scrolling
+ * and layout changes, moves when the cursor jumps to another call of the
+ * same function, and travels with the per-tab EditorState. Anchoring to the
+ * paren (not the cursor) also keeps it off the lines between the opener and
+ * the cursor in a multi-line call.
  */
-import { EditorView, ViewPlugin } from "@codemirror/view";
+import { StateField } from "@codemirror/state";
+import { showTooltip } from "@codemirror/view";
 import { syntaxTree } from "@codemirror/language";
 import { completionStatus } from "@codemirror/autocomplete";
-import docs from "./strudel-docs.json";
+import docs from "./strudel-docs.json" with { type: "json" };
 
 /**
  * Escape user-facing text for safe HTML insertion.
@@ -20,12 +25,14 @@ function esc(s) {
 }
 
 /**
- * Walk up from `pos` through the syntax tree to find an enclosing
- * ArgList whose parent CallExpression has a known callee name.
+ * Walk up from `pos` through the syntax tree to find the innermost
+ * ArgList the cursor is *inside* whose parent CallExpression has a known,
+ * documented callee.
  *
- * Returns `{ name, entry, argIndex }` or null.
+ * Returns `{ name, entry, argIndex, from }` (`from` is the offset of the
+ * opening paren) or null. Exported for tests.
  */
-function findCallContext(state, pos) {
+export function findCallContext(state, pos) {
   const tree = syntaxTree(state);
   let node = tree.resolveInner(pos, -1);
 
@@ -33,6 +40,14 @@ function findCallContext(state, pos) {
   for (let cur = node; cur; cur = cur.parent) {
     const n = cur.name;
     if (n !== "ArgList" && n !== "ArgumentList") continue;
+
+    // The cursor must be between the parens. Right after the closing `)`
+    // the tree still resolves to this ArgList, but the call is finished —
+    // keep walking, an enclosing call may still apply. An unclosed list
+    // (still being typed) has no `)` to be past.
+    if (pos <= cur.from) continue;
+    const closed = state.sliceDoc(cur.to - 1, cur.to) === ")";
+    if (closed && pos >= cur.to) continue;
 
     // The parent should be the call expression
     const call = cur.parent;
@@ -71,9 +86,15 @@ function findCallContext(state, pos) {
       }
     }
 
-    if (!calleeName) continue;
+    // The innermost call owns the cursor. If it isn't something we can
+    // describe, show nothing rather than an outer call's signature.
+    // hasOwn: `docs` is a plain object, so `docs["toString"]` would
+    // otherwise resolve to Object.prototype. A docs entry without params
+    // would render as a bare `name()` — misleading for the many functions
+    // whose parameters simply aren't documented.
+    if (!calleeName || !Object.hasOwn(docs, calleeName)) return null;
     const entry = docs[calleeName];
-    if (!entry) continue;
+    if (!entry.params || entry.params.length === 0) return null;
 
     // Determine which argument the cursor is in by counting commas
     // before `pos` inside the ArgList.
@@ -83,7 +104,7 @@ function findCallContext(state, pos) {
       if (state.sliceDoc(child.from, child.to) === ",") argIndex++;
     }
 
-    return { name: calleeName, entry, argIndex };
+    return { name: calleeName, entry, argIndex, from: cur.from };
   }
 
   return null;
@@ -107,108 +128,88 @@ function renderPill(name, entry, argIndex) {
   );
 }
 
-/**
- * CM6 ViewPlugin that manages the signature hint pill.
- */
-const signaturePlugin = ViewPlugin.fromClass(
-  class {
-    constructor(view) {
-      this.view = view;
-      this.pill = null;
-      this.currentKey = "";
-    }
+// What the pill should show for `state`, or null for nothing.
+function computeHint(state) {
+  // Hide when autocomplete is active — one surface owns attention at a time
+  if (completionStatus(state) !== null) return null;
+  // Don't show if there's a selection range (multi-char select)
+  const sel = state.selection.main;
+  if (!sel.empty) return null;
+  return findCallContext(state, sel.head);
+}
 
-    update(update) {
-      if (!update.selectionSet && !update.docChanged && !update.focusChanged) {
-        return;
-      }
+// Field value: `{ name, entry, argIndex, from, tooltip } | null`.
+//
+// CodeMirror tears a tooltip's DOM down and rebuilds it whenever the Tooltip
+// object changes identity. While the cursor stays inside the same call the
+// previous object is reused, so moving between arguments just re-renders the
+// pill in place (no flicker, no replayed pop-in).
+function nextHint(prev, ctx) {
+  if (!ctx) return null;
+  if (prev && prev.name === ctx.name && prev.from === ctx.from) {
+    if (prev.argIndex === ctx.argIndex) return prev;
+    return { ...ctx, tooltip: prev.tooltip };
+  }
+  return {
+    ...ctx,
+    tooltip: {
+      pos: ctx.from,
+      above: true,
+      create: createHintView,
+    },
+  };
+}
 
-      const { state } = update.view;
-      const pos = state.selection.main.head;
-
-      // Hide when autocomplete is active — one surface owns attention at a time
-      if (completionStatus(state) !== null) {
-        this.hide();
-        return;
-      }
-
-      // Don't show if there's a selection range (multi-char select)
-      if (!state.selection.main.empty) {
-        this.hide();
-        return;
-      }
-
-      const ctx = findCallContext(state, pos);
-      if (!ctx) {
-        this.hide();
-        return;
-      }
-
-      // Build a cache key so we don't re-render on every keystroke
-      // within the same function + same active param.
-      const key = `${ctx.name}:${ctx.argIndex}`;
-      if (key === this.currentKey && this.pill) return;
-      this.currentKey = key;
-
-      // Defer show() — coordsAtPos reads layout, which is forbidden
-      // during the CM6 update cycle. requestMeasure runs after the
-      // update settles.
-      this._pendingCtx = ctx;
-      this.view.requestMeasure({
-        read: () => {
-          const c = this._pendingCtx;
-          if (!c) return null;
-          const p = this.view.state.selection.main.head;
-          const coords = this.view.coordsAtPos(p);
-          if (!coords) return null;
-          const parentRect = this.view.dom.getBoundingClientRect();
-          return { ctx: c, coords, parentRect };
-        },
-        write: (measured) => {
-          if (!measured) {
-            this.hide();
-            return;
-          }
-          this.show(measured.ctx, measured.coords, measured.parentRect);
-        },
-      });
-    }
-
-    show({ name, entry, argIndex }, coords, parentRect) {
-      if (!this.pill) {
-        this.pill = document.createElement("div");
-        this.pill.className = "sig-hint";
-        this.pill.setAttribute("role", "tooltip");
-        this.pill.setAttribute("aria-live", "polite");
-        this.view.dom.appendChild(this.pill);
-      }
-
-      this.pill.innerHTML = renderPill(name, entry, argIndex);
-
-      // Place above the line, offset by pill height + 4px gap
-      const top = coords.top - parentRect.top - 28;
-      const left = coords.left - parentRect.left;
-
-      this.pill.style.top = `${Math.max(0, top)}px`;
-      this.pill.style.left = `${Math.max(0, left)}px`;
-      this.pill.style.display = "";
-    }
-
-    hide() {
-      if (this.pill) {
-        this.pill.style.display = "none";
-        this.currentKey = "";
-      }
-    }
-
-    destroy() {
-      if (this.pill) {
-        this.pill.remove();
-        this.pill = null;
-      }
-    }
+const hintField = StateField.define({
+  create(state) {
+    return nextHint(null, computeHint(state));
   },
-);
+  update(value, tr) {
+    // Strudel dispatches a highlight transaction per animation frame while
+    // playing; only edits, cursor moves and the completion popup opening or
+    // closing can change the answer.
+    if (
+      !tr.docChanged &&
+      !tr.selection &&
+      completionStatus(tr.startState) === completionStatus(tr.state)
+    ) {
+      return value;
+    }
+    return nextHint(value, computeHint(tr.state));
+  },
+  provide: (f) => showTooltip.from(f, (value) => value?.tooltip ?? null),
+});
+
+function createHintView(view) {
+  const dom = document.createElement("div");
+  dom.className = "sig-hint";
+  let rendered = null;
+
+  const render = (state) => {
+    const hint = state.field(hintField, false);
+    if (!hint || hint === rendered) return;
+    rendered = hint;
+    dom.innerHTML = renderPill(hint.name, hint.entry, hint.argIndex);
+  };
+  // The hint describes where the cursor is; with focus elsewhere there is
+  // no cursor to describe.
+  // Hidden with `visibility`, not `display`: CodeMirror places the tooltip
+  // from its measured box, and a display:none pill measures 0×0, so it would
+  // flash on top of the code line when shown again.
+  const syncFocus = (v) => {
+    dom.style.visibility = v.hasFocus ? "" : "hidden";
+  };
+
+  render(view.state);
+  syncFocus(view);
+  return {
+    dom,
+    update(update) {
+      render(update.state);
+      if (update.focusChanged) syncFocus(update.view);
+    },
+  };
+}
 
 /** CM6 extension: signature hints for Strudel functions. */
-export const signatureHint = signaturePlugin;
+export const signatureHint = hintField;

@@ -351,11 +351,11 @@
 
 /* ─── Signature hint pill (Phase 2) ───────────────────────────────────── */
 
+/* The pill is a CodeMirror tooltip (see signature-hint.js): CM positions
+   it, and the theme's own .cm-tooltip chrome has to be overridden. */
 .sig-hint {
-  position: absolute;
-  z-index: 100;
-  background: var(--surface-2);
-  border: 1px solid var(--border-soft);
+  background: var(--surface-2) !important;
+  border: 1px solid var(--border-soft) !important;
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-low);
   padding: 2px var(--space-2);
@@ -388,6 +388,12 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sig-hint {
+    animation: none;
   }
 }
 
