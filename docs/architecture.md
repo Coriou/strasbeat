@@ -728,145 +728,213 @@ lazy loading").
 
 ## CI and the smoke test
 
-`.github/workflows/ci.yml` runs `pnpm test` and `pnpm build` on pull
-requests, on pushes to `main`, and on pushes to `ci/**` branches. Those
-branches exist to check work in progress on a clean runner without opening
-a PR. Use `node scripts/ci-run.mjs test` (guards, wait, artifacts and cleanup);
-`vercel.json` keeps them from
-creating preview deployments. Tests are `node:test` files listed
-explicitly in the `test` script in `package.json` — a new `*.test.js` does
-not run until it is added there.
+`.github/workflows/ci.yml` runs `pnpm test`, `pnpm build` and the bundle
+ceilings (see "Performance rig and ratchets") on pull requests, on pushes
+to `main`, and on pushes to `ci/**` branches. Tests are `node:test` files
+listed explicitly in the `test` script in `package.json` — a new
+`*.test.js` does not run until it is added there.
+
+`ci/**` branches exist to check a commit on a clean runner without opening
+a PR. **Use `node scripts/ci-run.mjs test|smoke|perf`**, not a hand-typed
+push: it pushes the commit to a throwaway branch, waits for every run of
+it, prints the verdict and where the artifacts are, and deletes the branch
+whatever happened (`--keep` leaves it).
+
+`vercel.json` keeps `ci/**` from creating preview deployments, but Vercel
+reads that file **from the pushed commit**: a commit older than the guard
+(anything before `15c8bf9`), pushed to a `ci/` branch, is deployed as a
+public preview. That happened once. So the command refuses a commit whose
+`vercel.json` lacks the guard, refuses to push as a GitHub account that
+does not own the repository, and afterwards fails if a deployment appeared
+for the commit. To run an old commit, name it as `--base` for the perf
+workflow: it is checked out on the runner and never becomes a branch.
 
 **Browser smoke test (opt-in).** `.github/workflows/smoke.yml` builds the
 app, serves it with `vite preview` and drives it in headless Chromium with
-`.github/smoke/smoke.mjs`: boot, play/stop, evaluate outcomes, every panel,
-completions, visuals, a stored Vim profile, three viewport widths. It runs
-only for branches named `ci/smoke-*` and from the Actions tab — never on
-`main` or pull requests:
+`.github/smoke/smoke.mjs`: boot, play/stop, evaluate outcomes, the playback
+frame loop and its flag, every panel, completions, formatting in its
+worker, visuals, a stored Vim profile, three viewport widths. It runs only
+for branches named `ci/smoke-*` and from the Actions tab — never on `main`
+or pull requests:
 
 ```sh
 node scripts/ci-run.mjs smoke
 ```
 
-After the existing smoke test, the workflow runs `.github/smoke/sw.mjs`
-against three builds (`sw-build-1`, `sw-build-2`, and `STRASBEAT_SW=off`).
-It owns a switchable Node HTTP server with the production cache headers,
-disables the ordinary browser HTTP cache, and checks installation, cached
-online/offline launches, synth scheduling, lazy panels across deploys,
-explicit updates, activation after all windows close, and both escape
-hatches. `out/sw-report.json` records PASS/FAIL details and server traffic;
-failure screenshots and the offline screenshot accompany it. No browser
-or extra build is run locally.
+After it, the workflow runs `.github/smoke/sw.mjs`, the service worker's
+lifecycle test, against three builds (two that differ only by
+`STRASBEAT_BUILD_ID`, and a `STRASBEAT_SW=off` build). It owns a switchable
+Node HTTP server with production's cache headers, so it can replace the
+"deploy" under a running page: install, a second launch with no shell or
+asset request, a launch with the server down, the update notice with a
+second window open, the next launch picking up a waiting build without a
+click, and both kill switches.
 
-Screenshots and `report.json` are uploaded as the run's `smoke` artifact.
-The runner image and the Playwright version are pinned in the workflow;
-bump them deliberately. When a fix has a browser-visible effect, add a
-check for it to the script. Nothing here is run locally.
+Screenshots, `report.json` and `sw-report.json` (with the server traffic of
+each phase) are uploaded as the run's `smoke` artifact. The runner image
+and the Playwright version are pinned in the workflow; bump them
+deliberately. When a fix has a browser-visible effect, add a check for it
+to the script. Nothing here is run locally.
 
 ## Performance rig and ratchets
 
-`.github/perf/perf.mjs` observes finished builds from outside the app. No
-product hook or production asset is added. `.github/workflows/perf.yml`
-runs on `ci/perf-**` or manual dispatch, using ubuntu-24.04, Node 24,
-Playwright 1.65.1 and trace-mapping 0.3.25 installed outside the project.
-Hidden source maps preserve the production JS bytes. Ordinary CI also
-runs `bundle.mjs`: static entry/import graph JS and linked CSS raw/gzip
-(level 9), total JS, largest lazy chunks, and file count excluding maps.
+`.github/perf/` measures the production build from outside — the app has
+no hook for it — in headless Chromium on a GitHub runner
+(`.github/workflows/perf.yml`: `ci/perf-*` branches and manual dispatch,
+pinned `ubuntu-24.04` and Playwright 1.65.1). Two builds are measured in
+one job, on one machine, turn and turn about: the commit under test and a
+base (`main` unless told otherwise).
 
-| Journey | Start → end |
+```sh
+node scripts/ci-run.mjs perf                        # this commit against main
+node scripts/ci-run.mjs perf --base <ref>           # against another commit
+node scripts/ci-run.mjs perf --scenarios typing,eval   # some journeys only
+node scripts/ci-run.mjs perf --scenarios sweep      # the proxy evidence, below
+```
+
+A full run takes 20 to 25 minutes. A run of some journeys is checked
+against the ceilings of those journeys only.
+
+| Journey | From → to |
 |---|---|
-| launch-cold | Fresh navigation → editor insertion, following MessageChannel task, shell ready; default, CPU ×4, 150 ms response delay |
-| launch-warm | Second/third navigation in one context → the same boundaries; records SW control and requests reaching the server |
-| typing | First key at end of captainmo → two frames after final key; stopped, playing, CPU ×4 timing only |
-| playing | After eight pattern cycles → 600 paced frames at 120 Hz; roll, collapsed, scope, beats, Hydra, shader, and 1/2/4/8/16 synth layers |
-| tabs | Each of three tree opens / twenty tab switches → three frames later |
-| eval | Capture-phase Ctrl+Enter → first audio source start call; first, after stop, CPU ×4 |
-| idle | Ready plus two seconds settling → ten stopped seconds, without a measurement frame clock |
-| memory | Forty evaluate/300 ms/stop cycles, then forty tab switches; GC every ten, regression over cycles 10–40 |
+| `launch-cold` | navigation start, empty caches → the editor is in the document; the task that put it there has ended (a key press is handled from here); boot reports ready. Also at CPU ×4 and with 150 ms added to every response |
+| `launch-warm` | the same, for the second and third launch of one browser profile: HTTP cache warm, service worker installed and in control |
+| `typing` | the app at rest; a key goes down at the end of a 180-line pattern → two frames later; 103 keys. Also into a short and a long document (`default@short`, `default@long`), while a pattern plays, and at CPU ×4 |
+| `playing` | playback is steady → 600 frames later, stepped at exactly 120 Hz. Roll visible, roll collapsed, scope, beat grid; Hydra and shader at 30 Hz; the roll at 1, 2 and 8 layers as well as the usual 4 (`roll@8`) |
+| `tabs` | the app at rest; a click on a library item or a tab → three frames later |
+| `eval` | the app at rest; Ctrl+Enter goes down → the first `AudioScheduledSourceNode.start()` |
+| `idle` | boot is over, nothing playing → ten seconds later |
+| `memory` | 120 evaluate/stop cycles, then 60 tab switches; heap after GC, DOM nodes and listeners every 20 |
+| `sweep` | on request only: the four 120 Hz views of `playing`, each at four pattern sizes |
 
-Use `node scripts/ci-run.mjs perf --base main` for a runner comparison.
-The wrapper verifies the **pushed commit's** Vercel guard and the active
-GitHub account, refuses existing remote branch names, checks for deployments,
-and removes the branch in `finally` (also on interruption; `--keep` opts out).
-For custom bases it cancels the automatic push Perf run and dispatches a
-replacement; that explicitly superseded run is excluded from success checks.
-CI and all other runs must succeed. A commit with tracked edits requires
-explicit `--ref`; it tests the commit, not those edits.
+**Counts, not clocks.** On a shared runner two runs of identical code
+differed by up to 25 % in script time and by less than 0.1 % in function
+calls (about 1 % for playback since the frame loop: the measured five
+seconds are two and a half cycles of the pattern, and 21 to 23 highlight
+updates fall inside them depending on where they start). So each journey
+is measured twice: a timing pass with nothing attached, and a count pass —
+V8 precise-coverage call counts, attributed to source modules through
+hidden source maps (`pnpm build --sourcemap hidden` leaves the JS
+byte-identical), CodeMirror transactions, Canvas 2D calls, rAF callbacks,
+layouts, style recalculations, DOM mutation records, requests and bytes.
+Timings are reported as base against head from the same run; they are
+never a gate.
 
-On a runner with the tools installed beside the rig:
+A ceiling is one of two things. Most are **structural**: the count is the
+cost itself, or work nobody should add without saying so — requests before
+ready, bytes of initial JS, asset requests on a repeat launch, rAF
+callbacks, timers and DOM mutations at rest, CodeMirror transactions per
+second while nothing is typed, layouts and DOM mutation records per
+keystroke. They are exact and make no claim about time. Four are
+**proxies**, counts that stand in for time:
+`playing.{roll,collapsed,scope,beats}.callsPerFrame`. A proxy has to earn
+that, and it is only ever compared with itself. The summary ends with the
+evidence gathered in the run: for a view, the (count, time) pairs at each
+pattern size measured (`roll@1`, `roll@2`, `roll`, `roll@8`) and Pearson's
+r **within each build**. Both restrictions were learned from a wrong
+verdict:
+
+- Pooling two builds misleads. A change that removes cheap calls moves
+  the count much further than the time: the frame loop took 81–89 % of
+  the calls per frame and 35–58 % of the script time.
+- Comparing views misleads. A collapsed roll makes more calls per frame
+  than a one-layer visible roll and costs less script time, because
+  drawing on a canvas is native work that a call count cannot see. Across
+  the seven 120 Hz variants r was 0.85–0.97, and it was one point: without
+  the eight-layer roll the new build's r is 0.44–0.57.
+
+A count is "proven" when, in every build measured at four or more points,
+r clears 0.8 and the 5 % significance level for that many points (0.95 at
+four points, 0.88 at five, 0.81 at six). Add a proxy ceiling only for a
+count the summary calls proven. A full run carries the sizes of the roll
+view; `--scenarios sweep` measures every view that has a proxy ceiling at
+four sizes.
+
+What held up: calls per frame, within each of the four views, at four
+pattern sizes — r from 0.96 to 1.00 in both builds, in two sweeps, and
+0.97–1.00 for the roll in the six full runs that carried its sizes. The
+slope is not one to one: with the roll collapsed the new build goes from
+466 to 2,216 calls per frame while its script time goes from 13.3 to
+17.5 ms per second, because most of a frame's script cost does not depend
+on the pattern. The ceiling trips long before the time has moved much,
+which is the safe side. What did not hold up, and so is measured and
+reported but has no ceiling: calls per keystroke (the same keys cost more
+calls and less time in a short document than in a long one; three
+document sizes prove nothing either way, so the typing ceilings are
+structural), calls per tab operation (0.70 and 0.77), and calls during
+launch — the quadratic sound registration cost 125 ms of boot and not one
+extra call, which is why the launch scenario always takes a CPU profile
+(self time by module and by function, in the summary).
+
+**Frame stepping.** The playing, typing and tab journeys run in a page
+created with DevTools begin-frame control: nothing renders until the rig
+issues a frame, so 600 frames are exactly 600 frames on any machine. A
+window counts only if its wall time is within 1 % of `frames × interval`;
+otherwise it is measured again, up to three times. A window that never
+holds pace produces no number: the summary names it first ("not measured
+on this runner"), and a ceiling that depends on it fails the check. It
+does not fail the run by itself — on the slowest runner model seen (2.8
+GHz) the eight-layer variants cannot be stepped at 120 Hz, and they are
+evidence, not ceilings. The time compared with the 8.33 ms budget is
+measured in the page, from a frame's first rAF callback to the first task
+after its rendering update. The browser runs with `--disable-gpu`:
+software GL stalls the GPU process for up to a second per frame on a
+runner. The price is that the 2D canvas is rasterised on the main thread,
+so task time with the roll visible is pessimistic compared with a real
+GPU; script time and counts are not affected. The WebGL modes cannot hold
+120 Hz in software and are stepped at 30 Hz: their counts compare builds,
+their frame times mean nothing.
+
+**From rest.** The app is not finished when it reports ready: at idle it
+fetches its lazy panels and registers the service worker, which downloads
+its precache and takes the page over. The typing, evaluate and tab
+journeys wait for that to end (`settle` in `lib/browser.mjs`); the launch
+journeys measure it. Before they waited, the build that booted sooner had
+more of that tail inside its window, and the same keys with identical call
+counts read 3–8 % slower in script time. A timing that differs between two
+builds whose counts are identical is a question about the rig first.
+
+**Fixtures.** The rig serves each build itself, with production's cache
+headers. The eight sample manifests are fetched once per run and served
+byte-identical to both builds; any audio request is answered with one
+tiny WAV; any other external request is aborted and fails the scenario.
+Nothing is listened to: this measures work, not sound.
+
+**Ratchets.** `.github/perf/ratchets.json` holds the ceilings:
+`"<journey>.<variant>.<metric>": { max, tolerance, unit }`. The
+perf workflow fails when a count exceeds `max × (1 + tolerance)`, when a
+ratcheted count is missing, or when its window did not hold pace; ordinary
+CI checks the `bundle.*` ceilings after every build.
 
 ```sh
-node perf/perf.mjs --head /checkout/dist --base /base/dist --repeats 1
-node perf/perf.mjs --head /checkout/dist --scenarios typing,playing --mode ratchet
-node perf/perf.mjs --head /checkout/dist --scenarios playing --profile playing --trace playing
+node .github/perf/ratchet.mjs check results.json          # what CI runs
+node .github/perf/ratchet.mjs lower results.json          # after a win
+node .github/perf/ratchet.mjs guard base.json head.json   # nothing raised?
 ```
 
-`--net-delay`, `--out`, `--head-sha` and `--base-sha` are also supported.
-One repeat is the bounded default for a full census; increase repeats for
-spread estimates on selected journeys. Counts-only mode omits CPU variants
-and memory stress. Within each repeat and pass, base runs immediately before
-head. Timing and precise-coverage/count passes use separate contexts.
-CPU profiling is always enabled for launch timing passes. Other profiles
-and traces are opt-in; their timings include diagnostic overhead.
+A ceiling only goes down. After a change that lowers a count, download
+the run's `perf` artifact (`ci-run` prints where it put it), run `lower`
+on its `results.json` and commit the file with the change. `lower` never
+raises a ceiling and never adds or removes a key (`--init --metrics a,b`
+adds). The workflow's `guard` step fails when a ceiling was raised or
+removed relative to the base commit, or its tolerance widened, unless the
+key is listed in `raises` with a reason — which is the reviewable way to
+say "this count went up, and here is why".
 
-`out/results.json` is schema-versioned and retains each target/pass/repeat,
-window attempts, errors, skipped hooks, request logs, and raw frame samples.
-`out/summary.md` gives medians, relative spread (range / absolute median),
-paired differences, module groups, top functions and profile self time.
-A single repeat has no useful spread estimate. Count/time correlation is
-observational: fewer than four points, constant values or Pearson r < 0.8
-means **not proven**. Counts miss expensive single calls (sound registration,
-for example); inspect CPU profiles and same-runner A/B timings too.
+**Finding the next bottleneck.** Keep a branch
+(`node scripts/ci-run.mjs perf <name> --keep`) and dispatch the workflow
+on it by hand — `gh workflow run perf.yml --ref ci/perf-<name>` — with
+`-f profile=<journey>` for a CPU profile of its measured window (the
+`.cpuprofile` in the artifact, and a table of self time by function and
+module in the summary), `-f trace=<journey>` for a Chrome trace, or
+`-f scenarios=memory -f trace=memory` for a heap census: what the heap
+gained over the last 80 evaluate/stop cycles, by kind of object. The
+count pass of the playing and typing journeys always lists the 25 most
+called functions. Delete the branch when the run has been read.
 
-The frame driver pumps during boot/setup, then serializes beginFrame calls.
-Only paced 600-frame windows within 1% of nominal duration are valid; three
-failed attempts record an error and cannot pass a ceiling. Main-thread
-frame time is measured from the first rAF callback through a MessageChannel
-task after rendering, against the 8.33 ms budget. CDP round trips are only
-diagnostics. `--disable-gpu` avoids SwiftShader raster stalls, but moves
-canvas rasterization onto the main thread, pessimistic versus real hardware.
-Visual demos retry in a GL browser if software mode fails or misses pace.
-Idle never starts the permanent measurement rAF clock. Launch DOM milestones
-are in-page; their coverage/Performance snapshots include CDP binding latency.
-Typing reports aggregate counts per key and retains two-frame timing samples;
-it does not take a coverage snapshot between individual keys. Eval reports
-TaskDuration and long tasks, not a total task count (CDP has no such metric).
-
-The static server uses immutable asset caching, revalidation elsewhere and
-gzip text responses. Required JSON manifests are fetched once with retries,
-validated before browsers start, hashed in results and shared by both targets.
-The shader demo uses sawtooth in place of its GM lead in memory only: the
-GM loader fetches external JS, forbidden by the fixture policy. This
-substitution is recorded in results. All external audio files receive the same tiny WAV; this is a workload lab,
-not an audio-quality test. Other external requests abort and fail the scenario.
-Contexts allow service workers; routing is external-only and CDP explicitly
-re-enables the page HTTP cache. Warm results include cached response evidence
-and SW control rather than assuming a successful second navigation is warm.
-
-Ceilings are flat `scenario.variant.metric` entries with `max`, `tolerance`,
-and `unit`, plus `raises`. Exact counts default to zero tolerance, calls to
-2%, heap/timers to 5%. Checks reject missing metrics and invalid pacing.
-Only counts enter checks; elapsed time never gates CI.
-
-```sh
-node .github/perf/ratchet.mjs check out/results.json
-node .github/perf/ratchet.mjs lower out/results.json
-node .github/perf/ratchet.mjs guard base-ratchets.json .github/perf/ratchets.json
-```
-
-No existing build was available when introducing the rig, so **ceilings are
-not initialized yet**, including bundles. This is reported explicitly by
-`check`; no fabricated ceiling is enforced. First obtain a green runner
-census, then initialize the bundle keys with `lower bundle-results.json
---init` (the default list lives in `lib/ratchets.mjs`). Initialize browser
-keys with `lower out/results.json --init --metrics
-playing.roll.callsPerFrame,typing.default.perKey.layouts` (a comma-separated
-list), choosing counts whose repeatability and correlation were reviewed.
-The browser section starts empty. `lower` never adds/removes keys without
-`--init` and never raises an existing ceiling. Guard rejects removal,
-increased max/tolerance or changed unit unless `raises` includes
-`{ "key": "scenario.variant.metric", "reason": "why this measurement changed" }`.
-Keep exceptions narrow and review them with the changed fixture or metric.
+**What it cannot tell.** How anything sounds or looks; frame cost on a
+real GPU or a 120 Hz display; audio glitches under load. Those stay on
+the list for a person (`design/work/OPEN.md`).
 
 ## Console helpers
 

@@ -60,6 +60,7 @@ The maintainer's machine must stay lightly loaded.
                                                #   service-worker lifecycle test
   node scripts/ci-run.mjs perf                 # … + the performance rig, against main
   node scripts/ci-run.mjs perf --base <ref>    # the rig, against another commit
+  node scripts/ci-run.mjs perf --scenarios a,b # the rig, those journeys only
   ```
 
   It refuses a commit whose `vercel.json` lacks the `ci/**` deployment

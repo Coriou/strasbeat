@@ -47,4 +47,5 @@ the row and the spec's own line when one changes.
 | 26 | [pattern tabs](26-pattern-tabs.md) | shipped | plan in archive |
 | 27 | [track and listener bugfix](27-track-and-listener-bugfix.md) | shipped | fixed 2026-08-24 |
 | 28 | quality-upgrade session | reference | finished audit; record in `archive/28-upgrade-session.md`; open items in [OPEN.md](OPEN.md) |
+| 29 | [performance lane](29-perf-lane.md) | shipped | the rig and its ratchets stay in use; open items in [OPEN.md](OPEN.md) (PL-1…9) |
 | — | [research: Strudel visuals](research-strudel-visuals.md) | reference | |

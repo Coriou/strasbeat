@@ -1,8 +1,9 @@
 # Open items
 
-What the November 2026 quality audit left open: work deferred on purpose,
-calls only the maintainer can make, and behaviour nobody has yet checked
-in a real browser. Lifted from the audit record, which is now in
+What the November 2026 quality audit and the performance lane that
+followed it (`29-perf-lane.md`, rows `PL-…`) left open: work deferred on
+purpose, calls only the maintainer can make, and behaviour nobody has yet
+checked in a real browser. Lifted from the audit record, which is now in
 `archive/28-upgrade-session.md` (about 200 kB: search it for a finding ID
 such as `TR-19`, never read it whole). Section numbers such as §3 or §4
 below refer to that record; §6, §7 and §8 are the three sections of this
@@ -27,7 +28,7 @@ then fixed in it have been removed; the status lines in §4 are the record.
 | SC-11 | Audio-device, multichannel and polyphony settings are a new Settings section; matters to live performers, not beginners | Set an explicit `maxPolyphony` now (MX-16); spec an Audio section later; SuperDirt target is optional |
 | SC-12 | `.pianoroll()`, `.scope()`, `.tscope()`, `.fscope()`, `.spectrum()` and `.pitchwheel()` still draw on Strudel's unmanaged full-page canvas; a managed home for them needs a decision on where those visuals live | The Hydra/shader host (`src/strudel-ext/visuals-host.js`) and the bottom canvas's "Custom" mode now exist: route the full-page context through one of them so all canvases share a clip / full-window mechanism; finish `feedStrudel` (SC-18 rest) with it |
 | SC-14 (rest) | gamepad, motion, mqtt and mondo are new dependencies and niche; tidal, edo and dough are unreleased. The soundfont globals are in scope (5daf860) | Add the four published packages as opt-in rows in Settings when asked for — a maintainer call, since each is a new dependency |
-| MX-18 | Worker-based WAV encode changes the export pipeline and needs transferables plus a byte-for-byte equivalence test | Do the retention and yield fixes in Batch 1; move encoding to a Worker when long renders become a real workflow |
+| MX-18 | Worker-based WAV encode changes the export pipeline and needs transferables plus a byte-for-byte equivalence test. The performance lane left it: the encode is one pass over the samples at the end of a render that takes many times longer, and export is not a per-frame journey | Do the retention and yield fixes in Batch 1; move encoding to a Worker when long renders become a real workflow |
 | ED-14 | Whether "Insert sound" should replace the whole string is a product call (the docstring says intended) | Decide in §7; the token-level replacement is small once decided |
 | ED-8 (= SC-20) | Inline sliders lost and highlight bleed on tab switch need per-tab storage of mini-locations and widgets; not attempted in Batch 1 and not picked up with the render-loop work | Its own change: store `{miniLocations, widgets}` per tab, clear mini-locations unless the incoming tab is the playing one |
 | ED-17 | "x is not a function" locator misses `foo(1)` / `foo(x)`; not attempted | Small; do with the next error-message change (UX-28 is in the same file) |
@@ -50,16 +51,22 @@ then fixed in it have been removed; the status lines in §4 are the record.
 | SC-18 (rest) | Hydra's `feedStrudel` is accepted but does nothing useful; the piano-roll half (`hap.value.color`) is done | With SC-12 |
 | RD-10, UX-11 (rest) | Stopping while a different tab is focused leaves the playing tab's last frame on the roll (a click on it is a no-op). The scope has no stopped empty state | Clear the roll (or re-query the focused tab's first frame) when the frame's owner is not the focused tab; add a "Press play to see the scope" state |
 | BD-4 | Lazy-loading the MIDI import path: only ≈10 kB is left to move now that `@tonejs/midi` is gone | Not worth a lazy boundary on its own; fold into BD-8 if that happens |
-| BD-7 (rest) | A cache header for the `/strudel-cc` proxy could cache an upstream error for a day | Leave; BD-9 is the right place to cache manifests |
-| BD-8 | A vendor `manualChunks` split would evaluate before `storage-guard.js` (which must run first) and forms a cycle with the top-level-await entry | Only with an explicit allow-list of leaf packages, after moving the entry's top-level await and the storage guard into a chunk the vendors do not depend on; measure parallel-compile gain on the runner first |
-| BD-9 | Caching the sample manifests: `samples(url)` fetches internally, so there is nothing to hook | Fetch the manifests through Cache Storage with stale-while-revalidate, then register with `samples(json, base)` (boot already does `fetchJson` → `samples(json)` for the maps in `src/default-samples.js`); the first play before a bank lands must still be reported |
+| BD-8 | A vendor `manualChunks` split would evaluate before `storage-guard.js` (which must run first) and forms a cycle with the top-level-await entry. Since the performance lane the entry chunk is precached by the service worker and compiled from V8's code cache on repeat launches, which is most of what a split would have bought | Only with an explicit allow-list of leaf packages, after moving the entry's top-level await and the storage guard into a chunk the vendors do not depend on; measure with the rig (`launch-cold`, CPU ×4) first |
 | UX-3 (rest) | The editor's bracket colour (2.14:1) comes from the Strudel theme, not from strasbeat's tokens | Override it in the theme extension or pick it per theme; a design-polish call |
 | UX-15 (rest) | Sub-11 px font sizes in the panel stylesheets, native `<select>` and range inputs, `theme-color` (#1c1c1c vs the rendered background) | Panel sizes with the next panel pass; the select replacement is a component, spec it |
 | UX-19 (rest) | The palette and the Stop tooltip still say `Ctrl+.` on macOS; no shortcuts were rebound or added (mute on `⌘M`, tab navigation, `F1`) | Render through `src/ui/shortcut-format.js`; rebinding is a maintainer call |
 | UX-22 (rest) | The accent picker's lightness slider can still produce a focus ring below 3:1 | Clamp `--focus-ring` lightness independently of the accent |
 | UX-30 (rest) | The roll still animates its grid row; several off-token durations remain | Polish pass |
 | Light theme | Dark-only; no `prefers-color-scheme` rules | §7 item 4 |
-| PF-3, and the un-re-measured §3 rows | A slow heap rise over 30 evaluate→stop cycles needs a 300+ cycle soak; playing-frame cost, leak slopes and typing under CPU throttle were not re-measured after the fixes | The performance lane: build the measurement rig on runners, re-run the §3 scenarios against `03ba08c` and the final tree |
+| PL-1 | The playback frame loop (`src/frame-loop.js`) shipped with its predecessor still selectable (`?sb-frameloop=off`, `src/legacy-drawer.js`), because nobody had watched it on a real display | Compare the two on real hardware (§8), then delete the flag, `legacy-drawer.js` and the flag-off smoke checks together |
+| PL-2 | What is left per frame while playing (≈1,150 calls at 120 Hz with the roll collapsed) is mostly pattern queries: the audio scheduler's own 20 per second, and the frame loop's 6 | With the roll out of view the loop could take its notes from the scheduler's triggers instead of querying again (an estimated 250–400 calls per frame); wide windows still need their own queries. Diminishing returns: script time is already ≈20 ms per second on a runner |
+| PL-3 | The piano roll makes ≈690 canvas calls per frame for 148 visible notes (≈4.7 per note), every frame | Batch pills by colour and alpha into one path each, or keep a cached layer and translate it; measure on a real GPU first — the runner rasterises on the main thread, which exaggerates this |
+| PL-4 | The first paint of the editor waits for the whole of `main.js`: rails, transport, panels and bars are all mounted in the task that mounts the editor | Yield once after the editor is mounted (≈50 ms earlier on a runner, more on a slow machine). Not done in the lane: the handlers wired after that point assume everything exists, and an edit made in the gap must still reach autosave |
+| PL-5 | A static, pixel-stable copy of the editor painted before the bundle runs (the claude.ai "static composer" idea) was considered and not built | The gap it would hide is ≈140 ms cold and ≈110 ms warm on a runner; CodeMirror's styles are generated at runtime, so the copy would need them too, plus a keystroke hand-off. Revisit only if PL-4 is not enough |
+| PL-6 | A keystroke costs ≈50,300 function calls in a 180-line pattern; 95 % are CodeMirror and Lezer (incremental parse, decoration mapping, highlighting). strasbeat's own share is ≈800 calls, mostly the whole-document scans in `track-labels.js` and `drum-parse.js` | Small: run those scans at idle after the last key instead of on every key |
+| PL-7 | The service worker's audio cache is capped by entries (256), not by bytes, and the page does not ask for persistent storage | Add a byte budget if installed users report storage pressure; consider `navigator.storage.persist()` — it also protects the patterns in localStorage |
+| PL-8 | Rig gaps. Typing has no proven stand-in for time: calls per keystroke were thrown out (a short document costs more calls and less time than a long one) and three document sizes prove nothing about the other per-key counts, so the typing ceilings are structural only (layouts, DOM mutations, transactions per key). Calls per tab operation were thrown out too (r = 0.70 and 0.77). The playback window is two and a half cycles of the pattern, so calls per frame wobble by up to 1 % between runs. On the slowest runner model the eight-layer variants cannot be stepped at 120 Hz and are reported as not measured. The memory journey's heap slope has no ceiling (it is not flat after 120 cycles: 2.3–4.0 kB per cycle, V8 compiled code by the heap census). The WebGL modes are stepped at 30 Hz in software. `.pianoroll()` / `.scope()` on Strudel's own canvas (SC-12) are not measured | To prove a typing proxy, type into six document sizes (`default@…` in `typing.mjs`) and let the summary judge; measure a whole number of cycles to make playback counts exact; add variants when one of the others becomes the thing being worked on |
+| PL-9 | `vercel.json` disables deployments for a branch named `perf`, so that pushing the lane's branch made no preview | Remove the `"perf": false` line once the branch is merged and deleted; leave `ci/**` |
 
 ### Findings still open
 
@@ -464,12 +471,46 @@ here.
 - [ ] Safari and Firefox: boot, play, the lazy panels, the three layouts
       and the visuals. Everything automated this session ran in Chromium.
 
-**Not measured**
+**Installed app and performance (performance lane, `29-perf-lane.md`)**
 
-- [ ] Playing-frame cost in each bottom-panel mode, leak slopes over
-      repeated cycles, and typing latency under CPU throttle were not
-      re-measured after the fixes (§3). The runner comparison in §3.10
-      shows no typing regression on fast hardware and nothing else.
+The lane measured counts and timings on GitHub runners: no GPU, no audio
+device, no 120 Hz display, and nobody watching. On the installed Chrome
+app, on real hardware:
+
+- [ ] Update flow: with the app installed and open, deploy a change. On
+      the next launch (or within the hour) a card above the transport
+      says a new version is ready; it takes no focus and does not
+      interrupt typing or playback. "Reload to update" reloads once into
+      the new build (Settings → About shows a different build id).
+      Dismiss it instead: closing and reopening the app also brings the
+      new build.
+- [ ] Two windows open during an update: the one that did not click
+      keeps working, including a panel it had not opened yet.
+- [ ] Offline: with the network off, launch the app: the editor appears,
+      the status reaches "Ready to play", a synth pattern plays, samples
+      that were played before play again, a panel opens. A sample never
+      played before is reported, not silent.
+- [ ] `/?sb-sw=off` once: the app still works, DevTools → Application
+      shows no service worker and no `strasbeat-` cache; `/?sb-sw=on`
+      brings them back.
+- [ ] Feel at 120 Hz while playing: piano roll, scope, beat grid, Hydra
+      and shader, with the roll visible and collapsed. Then the same with
+      `/?sb-frameloop=off` (reload) and back with `/?sb-frameloop=on`:
+      the roll, the note highlighting in the code and the playheads must
+      look the same; only smoothness may differ.
+- [ ] Highlighting: notes light up in the code as they sound and go dark
+      when they stop or playback stops; with `.color("cyan magenta")` the
+      outline takes the note's colour; after a re-evaluate mid-bar the
+      highlight follows the new code.
+- [ ] Type while a dense pattern plays with the roll visible: no dropped
+      or late characters.
+- [ ] Format (Cmd/Ctrl+Shift+F) a long pattern while it plays: the roll
+      does not hitch; the first format after launch takes a moment longer
+      than later ones and says nothing in the meantime.
+- [ ] Audio under load: a dense pattern with the roll and a visual layer
+      showing, while typing and formatting: no clicks or dropouts.
+- [ ] Launch: the installed app opens to a usable editor without a
+      visible blank period, online and offline.
 
 **Added after the independent review**
 
