@@ -29,10 +29,16 @@ export function buildPaletteCommands({
   onCloseActiveTab,
   onToggleVisualsFullWindow,
 }) {
+  // Same rule as the keymap (editor-setup.js) and the track bar: a mute /
+  // solo toggle re-evaluates so it is heard, but with the transport stopped
+  // it is only an edit and must not start playback.
+  const evaluateIfPlaying = () => {
+    if (editor.repl?.scheduler?.started) editor.evaluate();
+  };
   return buildCommands({
     onEvaluate: () => editor.evaluate(),
     onStop: () => editor.stop(),
-    onSave: () => saveBtn?.click(),
+    onSave: import.meta.env.DEV ? () => saveBtn?.click() : null,
     onExportWav: () => exportBtn?.click(),
     onShare: () => shareBtn?.click(),
     onFormatCode: () => formatCommand(editor.editor),
@@ -43,14 +49,14 @@ export function buildPaletteCommands({
     onMuteTrack: () =>
       toggleLabelAtCursor(
         editor.editor,
-        () => editor.evaluate(),
+        evaluateIfPlaying,
         toggleMute,
         "input.track-mute",
       ),
     onSoloTrack: () =>
       toggleLabelAtCursor(
         editor.editor,
-        () => editor.evaluate(),
+        evaluateIfPlaying,
         toggleSolo,
         "input.track-solo",
       ),
@@ -92,7 +98,6 @@ export function buildPaletteCommands({
     onOpenConsole: () => rightRail.activate("console"),
     onOpenExport: () => rightRail.activate("export"),
     onOpenSettings: () => rightRail.activate("settings"),
-    onOpenSetup: () => rightRail.activate("setup"),
     onClosePanel: () => rightRail.collapse(),
     onFocusPatterns: () => leftRail.focusSearch(),
     onSwitchToRoll: () => bottomModes.setMode("roll"),

@@ -114,7 +114,7 @@
 }
 
 .palette__item.is-selected:hover {
-  background: oklch(0.63 0.19 358 / 0.18);
+  background: color-mix(in oklch, var(--accent) 18%, transparent);
 }
 
 .palette__item-label {
@@ -146,4 +146,23 @@
 .palette__item.is-selected .palette__item-kbd {
   background: color-mix(in oklch, var(--surface-1) 80%, var(--accent));
   border-color: color-mix(in oklch, var(--border-soft) 70%, var(--accent));
+}
+
+.palette__empty {
+  padding: var(--space-3);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-mut);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .palette-overlay,
+  .palette-overlay--exiting,
+  .palette,
+  .palette-overlay--exiting .palette,
+  .palette__item {
+    transition: none;
+  }
 }

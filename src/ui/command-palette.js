@@ -19,13 +19,16 @@
 //   palette.toggle(); // or palette.open() / palette.close()
 //
 // Only one palette may be open at a time. Opening while open refocuses
-// the input. Focus is trapped inside the overlay while open.
+// the input. Focus is trapped inside the overlay while open: the input is
+// the only focus target, and keys are handled at the document level so
+// Escape always closes it no matter where focus ended up.
 
 import { makeIcon } from "./icons.js";
 import { getStoredProfileId } from "../editor/keymap-profiles.js";
 import { subscribeKeymapChange } from "../editor/keymap-apply.js";
 
 const STORAGE_KEY = "strasbeat:palette-recents";
+const EXIT_MS = 120; // a little past the exit fade, see command-palette.css
 const MAX_RECENTS = 5;
 
 let instance = null;
@@ -54,12 +57,14 @@ export function mountCommandPalette({ commands }) {
   let selectedIndex = 0;
   let isOpen = false;
   let prevFocus = null;
+  let exitTimer = null; // pending removal of the overlay after close()
   let recents = loadRecents();
 
   // ─── DOM ──────────────────────────────────────────────────────────────
   const overlay = document.createElement("div");
   overlay.className = "palette-overlay";
   overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
   overlay.setAttribute("aria-label", "Command palette");
 
   const container = document.createElement("div");
@@ -80,12 +85,16 @@ export function mountCommandPalette({ commands }) {
   input.setAttribute("aria-expanded", "true");
   input.setAttribute("aria-controls", "palette-list");
   input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-label", "Search commands");
+  input.spellcheck = false;
+  input.autocomplete = "off";
   inputWrap.appendChild(input);
 
   const list = document.createElement("ul");
   list.id = "palette-list";
   list.className = "palette__list";
   list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Commands");
 
   container.appendChild(inputWrap);
   container.appendChild(list);
@@ -95,13 +104,22 @@ export function mountCommandPalette({ commands }) {
 
   function renderList() {
     list.replaceChildren();
+    if (filteredCommands.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "palette__empty";
+      empty.setAttribute("role", "presentation");
+      empty.textContent = "No matching commands";
+      list.appendChild(empty);
+      input.removeAttribute("aria-activedescendant");
+      return;
+    }
     for (let i = 0; i < filteredCommands.length; i++) {
       const cmd = filteredCommands[i];
       const li = document.createElement("li");
       li.className = "palette__item";
+      li.id = `palette-option-${i}`;
       li.setAttribute("role", "option");
-      li.setAttribute("aria-selected", i === selectedIndex ? "true" : "false");
-      if (i === selectedIndex) li.classList.add("is-selected");
+      li.setAttribute("aria-selected", "false");
       li.dataset.index = i;
 
       const labelSpan = document.createElement("span");
@@ -117,19 +135,28 @@ export function mountCommandPalette({ commands }) {
         li.appendChild(kbd);
       }
 
-      li.addEventListener("pointerdown", (e) => {
-        e.preventDefault(); // keep focus on input
-        executeCommand(i);
-      });
-
       list.appendChild(li);
     }
+    paintSelection();
+  }
 
-    // Scroll selected into view
-    const selectedEl = list.querySelector(".is-selected");
-    if (selectedEl) {
-      selectedEl.scrollIntoView({ block: "nearest" });
+  // Move the highlight without rebuilding the list, and tell assistive
+  // tech which option the (still focused) input now points at.
+  function paintSelection() {
+    const prev = list.querySelector(".is-selected");
+    if (prev) {
+      prev.classList.remove("is-selected");
+      prev.setAttribute("aria-selected", "false");
     }
+    const selectedEl = list.children[selectedIndex];
+    if (!selectedEl || !selectedEl.classList.contains("palette__item")) {
+      input.removeAttribute("aria-activedescendant");
+      return;
+    }
+    selectedEl.classList.add("is-selected");
+    selectedEl.setAttribute("aria-selected", "true");
+    input.setAttribute("aria-activedescendant", selectedEl.id);
+    selectedEl.scrollIntoView({ block: "nearest" });
   }
 
   function filter(query) {
@@ -197,7 +224,9 @@ export function mountCommandPalette({ commands }) {
 
   input.addEventListener("input", () => filter(input.value));
 
-  input.addEventListener("keydown", (e) => {
+  // Installed on `document` (capture) while open, so the palette keeps
+  // working even if focus has slipped out of the input.
+  function onKeydown(e) {
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
@@ -205,25 +234,50 @@ export function mountCommandPalette({ commands }) {
           selectedIndex + 1,
           filteredCommands.length - 1,
         );
-        renderList();
+        paintSelection();
         break;
       case "ArrowUp":
         e.preventDefault();
         selectedIndex = Math.max(selectedIndex - 1, 0);
-        renderList();
+        paintSelection();
         break;
       case "Enter":
         e.preventDefault();
+        e.stopPropagation();
         executeCommand(selectedIndex);
         break;
       case "Escape":
         e.preventDefault();
+        e.stopPropagation();
         close();
         break;
+      case "Tab":
+        // The input is the palette's only focus target — Tab stays put
+        // rather than walking into the app behind the overlay.
+        e.preventDefault();
+        input.focus();
+        break;
+      default:
+        // Typing after focus strayed: bring it home so the text lands in
+        // the search field.
+        if (document.activeElement !== input) input.focus();
     }
+  }
+
+  function onFocusIn(e) {
+    if (!overlay.contains(e.target)) input.focus();
+  }
+
+  // mousedown would blur the input (rows aren't focusable); cancel that and
+  // run the command on a real click, so right-clicks and touch scrolls over
+  // the list don't fire whatever is under the pointer.
+  list.addEventListener("mousedown", (e) => e.preventDefault());
+  list.addEventListener("click", (e) => {
+    const li = e.target instanceof Element ? e.target.closest(".palette__item") : null;
+    if (li) executeCommand(Number(li.dataset.index));
   });
 
-  overlay.addEventListener("pointerdown", (e) => {
+  overlay.addEventListener("mousedown", (e) => {
     if (e.target === overlay) {
       e.preventDefault();
       close();
@@ -245,29 +299,39 @@ export function mountCommandPalette({ commands }) {
       return;
     }
     isOpen = true;
+    // Reopened while the previous close was still fading out: cancel that
+    // removal, or it would take the overlay away from under the new session.
+    clearTimeout(exitTimer);
+    exitTimer = null;
+    overlay.classList.remove("palette-overlay--exiting");
     prevFocus = document.activeElement;
     document.body.appendChild(overlay);
+    document.addEventListener("keydown", onKeydown, true);
+    document.addEventListener("focusin", onFocusIn);
     input.value = "";
     filter("");
+    input.focus();
     requestAnimationFrame(() => {
-      overlay.classList.add("palette-overlay--open");
-      input.focus();
+      if (isOpen) overlay.classList.add("palette-overlay--open");
     });
   }
 
   function close() {
     if (!isOpen) return;
     isOpen = false;
+    document.removeEventListener("keydown", onKeydown, true);
+    document.removeEventListener("focusin", onFocusIn);
     overlay.classList.remove("palette-overlay--open");
     overlay.classList.add("palette-overlay--exiting");
-    const onEnd = () => {
+    // Remove after the exit transition (--t-pop-out); a timer rather than
+    // transitionend so reduced-motion and interrupted fades behave the same.
+    clearTimeout(exitTimer);
+    exitTimer = setTimeout(() => {
+      exitTimer = null;
       overlay.classList.remove("palette-overlay--exiting");
       overlay.remove();
-    };
-    overlay.addEventListener("transitionend", onEnd, { once: true });
-    // Fallback in case transitionend doesn't fire (edge case)
-    setTimeout(onEnd, 200);
-    if (prevFocus && typeof prevFocus.focus === "function") {
+    }, EXIT_MS);
+    if (prevFocus && prevFocus.isConnected && typeof prevFocus.focus === "function") {
       prevFocus.focus();
     }
     prevFocus = null;
@@ -322,7 +386,6 @@ export function buildCommands({
   onOpenConsole,
   onOpenExport,
   onOpenSettings,
-  onOpenSetup,
   onClosePanel,
   onFocusPatterns,
   onSwitchToRoll,
@@ -333,7 +396,7 @@ export function buildCommands({
   onCloseActiveTab,
   onToggleVisualsFullWindow,
 }) {
-  return [
+  const commands = [
     // ─── Transport ────────────────
     {
       id: "play",
@@ -470,12 +533,6 @@ export function buildCommands({
       run: onOpenSettings,
     },
     {
-      id: "setup",
-      label: "Open Setup Panel",
-      shortcut: null,
-      run: onOpenSetup,
-    },
-    {
       id: "closePanel",
       label: "Close Panel",
       shortcut: null,
@@ -494,7 +551,10 @@ export function buildCommands({
     { id: "closeTab", label: "Close Tab", run: onCloseActiveTab },
 
     // ─── File ─────────────────────
-    { id: "save", label: "Save Pattern", shortcut: `${MOD}S`, run: onSave },
+    // Writing a pattern file to disk only exists on the dev server; in a
+    // production build there's nothing to run (patterns autosave in the
+    // browser), so the host leaves onSave out and the entry is dropped.
+    { id: "save", label: "Save Pattern to Disk (dev)", shortcut: null, run: onSave },
     { id: "exportWav", label: "Export WAV", shortcut: null, run: onExportWav },
     { id: "share", label: "Copy Share Link", shortcut: null, run: onShare },
 
@@ -518,4 +578,7 @@ export function buildCommands({
       run: onToggleVisualsFullWindow,
     },
   ];
+  // An entry whose action the host didn't wire would close the palette and
+  // do nothing — leave it out instead.
+  return commands.filter((cmd) => typeof cmd.run === "function");
 }
