@@ -21,7 +21,12 @@ const PITCH_NAMES = [
 // The empty symbol can't be shown as an empty row, so it is labelled "major"
 // — but "major" is NOT a symbol the dictionaries accept (`chord("Cmajor")` is
 // an unknown chord → silence). `insert` is what accepting the row writes.
+//
+// `+` (augmented) is left out: the symbol is written inside a mini-notation
+// string, where `+` is not part of a word — `chord("C+")` is a parse error.
+// `aug` is the same chord and is offered.
 const CHORD_QUALITIES = Object.keys(complex)
+  .filter((symbol) => symbol !== "+")
   .sort()
   .map((symbol) => ({ insert: symbol, label: symbol === "" ? "major" : symbol }));
 

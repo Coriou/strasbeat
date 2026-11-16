@@ -9,6 +9,7 @@ import { javascriptLanguage } from "@codemirror/lang-javascript";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { chord } from "@strudel/core";
 import "@strudel/tonal";
+import { mini } from "@strudel/mini";
 
 import { functionsProvider, buildFunctionList } from "./functions.js";
 import { chordProvider } from "./chord.js";
@@ -126,6 +127,14 @@ describe("chordProvider", () => {
       const doc = accept(state, result, option);
       const symbol = doc.match(/^chord\("(.*)"\)$/)?.[1];
       assert.ok(symbol != null, `unexpected doc ${doc}`);
+      // The symbol is typed inside a double-quoted string, which the
+      // transpiler hands to the mini-notation parser.
+      const parsed = mini(`C${symbol}`).queryArc(0, 1);
+      assert.deepEqual(
+        parsed.map((h) => h.value),
+        [`C${symbol}`],
+        `"C${symbol}" is not one mini-notation word`,
+      );
       const haps = chord(symbol).voicing().queryArc(0, 1);
       assert.ok(haps.length > 0, `chord("${symbol}") (row "${option.label}") produced no notes`);
     }
