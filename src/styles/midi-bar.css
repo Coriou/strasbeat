@@ -102,15 +102,26 @@
   flex-shrink: 0;
 }
 
+/* The input is 24px tall so it is easy to grab; the 4px track is drawn by
+   the track pseudo-elements. */
 .midi-bar__vol-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 64px;
+  height: 24px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+.midi-bar__vol-slider::-webkit-slider-runnable-track {
   height: 4px;
   background: var(--surface-3);
   border-radius: 2px;
-  outline: none;
-  cursor: pointer;
+}
+.midi-bar__vol-slider::-moz-range-track {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 2px;
 }
 
 .midi-bar__vol-slider::-webkit-slider-thumb {
@@ -118,6 +129,7 @@
   appearance: none;
   width: 10px;
   height: 10px;
+  margin-top: -3px; /* centre the 10px thumb on the 4px track */
   border-radius: 50%;
   background: var(--text-mut);
   cursor: pointer;
@@ -181,7 +193,7 @@
   outline-offset: 1px;
 }
 .midi-bar__preset-chevron {
-  font-size: 9px;
+  flex-shrink: 0;
   color: var(--text-mut);
 }
 
@@ -251,6 +263,9 @@
   font: 500 var(--text-xs) var(--font-sans);
   cursor: pointer;
   text-align: left;
+}
+.midi-bar__preset-item[hidden] {
+  display: none;
 }
 .midi-bar__preset-item:hover,
 .midi-bar__preset-item.is-focused {
@@ -365,21 +380,33 @@
   color: var(--text-dim);
 }
 
+/* The input is 24px tall so it is easy to grab; the 4px track is drawn by
+   the track pseudo-elements. */
 .midi-bar__fx-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
+  height: 24px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+.midi-bar__fx-slider::-webkit-slider-runnable-track {
   height: 4px;
   background: var(--surface-3);
   border-radius: 2px;
-  outline: none;
-  cursor: pointer;
+}
+.midi-bar__fx-slider::-moz-range-track {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 2px;
 }
 .midi-bar__fx-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 10px;
   height: 10px;
+  margin-top: -3px; /* centre the 10px thumb on the 4px track */
   border-radius: 50%;
   background: var(--text-mut);
   cursor: pointer;
@@ -472,6 +499,51 @@
 .midi-bar__output-dot.is-active {
   background: var(--accent);
   opacity: 1;
+}
+
+/* Enable / Retry, shown while MIDI output has no browser permission. */
+.midi-bar__out-btn {
+  height: 20px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: 500 var(--text-xs) var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--t-hover);
+}
+.midi-bar__out-btn[hidden] {
+  display: none;
+}
+.midi-bar__out-btn:hover {
+  border-color: var(--border);
+}
+.midi-bar__out-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ─── Transport MIDI pill as a button ───
+   While MIDI is not connected (or was refused) the pill is the control that
+   asks for access; see wireMidiPill in src/ui/midi-bar.js. */
+.transport__pill--midi.is-idle.is-action {
+  color: var(--text-mut);
+}
+.transport__pill--midi.is-action {
+  cursor: pointer;
+  transition:
+    color var(--t-hover),
+    border-color var(--t-hover);
+}
+.transport__pill--midi.is-action:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+.transport__pill--midi.is-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ─── Velocity curve toggle ─── */

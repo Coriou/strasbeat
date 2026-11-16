@@ -13,13 +13,17 @@ import {
 } from "../midi-bridge.js";
 import { superdough, getAudioContext } from "@strudel/webaudio";
 import {
-  isMidiOutputReady,
+  getMidiOutputState,
   getMidiOutputs,
   getMidiOutputDevice,
   setMidiOutputDevice,
   onMidiOutputChange,
+  enableMidiOutput,
+  resolveMidiOutputName,
   getEnabledPackages,
 } from "../user-setup.js";
+import { isExportRunning } from "../export.js";
+import { makeIcon } from "./icons.js";
 
 // ─── Mini-keyboard renderer ──────────────────────────────────────────────
 // 2-octave (24-key) piano visualization on a <canvas>.
@@ -176,10 +180,14 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   outSelect.className = "midi-bar__device-select";
   outSelect.title = "MIDI output device";
   outSelect.setAttribute("aria-label", "MIDI output device");
+  // Enable / Retry — shown instead of a dead selector while MIDI output has
+  // no browser permission yet (or was refused it).
+  const outEnableBtn = makeBtn("midi-bar__out-btn", "Enable");
+  outEnableBtn.hidden = true;
   const outDot = document.createElement("span");
   outDot.className = "midi-bar__output-dot";
-  outDot.title = "MIDI output status";
-  outGroup.append(outLabel, outSelect, outDot);
+  outDot.setAttribute("role", "img");
+  outGroup.append(outLabel, outSelect, outEnableBtn, outDot);
   if (midiOutputEnabled) container.appendChild(outGroup);
 
   // Sep (only if output is present)
@@ -249,6 +257,8 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   const velGroup = document.createElement("div");
   velGroup.className = "midi-bar__velocity-curve";
   velGroup.title = "Velocity curve";
+  velGroup.setAttribute("role", "group");
+  velGroup.setAttribute("aria-label", "Velocity curve");
   const VELOCITY_MODES = ["soft", "linear", "hard"];
   const velBtns = {};
   for (const mode of VELOCITY_MODES) {
@@ -257,16 +267,22 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     btn.className = "midi-bar__vel-btn";
     btn.textContent = mode[0].toUpperCase() + mode.slice(1);
     btn.dataset.mode = mode;
-    if (mode === midi.getVelocityCurve()) btn.classList.add("is-active");
     btn.addEventListener("click", () => {
       midi.setVelocityCurve(mode);
-      for (const b of Object.values(velBtns)) b.classList.remove("is-active");
-      btn.classList.add("is-active");
+      syncVelocityButtons();
       persistState();
     });
     velGroup.appendChild(btn);
     velBtns[mode] = btn;
   }
+  function syncVelocityButtons() {
+    const current = midi.getVelocityCurve();
+    for (const [mode, b] of Object.entries(velBtns)) {
+      b.classList.toggle("is-active", mode === current);
+      b.setAttribute("aria-pressed", mode === current ? "true" : "false");
+    }
+  }
+  syncVelocityButtons();
   container.appendChild(velGroup);
 
   // Spacer
@@ -278,24 +294,36 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   const presetBtn = document.createElement("button");
   presetBtn.type = "button";
   presetBtn.className = "midi-bar__preset-btn";
-  presetBtn.setAttribute("aria-haspopup", "listbox");
+  presetBtn.setAttribute("aria-haspopup", "dialog");
   presetBtn.setAttribute("aria-expanded", "false");
-  presetBtn.innerHTML = `<span class="midi-bar__preset-label">${presets[getPreset()]?.label ?? getPreset()}</span><span class="midi-bar__preset-chevron" aria-hidden="true">▾</span>`;
+  const presetLabelEl = document.createElement("span");
+  presetLabelEl.className = "midi-bar__preset-label";
+  presetLabelEl.textContent = presets[getPreset()]?.label ?? getPreset();
+  const presetChevron = makeIcon("chevron-down", { size: 12 });
+  presetChevron.classList.add("midi-bar__preset-chevron");
+  presetBtn.append(presetLabelEl, presetChevron);
+  function setPresetLabel(key) {
+    const label = presets[key]?.label ?? key;
+    presetLabelEl.textContent = label;
+    presetBtn.setAttribute("aria-label", `MIDI preset: ${label}`);
+  }
+  setPresetLabel(getPreset());
   container.appendChild(presetBtn);
-  const presetLabelEl = presetBtn.querySelector(".midi-bar__preset-label");
 
   // Preset popover (initially hidden)
   const popover = buildPresetPopover(
     getPreset,
     (key) => {
       onPresetChange(key);
-      presetLabelEl.textContent = presets[key]?.label ?? key;
+      setPresetLabel(key);
       closePopover();
       popover._updateFxSliders();
     },
     midi,
   );
-  popover.setAttribute("role", "listbox");
+  // The popover holds a filter field, the preset list and the FX sliders, so
+  // it is a dialog; only the list inside it is the listbox.
+  popover.setAttribute("role", "dialog");
   popover.setAttribute("aria-label", "MIDI preset");
   document.body.appendChild(popover);
 
@@ -308,8 +336,11 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   const susLamp = document.createElement("div");
   susLamp.className = "midi-bar__sustain";
   susLamp.title = "Sustain pedal (CC64)";
+  susLamp.setAttribute("role", "img");
+  susLamp.setAttribute("aria-label", "Sustain pedal: up");
   const susLabel = document.createElement("span");
   susLabel.className = "midi-bar__sustain-label";
+  susLabel.setAttribute("aria-hidden", "true");
   susLabel.textContent = "sus";
   susGroup.append(susLamp, susLabel);
   container.appendChild(susGroup);
@@ -319,12 +350,16 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   modGroup.className = "midi-bar__mod-group";
   const modBar = document.createElement("div");
   modBar.className = "midi-bar__mod-bar";
+  modBar.title = "Mod wheel (CC1) — closes a low-pass filter on live notes";
+  modBar.setAttribute("role", "img");
+  modBar.setAttribute("aria-label", "Mod wheel: 0%");
   const modFill = document.createElement("div");
   modFill.className = "midi-bar__mod-fill";
   modFill.style.height = "0%";
   modBar.appendChild(modFill);
   const modLabel = document.createElement("span");
   modLabel.className = "midi-bar__mod-label";
+  modLabel.setAttribute("aria-hidden", "true");
   modLabel.textContent = "mod";
   modGroup.append(modBar, modLabel);
   container.appendChild(modGroup);
@@ -359,6 +394,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   captureBtn.title =
     "Toggle live MIDI capture — click again to save the captured phrase";
   captureBtn.setAttribute("aria-label", "Capture");
+  captureBtn.setAttribute("aria-pressed", "false");
   captureBtn.innerHTML = `<span class="btn__icon" data-icon="disc"></span><span id="capture-count" class="capture__count"></span>`;
   container.appendChild(captureBtn);
 
@@ -421,38 +457,89 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   if (midiOutputEnabled) {
     function rebuildOutputSelect() {
       outSelect.innerHTML = "";
+      const state = getMidiOutputState();
+      outGroup.hidden = false;
+
+      if (state !== "ready") {
+        // No device list without browser permission: say why, and offer the
+        // click that asks for it rather than a selector stuck on "Loading…".
+        const copy = {
+          off: ["Loading…", null, "MIDI output is loading"],
+          enabling: ["Waiting…", null, "Waiting for MIDI permission…"],
+          idle: [
+            "Off",
+            "Enable",
+            "MIDI output needs permission. Click Enable — your browser will ask to allow MIDI devices.",
+          ],
+          blocked: [
+            "Blocked",
+            "Retry",
+            "MIDI output is blocked for this site. Allow MIDI devices in your browser's site settings, then click Retry.",
+          ],
+          unsupported: [
+            "Unsupported",
+            null,
+            "This browser does not support Web MIDI, so .midi() cannot send anywhere.",
+          ],
+        }[state];
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = copy[0];
+        outSelect.appendChild(opt);
+        outSelect.disabled = true;
+        outSelect.title = copy[2];
+        outEnableBtn.hidden = copy[1] == null;
+        if (copy[1]) outEnableBtn.textContent = copy[1];
+        outEnableBtn.title = copy[2];
+        outDot.classList.remove("is-active");
+        outDot.title = copy[2];
+        outDot.setAttribute("aria-label", copy[2]);
+        return;
+      }
+
+      outEnableBtn.hidden = true;
       const outputs = getMidiOutputs();
       if (outputs.length === 0) {
         const opt = document.createElement("option");
         opt.value = "";
-        opt.textContent = isMidiOutputReady() ? "No outputs" : "Loading…";
+        opt.textContent = "No outputs";
         outSelect.appendChild(opt);
         outSelect.disabled = true;
+        outSelect.title = "No MIDI output device is connected";
         outDot.classList.remove("is-active");
-        outGroup.hidden = false;
+        outDot.title = outSelect.title;
+        outDot.setAttribute("aria-label", outSelect.title);
         return;
       }
       outSelect.disabled = false;
       outDot.classList.add("is-active");
-      outGroup.hidden = false;
-      const stored = getMidiOutputDevice();
       for (const o of outputs) {
         const opt = document.createElement("option");
         opt.value = o.name;
         opt.textContent = o.name;
         outSelect.appendChild(opt);
       }
-      // Restore persisted selection, or default to first IAC / first output
-      if (stored && outputs.some((o) => o.name === stored)) {
-        outSelect.value = stored;
-      } else {
-        const iac = outputs.find((o) => o.name.includes("IAC"));
-        outSelect.value = iac ? iac.name : (outputs[0]?.name ?? "");
-      }
+      // Show the device a bare .midi() will really use: the persisted choice
+      // when it is connected, otherwise the same default upstream applies.
+      const stored = getMidiOutputDevice();
+      const { name, missing } = resolveMidiOutputName(
+        stored,
+        outputs.map((o) => o.name),
+      );
+      outSelect.value = name ?? "";
+      const status = missing
+        ? `"${stored}" is not connected — .midi() sends to "${name}"`
+        : `.midi() sends to "${name}" (applies from the next evaluate)`;
+      outSelect.title = status;
+      outDot.title = status;
+      outDot.setAttribute("aria-label", status);
     }
     rebuildOutputSelect();
     outSelect.addEventListener("change", () => {
       setMidiOutputDevice(outSelect.value);
+    });
+    outEnableBtn.addEventListener("click", () => {
+      enableMidiOutput();
     });
     unsubMidiOutput = onMidiOutputChange(rebuildOutputSelect);
   }
@@ -461,6 +548,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   function onModWheel({ value }) {
     const pct = Math.round((value / 127) * 100);
     modFill.style.height = `${pct}%`;
+    modBar.setAttribute("aria-label", `Mod wheel: ${pct}%`);
   }
   midi.on("modwheel", onModWheel);
 
@@ -592,6 +680,7 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   // Sustain lamp
   function onSustain({ down }) {
     susLamp.classList.toggle("midi-bar__sustain--active", down);
+    susLamp.setAttribute("aria-label", `Sustain pedal: ${down ? "down" : "up"}`);
   }
   midi.on("sustain", onSustain);
 
@@ -678,7 +767,9 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
           octaveShift: midi.getOctaveShift(),
           preset: getPreset(),
           velocityCurve: midi.getVelocityCurve(),
-          selectedDevice: midi.getSelectedDevice(),
+          // the chosen input, even while it is unplugged and the bridge has
+          // fallen back to all devices
+          selectedDevice: midi.getPreferredDevice(),
           metronomeEnabled: midi.isMetronomeEnabled(),
           metronomeBpm: midi.getMetronomeBpm(),
         }),
@@ -703,13 +794,11 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
       }
       if (typeof s.preset === "string" && presets[s.preset]) {
         onPresetChange(s.preset);
-        presetLabelEl.textContent = presets[s.preset].label ?? s.preset;
+        setPresetLabel(s.preset);
       }
       if (typeof s.velocityCurve === "string") {
         midi.setVelocityCurve(s.velocityCurve);
-        for (const b of Object.values(velBtns)) {
-          b.classList.toggle("is-active", b.dataset.mode === s.velocityCurve);
-        }
+        syncVelocityButtons();
       }
       if (typeof s.selectedDevice === "string") {
         midi.setSelectedDevice(s.selectedDevice);
@@ -741,7 +830,9 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   function updatePopoverSelection() {
     const current = getPreset();
     for (const item of popover.querySelectorAll(".midi-bar__preset-item")) {
-      item.classList.toggle("is-selected", item.dataset.key === current);
+      const selected = item.dataset.key === current;
+      item.classList.toggle("is-selected", selected);
+      item.setAttribute("aria-selected", selected ? "true" : "false");
     }
   }
 
@@ -751,6 +842,9 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     previewTimer = setTimeout(() => {
       const p = presets[key];
       if (!p || p.drumMap) return;
+      // During a WAV export the shared context is the offline one; a preview
+      // would land in the rendered file.
+      if (isExportRunning()) return;
       const ctx = getAudioContext();
       if (!ctx || ctx.state !== "running") return;
       const now = ctx.currentTime;
@@ -777,15 +871,11 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
     for (const item of popover.querySelectorAll(".midi-bar__preset-item")) {
       item.hidden = q && !item.textContent.toLowerCase().includes(q);
     }
-    for (const cat of popover.querySelectorAll(".midi-bar__preset-category")) {
-      // Hide category if all its items are hidden
-      let next = cat.nextElementSibling;
-      let anyVisible = false;
-      while (next && !next.classList.contains("midi-bar__preset-category")) {
-        if (!next.hidden) anyVisible = true;
-        next = next.nextElementSibling;
-      }
-      cat.hidden = !anyVisible;
+    for (const group of popover.querySelectorAll(".midi-bar__preset-group")) {
+      // Hide a category when all its items are hidden
+      group.hidden = !group.querySelector(
+        ".midi-bar__preset-item:not([hidden])",
+      );
     }
   }
 
@@ -879,6 +969,57 @@ export function mountMidiBar({ container, midi, getPreset, onPresetChange }) {
   };
 }
 
+// ─── Transport MIDI pill ──────────────────────────────────────────────────
+
+/**
+ * Make the transport's MIDI status pill the place to connect a keyboard.
+ *
+ * MIDI access is only requested from a user gesture (the browser shows a
+ * permission prompt), and with no device connected the MIDI bar itself is
+ * hidden — so the pill is the one always-visible entry point. It behaves as
+ * a button while there is something to do (connect, or retry after the
+ * permission was refused) and as a plain status readout otherwise.
+ *
+ * @param {HTMLElement} pillEl  #midi-status
+ * @param {import('../midi-bridge.js').MidiBridge} midi
+ * @returns {() => void} dispose
+ */
+export function wireMidiPill(pillEl, midi) {
+  const isActionable = () => {
+    const state = midi.getConnectionState();
+    return state === "idle" || state === "blocked";
+  };
+  function sync() {
+    const actionable = isActionable();
+    pillEl.classList.toggle("is-action", actionable);
+    if (actionable) {
+      pillEl.setAttribute("role", "button");
+      pillEl.tabIndex = 0;
+    } else {
+      pillEl.setAttribute("role", "status");
+      pillEl.removeAttribute("tabindex");
+    }
+  }
+  function activate() {
+    if (isActionable()) midi.start();
+  }
+  function onKeydown(e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (!isActionable()) return;
+    e.preventDefault();
+    activate();
+  }
+  pillEl.addEventListener("click", activate);
+  pillEl.addEventListener("keydown", onKeydown);
+  midi.on("connectionchange", sync);
+  sync();
+  return () => {
+    pillEl.removeEventListener("click", activate);
+    pillEl.removeEventListener("keydown", onKeydown);
+    midi.off("connectionchange", sync);
+  };
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function makeSep() {
@@ -906,11 +1047,14 @@ function buildPresetPopover(getPreset, onSelect, midi) {
   filter.type = "text";
   filter.className = "midi-bar__preset-filter";
   filter.placeholder = "Filter…";
+  filter.setAttribute("aria-label", "Filter presets");
   popover.appendChild(filter);
 
   // Scrollable preset list
   const listWrap = document.createElement("div");
   listWrap.className = "midi-bar__preset-list";
+  listWrap.setAttribute("role", "listbox");
+  listWrap.setAttribute("aria-label", "Presets");
   popover.appendChild(listWrap);
 
   // Group presets by category
@@ -924,16 +1068,24 @@ function buildPresetPopover(getPreset, onSelect, midi) {
 
   for (const [cat, items] of byCategory) {
     if (items.length === 0) continue;
+    // One group per category, so the listbox contains only groups of options.
+    const groupEl = document.createElement("div");
+    groupEl.className = "midi-bar__preset-group";
+    groupEl.setAttribute("role", "group");
+    groupEl.setAttribute("aria-label", cat);
+    listWrap.appendChild(groupEl);
     const catEl = document.createElement("div");
     catEl.className = "midi-bar__preset-category";
+    catEl.setAttribute("role", "presentation");
     catEl.textContent = cat;
-    listWrap.appendChild(catEl);
+    groupEl.appendChild(catEl);
 
     for (const { key, label } of items) {
       const item = document.createElement("button");
       item.type = "button";
       item.className = "midi-bar__preset-item";
       item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", "false");
       item.dataset.key = key;
       item.textContent = label;
       item.addEventListener("click", () => onSelect(key));
@@ -942,13 +1094,15 @@ function buildPresetPopover(getPreset, onSelect, midi) {
         const prev = listWrap.querySelector(".is-focused");
         if (prev) prev.classList.remove("is-focused");
       });
-      listWrap.appendChild(item);
+      groupEl.appendChild(item);
     }
   }
 
   // ─── FX sliders section ─────────────────────────────────────────────
   const fxSection = document.createElement("div");
   fxSection.className = "midi-bar__fx-section";
+  fxSection.setAttribute("role", "group");
+  fxSection.setAttribute("aria-label", "Preset effects");
 
   const FX_DEFS = [
     {

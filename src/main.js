@@ -28,7 +28,7 @@ import {
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { MidiBridge } from "./midi-bridge.js";
-import { mountMidiBar } from "./ui/midi-bar.js";
+import { mountMidiBar, wireMidiPill } from "./ui/midi-bar.js";
 import { installCompletions } from "./editor/completions/install.js";
 import {
   clearError,
@@ -1882,7 +1882,11 @@ const midiBar = mountMidiBar({
 // Hydrate icons inside the dynamically built MIDI bar.
 hydrateIcons(midiBarContainer);
 
-midi.start();
+// No permission prompt on page load: connect right away only when MIDI
+// access was granted on an earlier visit, otherwise the transport pill is
+// the "Connect MIDI" button that asks on click.
+wireMidiPill(document.getElementById("midi-status"), midi);
+midi.startIfPermitted();
 
 // Capture button lives inside the MIDI bar now; find it there.
 const captureBtn = midiBar.getCaptureButton();

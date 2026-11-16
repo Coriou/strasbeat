@@ -22,6 +22,7 @@ import {
   generatePatternDraft,
   gridSubdivisionLabel,
 } from "./midi-to-strudel.js";
+import { isExportRunning } from "./export.js";
 
 // ─── Presets ──────────────────────────────────────────────────────────────
 // Each preset is the value object passed to superdough() per noteon, minus
@@ -507,6 +508,80 @@ export function detectChord(midiNotes) {
   return null;
 }
 
+// ─── Mod wheel → filter ───────────────────────────────────────────────────
+// CC1 closes a low-pass over the played notes: wheel down (0, where it rests
+// and where a keyboard without a wheel stays forever) leaves the sound
+// untouched, wheel fully up (127) brings the cutoff down to 200 Hz, on an
+// exponential curve in between. Returns the cutoff to apply, or null for
+// "no mod-wheel filtering".
+export function modWheelCutoff(modWheel) {
+  if (!(modWheel > 0)) return null;
+  return 20000 * Math.pow(100, -Math.min(modWheel, 127) / 127);
+}
+
+// The lpf a live note is played with: the tighter of the preset's own filter
+// and the mod wheel's. undefined = no filter at all.
+export function liveNoteLpf(presetLpf, modWheel) {
+  const wheel = modWheelCutoff(modWheel);
+  if (wheel == null) return presetLpf ?? undefined;
+  return Math.min(presetLpf ?? 20000, wheel);
+}
+
+// ─── Live voice budget ────────────────────────────────────────────────────
+// Every note-on is a one-shot superdough voice that rings for the preset's
+// hold time (up to 8 s, tripled by the sustain pedal), and superdough hands
+// back no handle to cut one short. Fast playing on a sustained preset would
+// otherwise stack voices without bound until the output clips and the audio
+// thread glitches. So the hold time of *new* notes shrinks as voices pile up:
+// past the soft limit the pedal stops extending notes, and past the hard
+// limit the hold tapers in proportion to the overshoot. The taper is smooth
+// on purpose: dense two-handed playing settles at a slightly shorter ring
+// instead of alternating between full-length and chopped chords.
+export const LIVE_VOICE_SOFT_LIMIT = 24;
+export const LIVE_VOICE_HARD_LIMIT = 48;
+const OVERLOAD_HOLD_SECONDS = 0.5;
+
+export function liveHoldSeconds(baseDuration, sustainDown, activeVoices) {
+  if (activeVoices > LIVE_VOICE_HARD_LIMIT) {
+    const tapered = baseDuration * (LIVE_VOICE_HARD_LIMIT / activeVoices);
+    return Math.max(tapered, Math.min(baseDuration, OVERLOAD_HOLD_SECONDS));
+  }
+  if (activeVoices >= LIVE_VOICE_SOFT_LIMIT) return baseDuration;
+  return sustainDown ? baseDuration * 3 : baseDuration;
+}
+
+// ─── Connection status copy ───────────────────────────────────────────────
+// `ok: null` renders the transport pill in its neutral style: none of these
+// is an error the user caused — MIDI is optional. `action: true` marks the
+// states where clicking the pill does something (see wireMidiPill).
+const CONNECTION_STATUS = {
+  idle: {
+    ok: null,
+    msg: "Connect MIDI",
+    title:
+      "Play with a MIDI keyboard: click to connect. Your browser will ask for permission.",
+    action: true,
+  },
+  requesting: {
+    ok: null,
+    msg: "MIDI…",
+    title: "Waiting for MIDI permission…",
+  },
+  blocked: {
+    ok: null,
+    msg: "MIDI blocked",
+    title:
+      "MIDI access is blocked for this site. Allow MIDI devices in your browser's site settings, then click to try again.",
+    action: true,
+  },
+  unsupported: {
+    ok: null,
+    msg: "No Web MIDI",
+    title:
+      "This browser does not support Web MIDI, so MIDI keyboards cannot be used here. Chrome, Edge and Firefox do.",
+  },
+};
+
 // ─── MidiBridge ───────────────────────────────────────────────────────────
 export class MidiBridge {
   /**
@@ -521,6 +596,18 @@ export class MidiBridge {
     this.onCaptureChange = onCaptureChange ?? (() => {});
     /** @type {MIDIAccess|null} */
     this.access = null;
+    /** @type {'idle'|'requesting'|'connected'|'blocked'|'unsupported'} */
+    this._connection = "idle";
+    /** In-flight requestMIDIAccess(), so concurrent start() calls share it. */
+    this._starting = null;
+    /** A one-off pill message is showing; the next played note clears it. */
+    this._transientStatus = false;
+    this._exportNoticeShown = false;
+    /** End times (AudioContext seconds) of live voices still sounding. */
+    this._liveVoiceEnds = [];
+    this._voiceOverload = false;
+    /** Input ids seen at the last wiring pass, to notice an unplug. */
+    this._knownInputIds = new Set();
     this.captureEnabled = false;
     /** @type {{midi:number, velocity:number, time:number}[]} */
     this.captureBuffer = [];
@@ -544,15 +631,17 @@ export class MidiBridge {
     this.presetOverrides = new Map();
 
     // ─── Mod wheel (CC1) ──────────────────────────────────────────────
-    this._modWheel = 0; // 0–127, default fully open
+    this._modWheel = 0; // 0–127; 0 (wheel at rest) = no filtering
 
     // ─── Velocity curve ───────────────────────────────────────────────
     /** @type {'soft'|'linear'|'hard'} */
     this._velocityCurve = 'linear';
 
     // ─── Device selector ──────────────────────────────────────────────
-    /** @type {string|null} null = all devices */
+    /** @type {string|null} the input being listened to; null = all devices */
     this._selectedDevice = null;
+    /** @type {string|null} the user's choice, kept while it is unplugged */
+    this._preferredDevice = null;
 
     // ─── Metronome ────────────────────────────────────────────────────
     this._metronomeEnabled = false;
@@ -631,7 +720,12 @@ export class MidiBridge {
   getSelectedDevice() {
     return this._selectedDevice;
   }
+  /** The user's chosen input, even while it is unplugged (for persistence). */
+  getPreferredDevice() {
+    return this._preferredDevice;
+  }
   setSelectedDevice(id) {
+    this._preferredDevice = id;
     this._selectedDevice = id;
     this._wireInputs();
   }
@@ -666,6 +760,9 @@ export class MidiBridge {
     if (!ctx || ctx.state !== "running") return;
     this._metronomeBeat = 0;
     const tick = () => {
+      // During an offline WAV render getAudioContext() is the offline
+      // context: a click scheduled now would be baked into the file.
+      if (isExportRunning()) return;
       const now = getAudioContext()?.currentTime;
       if (!now) return;
       const beat = this._metronomeBeat % 4;
@@ -712,59 +809,135 @@ export class MidiBridge {
     return this.getDevices().length > 0;
   }
 
-  async start() {
+  // ─── Connection ────────────────────────────────────────────────────
+  getConnectionState() {
+    return this._connection;
+  }
+
+  _setConnection(state) {
+    this._connection = state;
+    this._transientStatus = false;
+    if (state !== "connected") {
+      this.onStatus({ ...CONNECTION_STATUS[state], state });
+    }
+    this._emit("connectionchange", { state });
+  }
+
+  /**
+   * Boot-time entry point. Asking for MIDI access makes the browser show a
+   * permission prompt, which must not greet someone who has only just opened
+   * the page — so this connects only when access was already granted on an
+   * earlier visit (a returning player's keyboard works with zero clicks) and
+   * otherwise leaves the pill as an invitation that calls start() on click.
+   */
+  async startIfPermitted() {
     if (typeof navigator.requestMIDIAccess !== "function") {
-      this.onStatus({
-        ok: false,
-        msg: "MIDI unavailable",
-        title: "Web MIDI is not supported in this browser.",
-      });
+      this._setConnection("unsupported");
       return false;
     }
+    let permission = null;
     try {
-      this.access = await navigator.requestMIDIAccess();
-    } catch (e) {
-      console.warn("[midi] permission denied:", e);
-      this.onStatus({
-        ok: false,
-        msg: "MIDI blocked",
-        title: "MIDI permission was denied for this page.",
-      });
-      return false;
+      permission = await navigator.permissions?.query({ name: "midi" });
+    } catch {
+      // The Permissions API does not know "midi" here: we cannot tell
+      // without prompting, so wait for a click.
     }
-    this._wireInputs();
-    this.access.addEventListener("statechange", () => this._wireInputs());
-    return true;
+    if (permission) {
+      // Granting (or revoking) access in the browser's site settings takes
+      // effect without a reload.
+      permission.onchange = () => {
+        if (permission.state === "granted") this.start();
+        else if (permission.state === "denied" && !this.access) {
+          this._setConnection("blocked");
+        }
+      };
+    }
+    if (permission?.state === "granted") return this.start();
+    this._setConnection(permission?.state === "denied" ? "blocked" : "idle");
+    return false;
+  }
+
+  /**
+   * Request MIDI access and start listening. May show the browser's
+   * permission prompt, so call it from a user gesture (the MIDI pill).
+   * Safe to call again: after a denial it retries, once connected it is a
+   * no-op.
+   */
+  start() {
+    if (this.access) return Promise.resolve(true);
+    if (this._starting) return this._starting;
+    if (typeof navigator.requestMIDIAccess !== "function") {
+      this._setConnection("unsupported");
+      return Promise.resolve(false);
+    }
+    this._setConnection("requesting");
+    this._starting = (async () => {
+      try {
+        this.access = await navigator.requestMIDIAccess();
+      } catch (e) {
+        console.warn("[midi] access was not granted:", e);
+        this._setConnection("blocked");
+        return false;
+      } finally {
+        this._starting = null;
+      }
+      this._setConnection("connected");
+      this._wireInputs();
+      this.access.addEventListener("statechange", () => this._wireInputs());
+      return true;
+    })();
+    return this._starting;
   }
 
   _wireInputs() {
     if (!this.access) return;
-    const selected = this._selectedDevice;
-    let foundSelected = false;
-    for (const input of this.access.inputs.values()) {
-      if (selected && input.id !== selected) {
-        input.onmidimessage = null;
-        continue;
-      }
-      if (selected && input.id === selected) foundSelected = true;
-      // Re-assigning .onmidimessage is idempotent — replaces any prior handler.
-      input.onmidimessage = (e) => this._onMessage(e);
+    const inputs = [...this.access.inputs.values()];
+
+    // An unplugged controller cannot send the pedal-up or wheel-down that
+    // would release what it was holding.
+    const ids = new Set(inputs.map((i) => i.id));
+    let unplugged = false;
+    for (const id of this._knownInputIds) {
+      if (!ids.has(id)) unplugged = true;
     }
-    // If the selected device disconnected, fall back to all devices.
-    if (selected && !foundSelected) {
+    this._knownInputIds = ids;
+    if (unplugged) this._resetControllers();
+
+    // Listen to the chosen input when it is present. While it is unplugged
+    // fall back to every input (with one keyboard left the selector is
+    // hidden, so staying deaf would be a dead end) — but remember the choice
+    // and go back to it as soon as the device returns.
+    const preferred = this._preferredDevice;
+    const preferredPresent = preferred != null && ids.has(preferred);
+    if (preferred != null && !preferredPresent && this._selectedDevice) {
       console.warn(
-        `[midi] selected device "${selected}" disconnected — falling back to all devices`,
+        `[midi] selected input "${preferred}" is not connected — listening to all inputs until it returns`,
       );
-      this._selectedDevice = null;
-      for (const input of this.access.inputs.values()) {
-        input.onmidimessage = (e) => this._onMessage(e);
-      }
+    }
+    this._selectedDevice = preferredPresent ? preferred : null;
+    const selected = this._selectedDevice;
+    for (const input of inputs) {
+      // Re-assigning .onmidimessage is idempotent — replaces any prior handler.
+      input.onmidimessage =
+        selected && input.id !== selected ? null : (e) => this._onMessage(e);
     }
     this._announce();
     this._emit("devicechange", { devices: this.getDevices() });
   }
 
+  _resetControllers() {
+    if (this._sustainDown) {
+      this._sustainDown = false;
+      this._emit("sustain", { down: false });
+    }
+    if (this._modWheel !== 0) {
+      this._modWheel = 0;
+      this._emit("modwheel", { value: 0 });
+    }
+  }
+
   _announce() {
+    this._transientStatus = false;
     const inputs = this.access ? [...this.access.inputs.values()] : [];
     if (inputs.length === 0) {
       this.onStatus({
@@ -780,6 +953,12 @@ export class MidiBridge {
         title: `Connected MIDI input${inputs.length === 1 ? "" : "s"}: ${names}`,
       });
     }
+  }
+
+  /** Show a one-off pill message; the next note that sounds restores it. */
+  _showTransientStatus(status) {
+    this._transientStatus = true;
+    this.onStatus(status);
   }
 
   _onMessage(e) {
@@ -815,9 +994,24 @@ export class MidiBridge {
       console.warn("[midi] unknown preset:", presetKey);
       return;
     }
+    // While a WAV export renders, getAudioContext() is the offline context:
+    // a note played now would be inaudible and baked into the file at an
+    // arbitrary position.
+    if (isExportRunning()) {
+      if (!this._exportNoticeShown) {
+        this._exportNoticeShown = true;
+        this._showTransientStatus({
+          ok: null,
+          msg: "MIDI paused",
+          title: "Live MIDI is paused while a WAV export is rendering.",
+        });
+      }
+      return;
+    }
+    this._exportNoticeShown = false;
     const ctx = getAudioContext();
     if (!ctx || ctx.state !== "running") {
-      this.onStatus({
+      this._showTransientStatus({
         ok: null,
         msg: "MIDI needs audio",
         title: "Click the page once to enable audio for live MIDI.",
@@ -829,9 +1023,23 @@ export class MidiBridge {
     // Apply octave shift (clamped to valid MIDI range 0–127).
     const midi = Math.max(0, Math.min(127, midiRaw + this._octaveShift * 12));
 
-    // Duration — sustain pedal extends by 3×.
+    // Duration — sustain pedal extends by 3×, unless too many live voices
+    // are already sounding (see liveHoldSeconds).
     const baseDuration = preset.duration ?? 0.5;
-    const duration = this._sustainDown ? baseDuration * 3 : baseDuration;
+    this._liveVoiceEnds = this._liveVoiceEnds.filter((end) => end > now);
+    const activeVoices = this._liveVoiceEnds.length;
+    const duration = liveHoldSeconds(
+      baseDuration,
+      this._sustainDown,
+      activeVoices,
+    );
+    const overloaded = activeVoices >= LIVE_VOICE_HARD_LIMIT;
+    if (overloaded && !this._voiceOverload) {
+      console.warn(
+        `[midi] ${activeVoices} live voices are sounding — new notes are shortened until some have decayed`,
+      );
+    }
+    this._voiceOverload = overloaded;
 
     // Apply velocity curve.
     let vel = velocity;
@@ -842,24 +1050,30 @@ export class MidiBridge {
     if (preset.drumMap) {
       const s = preset.drumMap[midi];
       if (!s) return; // out-of-range key on a drum preset
-      if (!getSound(s) && !this._warnedSounds.has(s)) {
-        this._warnedSounds.add(s);
-        console.warn(
-          `[midi] preset "${presetKey}" → drum sound "${s}" not loaded. ` +
-            `Run strasbeat.findSounds("${s}") to look for alternatives.`,
-        );
+      if (!getSound(s)) {
+        // Warn once per sound, but skip the note every time: superdough
+        // throws for a sound that is not loaded.
+        if (!this._warnedSounds.has(s)) {
+          this._warnedSounds.add(s);
+          console.warn(
+            `[midi] preset "${presetKey}" → drum sound "${s}" not loaded. ` +
+              `Run strasbeat.findSounds("${s}") to look for alternatives.`,
+          );
+        }
         return;
       }
       value = { s, gain: this._volume * (0.5 + vel * 0.5) };
     } else {
-      if (!getSound(preset.s) && !this._warnedSounds.has(preset.s)) {
-        this._warnedSounds.add(preset.s);
-        console.warn(
-          `[midi] preset "${presetKey}" uses sound "${preset.s}" which is ` +
-            `not in the loaded soundMap. Try strasbeat.findSounds("${preset.s.replace(/^gm_/, "")}") ` +
-            `in the console to find a registered alternative.`,
-        );
-        this.onStatus({
+      if (!getSound(preset.s)) {
+        if (!this._warnedSounds.has(preset.s)) {
+          this._warnedSounds.add(preset.s);
+          console.warn(
+            `[midi] preset "${presetKey}" uses sound "${preset.s}" which is ` +
+              `not in the loaded soundMap. Try strasbeat.findSounds("${preset.s.replace(/^gm_/, "")}") ` +
+              `in the console to find a registered alternative.`,
+          );
+        }
+        this._showTransientStatus({
           ok: false,
           msg: "MIDI preset unavailable",
           title: `MIDI preset "${presetKey}" could not load sound "${preset.s}".`,
@@ -890,14 +1104,15 @@ export class MidiBridge {
         if (overrides.lpf != null) value.lpf = overrides.lpf;
       }
 
-      // Mod wheel (CC1) → LPF: exponential curve 200 Hz–20 kHz.
-      // The mod wheel can only close the filter (never open beyond preset).
-      if (this._modWheel < 127) {
-        const modWheelLpf = 200 * Math.pow(100, this._modWheel / 127);
-        const presetLpf = value.lpf ?? 20000;
-        value.lpf = Math.min(presetLpf, modWheelLpf);
-      }
+      // Mod wheel (CC1) closes the filter; at rest it leaves the note alone.
+      const lpf = liveNoteLpf(value.lpf, this._modWheel);
+      if (lpf != null) value.lpf = lpf;
     }
+
+    // The note is going to sound: drop any one-off pill message ("needs
+    // audio", "preset unavailable", …) that no longer applies.
+    if (this._transientStatus) this._announce();
+    this._liveVoiceEnds.push(now + duration + (preset.release ?? 0.1));
 
     // 10ms latency cushion so the note schedules slightly in the future —
     // strictly required, superdough warns and skips events scheduled in the
@@ -966,8 +1181,11 @@ export class MidiBridge {
     const preset = presets[presetKey];
     const sound = preset?.s ?? "sawtooth";
 
+    // A drum-pad preset has no single `s`: each key plays its own sample, so
+    // the capture is written as a drum pattern with those same sounds.
     const input = captureBufferToTranslationInput(this.captureBuffer, {
       presetName: presetKey,
+      ...(preset?.drumMap && { drumMap: preset.drumMap }),
     });
     // If metronome was enabled, use its BPM as the capture BPM.
     if (opts.bpmHint) input.bpm = opts.bpmHint;
