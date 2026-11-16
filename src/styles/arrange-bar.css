@@ -388,19 +388,32 @@
 
 /* Progress fill and playhead — no transition: the rAF tick already updates
    at 60Hz, and a transition would visibly lag the scheduler position. */
+/* The fill and the dot's carrier span the whole strip and sit one full
+   width to the left; arrange-bar.js slides them in by transform, so the
+   playhead costs no layout. The strip's overflow clips the hidden part. */
 .arrange-bar__progress {
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
+  inset: 0;
   background: color-mix(in oklch, var(--accent) 14%, transparent);
   pointer-events: none;
   z-index: 2;
+  transform: translateX(-100%);
+  will-change: transform;
+}
+
+.arrange-bar__dot-carrier {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  transform: translateX(-100%);
+  will-change: transform;
 }
 
 .arrange-bar__dot {
   position: absolute;
   top: 50%;
-  left: 0;
+  left: 100%;
   width: 9px;
   height: 9px;
   margin-top: -4.5px;

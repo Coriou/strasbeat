@@ -11,14 +11,29 @@
 //
 // Palette color assignment uses the label's index in source order
 // (PALETTE[i % PALETTE.length]). The piano roll derives its color the same
-// way, from the same parseLabels array — `PALETTE[labels.indexOf(label) %
-// PALETTE.length]` at piano-roll.js:411 — so the two agree by construction,
-// not by coincidence. colorForKey's insertion-order Map is only the piano
-// roll's fallback for haps it cannot attribute to a label at all.
+// way, from parseLabels of the evaluated code — `PALETTE[labels.indexOf(label)
+// % PALETTE.length]` in piano-roll.js's hapInfo — so the two agree by
+// construction, not by coincidence. colorForKey's insertion-order Map is only
+// the piano roll's fallback for haps it cannot attribute to a label at all.
 
 import { parseLabels, toggleMute, toggleSolo } from "../editor/track-labels.js";
 import { diffChanges } from "../editor/text-diff.js";
 import { PALETTE } from "./palette.js";
+
+/**
+ * Everything a track entry renders, as one comparable string. Source offsets
+ * are deliberately not part of it: they move with every edit above the
+ * track without changing how the entry looks or what its click does.
+ */
+export function entrySignature(label) {
+  return [
+    label.displayName,
+    label.muted ? 1 : 0,
+    label.soloed ? 1 : 0,
+    label.soloSuppressed ? 1 : 0,
+    label.duplicate ? 1 : 0,
+  ].join("\u0001");
+}
 
 export function mountTrackBar({
   container,
@@ -31,6 +46,11 @@ export function mountTrackBar({
   // deduped by the offending set — otherwise a single bad file would spam the
   // console once per keystroke. Reset when the names stop colliding.
   let warnedDuplicates = "";
+
+  // The entries container once built, and one signature per rendered entry
+  // (same order as its children).
+  let entriesEl = null;
+  let signatures = [];
 
   function rebuild() {
     const code = view.state.doc.toString();
@@ -49,36 +69,47 @@ export function mountTrackBar({
       }
     }
 
-    // Clear previous children without innerHTML to avoid unnecessary reflow.
-    while (container.firstChild) container.removeChild(container.firstChild);
-
     if (labels.length === 0) {
-      container.hidden = true;
+      // Nothing to show, and usually nothing was showing: don't touch the DOM.
+      if (entriesEl) {
+        while (container.firstChild) container.removeChild(container.firstChild);
+        entriesEl = null;
+        signatures = [];
+      }
+      if (!container.hidden) container.hidden = true;
       return;
     }
 
-    container.hidden = false;
+    if (container.hidden) container.hidden = false;
 
-    const meta = document.createElement("div");
-    meta.className = "track-bar__meta";
+    if (!entriesEl) {
+      const meta = document.createElement("div");
+      meta.className = "track-bar__meta";
 
-    const title = document.createElement("span");
-    title.className = "track-bar__title";
-    title.textContent = "Tracks";
+      const title = document.createElement("span");
+      title.className = "track-bar__title";
+      title.textContent = "Tracks";
 
-    const hint = document.createElement("span");
-    hint.className = "track-bar__hint";
-    hint.textContent = "Click to mute · Shift\u2011click to solo";
+      const hint = document.createElement("span");
+      hint.className = "track-bar__hint";
+      hint.textContent = "Click to mute · Shift\u2011click to solo";
 
-    meta.append(title, hint);
-    container.appendChild(meta);
+      meta.append(title, hint);
+      container.appendChild(meta);
 
-    const entries = document.createElement("div");
-    entries.className = "track-bar__entries";
-    container.appendChild(entries);
+      entriesEl = document.createElement("div");
+      entriesEl.className = "track-bar__entries";
+      container.appendChild(entriesEl);
+    }
+    const entries = entriesEl;
 
+    // Most edits leave every track as it was. An entry is rebuilt only when
+    // something it shows changed; its colour follows its position, and its
+    // click handler looks the track up by name, so neither needs more.
     for (let i = 0; i < labels.length; i++) {
       const label = labels[i];
+      const signature = entrySignature(label);
+      if (signatures[i] === signature) continue;
       const color = PALETTE[i % PALETTE.length];
       const displayName = label.displayName;
 
@@ -164,8 +195,13 @@ export function mountTrackBar({
         }
       });
 
-      entries.appendChild(btn);
+      const prev = entries.children[i];
+      if (prev) entries.replaceChild(btn, prev);
+      else entries.appendChild(btn);
+      signatures[i] = signature;
     }
+    while (entries.children.length > labels.length) entries.lastChild.remove();
+    signatures.length = labels.length;
   }
 
   // Initial render from whatever is already in the editor.

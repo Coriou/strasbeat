@@ -86,25 +86,21 @@ export function mountArrangeBar({
     // surprised.
     const trackLabels = parseLabels(code);
 
-    while (container.firstChild) container.removeChild(container.firstChild);
-    rows = [];
-
-    if (sourceEntries.length === 0) {
-      container.hidden = true;
-      stopRaf();
-      return;
-    }
-
-    container.hidden = false;
-
     // When there's more than one arrangement we annotate each with its
     // source line — otherwise the bare "Arrangement" title reads cleaner.
     const showLineNumbers = sourceEntries.length > 1;
+    const soloKey = getSoloKey();
 
+    // This runs on every keystroke, and almost every keystroke leaves the
+    // strip looking exactly as it did (only source offsets moved). So each
+    // row is described by a signature of everything it renders; a row whose
+    // signature is unchanged keeps its DOM and just adopts the fresh entry
+    // (click targets and the playhead read offsets and cycles from it).
+    const specs = [];
     for (let i = 0; i < sourceEntries.length; i++) {
       const entry = sourceEntries[i];
       if (!entry.sections || entry.sections.length === 0) continue;
-      const row = buildRow({
+      const spec = {
         entry,
         arrangeIndex: i,
         usingParser,
@@ -112,26 +108,50 @@ export function mountArrangeBar({
         showLineNumber: showLineNumbers,
         trailingTransform: resolveTrailingTransform(code, entry, parsedArrangements, i),
         mutedByTrack: isInsideMutedTrack(entry, trackLabels, code, parsedArrangements, i),
-      });
-      rows.push(row);
-      container.appendChild(row.el);
+      };
+      spec.signature = rowSignature(spec, soloKey);
+      specs.push(spec);
     }
 
-    if (rows.length === 0) {
-      container.hidden = true;
+    if (specs.length === 0) {
+      if (rows.length > 0) {
+        while (container.firstChild) container.removeChild(container.firstChild);
+        rows = [];
+      }
+      if (!container.hidden) container.hidden = true;
       stopRaf();
       return;
     }
 
+    const nextRows = [];
+    for (let i = 0; i < specs.length; i++) {
+      const spec = specs[i];
+      const prev = rows[i];
+      if (prev && prev.signature === spec.signature) {
+        prev.entry = spec.entry;
+        nextRows.push(prev);
+        continue;
+      }
+      const row = buildRow(spec);
+      if (prev) container.replaceChild(row.el, prev.el);
+      else container.appendChild(row.el);
+      nextRows.push(row);
+    }
+    for (let i = specs.length; i < rows.length; i++) rows[i].el.remove();
+    rows = nextRows;
+
+    if (container.hidden) container.hidden = false;
+
     // Dense mode kicks in past 4 arrangements — the cap on max-height
     // forces scrolling anyway, but in dense mode each row is slimmer so
     // more of them are visible before the user has to scroll.
-    container.dataset.density = rows.length > 4 ? "dense" : "normal";
+    const density = rows.length > 4 ? "dense" : "normal";
+    if (container.dataset.density !== density) container.dataset.density = density;
 
-    startRaf();
+    if (getScheduler()?.started) startRaf();
   }
 
-  function buildRow({ entry, arrangeIndex, usingParser, previewReason, showLineNumber, trailingTransform, mutedByTrack }) {
+  function buildRow({ entry, arrangeIndex, usingParser, previewReason, showLineNumber, trailingTransform, mutedByTrack, signature }) {
     const rowEl = document.createElement("div");
     rowEl.className = "arrange-bar__row";
     if (usingParser) rowEl.classList.add("arrange-bar__row--preview");
@@ -187,7 +207,25 @@ export function mountArrangeBar({
     sectionsHost.className = "arrange-bar__sections";
     strip.appendChild(sectionsHost);
 
-    const segmentEls = [];
+    // Created before the segments so their click handlers can read the
+    // row's *current* entry: an unchanged row outlives the entry it was
+    // built from (see rebuild), and source offsets move with every edit.
+    const row = {
+      el: rowEl,
+      signature,
+      entry,
+      arrangeIndex,
+      segmentEls: [],
+      progressEl: null,
+      dotEl: null,
+      currentEl: current,
+      usingParser,
+      mutedByTrack,
+      lastIndex: -1,
+      lastPctKey: 0,
+      lastCurrentLabel: null,
+    };
+    const segmentEls = row.segmentEls;
     const soloKey = getSoloKey();
     const hasSolo = !!soloKey && soloKey.arrangeIndex === arrangeIndex;
 
@@ -197,6 +235,7 @@ export function mountArrangeBar({
       const isDimmedBySolo = hasSolo && !isSoloed;
 
       const segEl = buildSegment({
+        row,
         section,
         sectionIndex: i,
         arrangeIndex,
@@ -213,30 +252,25 @@ export function mountArrangeBar({
     progress.setAttribute("aria-hidden", "true");
     strip.appendChild(progress);
 
+    // The dot rides the right edge of a strip-wide carrier; both it and the
+    // progress fill move by transform (see setRowProgress), never by layout.
+    const carrier = document.createElement("div");
+    carrier.className = "arrange-bar__dot-carrier";
+    carrier.setAttribute("aria-hidden", "true");
     const dot = document.createElement("div");
     dot.className = "arrange-bar__dot";
-    dot.setAttribute("aria-hidden", "true");
-    strip.appendChild(dot);
+    carrier.appendChild(dot);
+    strip.appendChild(carrier);
 
     rowEl.appendChild(strip);
 
-    return {
-      el: rowEl,
-      entry,
-      arrangeIndex,
-      segmentEls,
-      progressEl: progress,
-      dotEl: dot,
-      currentEl: current,
-      usingParser,
-      mutedByTrack,
-      lastIndex: -1,
-      lastPctKey: -1,
-      lastCurrentLabel: null,
-    };
+    row.progressEl = progress;
+    row.dotEl = carrier;
+    return row;
   }
 
   function buildSegment({
+    row,
     section,
     sectionIndex,
     arrangeIndex,
@@ -272,10 +306,11 @@ export function mountArrangeBar({
     // dedicated controls so the segment-wide click stays predictable.
     btn.addEventListener("click", (e) => {
       if (e.target.closest(".arrange-bar__solo-btn, .arrange-bar__solo-pill")) return;
-      if (typeof section.sourceStart === "number") {
+      const sourceStart = row.entry.sections[sectionIndex]?.sourceStart;
+      if (typeof sourceStart === "number") {
         try {
           view.dispatch({
-            selection: { anchor: section.sourceStart },
+            selection: { anchor: sourceStart },
             scrollIntoView: true,
           });
           view.focus?.();
@@ -348,35 +383,30 @@ export function mountArrangeBar({
     }
   }
 
+  // The playhead loop runs only while the scheduler does. Stopped, it parks
+  // every row once and ends; it is started again by a rebuild (each evaluate
+  // triggers one through the registry) or by the playback state turning to
+  // "playing" (see the observer in the wiring below).
   function tick() {
-    if (rows.length === 0) {
-      raf = null;
+    raf = null;
+    if (rows.length === 0) return;
+    const sched = getScheduler();
+    if (!sched?.started) {
+      for (const row of rows) resetRowPlayhead(row);
       return;
     }
-    const sched = getScheduler();
-    const started = !!sched?.started;
-    const cycle = started && typeof sched.now === "function" ? sched.now() : 0;
+    const cycle = typeof sched.now === "function" ? sched.now() : 0;
 
     for (const row of rows) {
       if (row.usingParser || row.mutedByTrack) {
         resetRowPlayhead(row);
         continue;
       }
-      const located = started
-        ? locatePlayhead(
-            { totalCycles: row.entry.totalCycles, sections: row.entry.sections },
-            cycle,
-          )
-        : null;
+      const located = locatePlayhead(row.entry, cycle);
 
       if (located) {
         const pctKey = Math.round(located.totalProgress * 1000);
-        if (pctKey !== row.lastPctKey) {
-          row.lastPctKey = pctKey;
-          const pct = pctKey / 10;
-          row.progressEl.style.width = `${pct}%`;
-          row.dotEl.style.left = `${pct}%`;
-        }
+        if (pctKey !== row.lastPctKey) setRowProgress(row, pctKey);
         if (located.index !== row.lastIndex) {
           if (row.lastIndex >= 0 && row.segmentEls[row.lastIndex]) {
             row.segmentEls[row.lastIndex].classList.remove("is-active");
@@ -398,12 +428,18 @@ export function mountArrangeBar({
     raf = requestAnimationFrame(tick);
   }
 
+  // pctKey is progress in tenths of a percent. Both elements are as wide
+  // as the strip and start one full width to the left (arrange-bar.css), so
+  // the same translate moves the fill's right edge and the dot together.
+  function setRowProgress(row, pctKey) {
+    row.lastPctKey = pctKey;
+    const slide = pctKey === 0 ? "" : `translateX(${(pctKey / 10 - 100).toFixed(1)}%)`;
+    row.progressEl.style.transform = slide;
+    row.dotEl.style.transform = slide;
+  }
+
   function resetRowPlayhead(row) {
-    if (row.lastPctKey !== 0) {
-      row.lastPctKey = 0;
-      row.progressEl.style.width = "0%";
-      row.dotEl.style.left = "0%";
-    }
+    if (row.lastPctKey !== 0) setRowProgress(row, 0);
     if (row.lastIndex !== -1) {
       if (row.segmentEls[row.lastIndex]) {
         row.segmentEls[row.lastIndex].classList.remove("is-active");
@@ -456,12 +492,59 @@ export function mountArrangeBar({
     else scheduleRebuild();
   });
 
+  // Playback starting is what sets the playheads moving. The transport
+  // mirrors its state onto an ancestor as `data-playback` (the same hook
+  // arrange-bar.css dims the parked playhead with), so watch that attribute
+  // instead of keeping a frame loop alive to notice.
+  const playbackRoot = container.closest?.("[data-playback]");
+  if (playbackRoot && typeof MutationObserver !== "undefined") {
+    new MutationObserver(() => {
+      if (playbackRoot.dataset.playback === "playing" && rows.length > 0) {
+        startRaf();
+      }
+    }).observe(playbackRoot, {
+      attributes: true,
+      attributeFilter: ["data-playback"],
+    });
+  } else {
+    console.warn(
+      "[strasbeat/arrange-bar] no [data-playback] ancestor — the playhead will only follow playback after an evaluate",
+    );
+  }
+
   // Initial render (subscribeRegistry already called fn once above; this
   // is belt-and-braces for the pre-subscribe synchronous path).
   rebuild();
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Everything a row renders, as one comparable string — and nothing it does
+ * not: source offsets are left out on purpose, since they shift with every
+ * edit above the arrangement without changing a pixel.
+ *
+ * @param {object} spec  the arguments buildRow() receives
+ * @param {{ arrangeIndex: number, sectionIndex: number } | null} soloKey
+ */
+export function rowSignature(spec, soloKey) {
+  const { entry, arrangeIndex, trailingTransform } = spec;
+  const solo =
+    soloKey && soloKey.arrangeIndex === arrangeIndex ? soloKey.sectionIndex : -1;
+  const parts = [
+    arrangeIndex,
+    spec.usingParser ? spec.previewReason : "",
+    spec.mutedByTrack ? 1 : 0,
+    spec.showLineNumber ? entry.sourceLine : "",
+    trailingTransform ? `${trailingTransform.method}(${trailingTransform.argText})` : "",
+    entry.totalCycles,
+    solo,
+  ];
+  for (const section of entry.sections) {
+    parts.push(section.cycles, section.label ?? "");
+  }
+  return parts.join("\u0001");
+}
 
 function fromParsed(parsed) {
   // Wrap the parser output in the same shape as a registry entry so the
