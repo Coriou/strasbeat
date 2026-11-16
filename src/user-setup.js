@@ -15,6 +15,8 @@
 //   deleteUserSampleBank(name: string) → Promise<void>
 //   deleteAllUserSamples() → Promise<void>
 
+import { Pattern, logger } from "@strudel/core";
+
 const PACKAGES_KEY = "strasbeat:enabled-packages";
 const SCRIPT_KEY = "strasbeat:setup-script";
 const MIDI_OUTPUT_KEY = "strasbeat:midi-output-device";
@@ -23,20 +25,201 @@ const IDB_VERSION = 1;
 const IDB_STORE = "banks";
 
 // ─── MIDI output state (populated after @strudel/midi loads) ────────────
+//
+//   off          @strudel/midi is not loaded
+//   idle         loaded, but MIDI access has not been granted yet — the MIDI
+//                bar offers an "Enable" button (see enableMidiOutput)
+//   enabling     waiting on the browser (possibly on its permission prompt)
+//   ready        WebMidi is enabled; getMidiOutputs() is live
+//   blocked      the browser refused access — the MIDI bar offers "Retry"
+//   unsupported  this browser has no Web MIDI
 
 let _midiOutputModule = null; // { WebMidi, enableWebMidi }
-let _midiOutputReady = false;
+let _midiOutputState = "off";
+let _midiOutputEnabling = null;
 const _midiOutputListeners = new Set();
+
+/** @returns {'off'|'idle'|'enabling'|'ready'|'blocked'|'unsupported'} */
+export function getMidiOutputState() {
+  return _midiOutputState;
+}
+
+function _setMidiOutputState(state) {
+  _midiOutputState = state;
+  _notifyMidiOutputListeners();
+}
 
 /** Whether @strudel/midi has been loaded and WebMidi enabled. */
 export function isMidiOutputReady() {
-  return _midiOutputReady;
+  return _midiOutputState === "ready";
 }
 
 /** Returns WebMidi.outputs array, or [] if not ready. */
 export function getMidiOutputs() {
-  if (!_midiOutputReady || !_midiOutputModule) return [];
+  if (_midiOutputState !== "ready" || !_midiOutputModule) return [];
   return Array.from(_midiOutputModule.WebMidi.outputs ?? []);
+}
+
+/**
+ * Ask the browser for MIDI output access (with sysex, which is what
+ * @strudel/midi requests) and enable WebMidi. May show a permission prompt,
+ * so outside of boot it is called from a user gesture: the MIDI bar's
+ * Enable / Retry button, or evaluating a pattern that calls `.midi()`.
+ * Never rejects — the outcome is the state, which listeners are told about.
+ *
+ * @returns {Promise<boolean>} whether output is ready
+ */
+export function enableMidiOutput() {
+  const mod = _midiOutputModule;
+  if (!mod) return Promise.resolve(false);
+  if (_midiOutputState === "ready") return Promise.resolve(true);
+  if (_midiOutputEnabling) return _midiOutputEnabling;
+  if (typeof navigator.requestMIDIAccess !== "function") {
+    _setMidiOutputState("unsupported");
+    return Promise.resolve(false);
+  }
+  _setMidiOutputState("enabling");
+  _midiOutputEnabling = (async () => {
+    try {
+      await mod.enableWebMidi({
+        onConnected: _notifyMidiOutputListeners,
+        onDisconnected: _notifyMidiOutputListeners,
+      });
+      if (!mod.WebMidi.enabled) throw new Error("WebMidi did not enable");
+      _midiOutputState = "ready";
+      const outputs = Array.from(mod.WebMidi.outputs ?? []);
+      console.log(
+        `[user-setup] WebMidi enabled, ${outputs.length} output(s):`,
+        outputs.map((o) => o.name).join(", ") || "(none)",
+      );
+      return true;
+    } catch (err) {
+      console.warn("[user-setup] MIDI output could not be enabled:", err);
+      _midiOutputState = "blocked";
+      return false;
+    } finally {
+      _midiOutputEnabling = null;
+      _notifyMidiOutputListeners();
+    }
+  })();
+  return _midiOutputEnabling;
+}
+
+// Boot-time counterpart of enableMidiOutput(): enable straight away only when
+// the permission is already held, so loading the page never raises a
+// permission prompt on its own.
+async function _enableMidiOutputIfPermitted() {
+  if (typeof navigator.requestMIDIAccess !== "function") {
+    _setMidiOutputState("unsupported");
+    return;
+  }
+  let permission = null;
+  try {
+    permission = await navigator.permissions?.query({
+      name: "midi",
+      sysex: true,
+    });
+  } catch {
+    // Permissions API cannot answer for MIDI here — wait for a click.
+  }
+  if (permission?.state === "granted") {
+    await enableMidiOutput();
+  } else {
+    _setMidiOutputState(permission?.state === "denied" ? "blocked" : "idle");
+  }
+}
+
+/**
+ * Which output a bare `.midi()` should use: the device picked in the MIDI
+ * bar when it is connected, otherwise upstream's own default (the first IAC
+ * bus, else the first output). `missing` is true when a picked device had to
+ * be replaced.
+ *
+ * @param {string} stored  persisted device name ("" when never picked)
+ * @param {string[]} outputNames  currently connected output names
+ * @returns {{ name: string | undefined, missing: boolean }}
+ */
+export function resolveMidiOutputName(stored, outputNames) {
+  if (stored && outputNames.includes(stored)) {
+    return { name: stored, missing: false };
+  }
+  // Not enabled yet, so the device list is unknown: trust the stored name.
+  if (outputNames.length === 0) {
+    return { name: stored || undefined, missing: false };
+  }
+  const fallback = outputNames.find((n) => n.includes("IAC")) ?? outputNames[0];
+  return { name: fallback, missing: !!stored };
+}
+
+/**
+ * Make the MIDI bar's output selector real.
+ *
+ * Upstream `.midi(port)` resolves its device from the `port` argument alone
+ * (default: first IAC bus, else first output) and exposes no setter for that
+ * default, so the only place to apply the user's choice is the call itself:
+ * this wraps `Pattern.prototype.midi` so that a call WITHOUT a port —
+ * `.midi()` or `.midi({ midichannel: 2 })` — gets the selected device name as
+ * its port. A call that names a port (`.midi('IAC')`, `.midi(1)`,
+ * `.midi({ port })`) is passed through untouched.
+ *
+ * The device is resolved when the pattern is evaluated, so a new selection
+ * applies from the next evaluate.
+ *
+ * @param {{ prototype: { midi: Function } }} PatternClass
+ * @param {{ resolve: () => { name: string | undefined, missing: boolean, stored?: string }, onMissing?: (stored: string, fallback: string) => void, onCall?: () => void }} hooks
+ */
+export function installMidiOutputDefault(PatternClass, hooks) {
+  const upstreamMidi = PatternClass.prototype.midi;
+  if (typeof upstreamMidi !== "function" || upstreamMidi._strasbeatDefault) {
+    return;
+  }
+  function midi(midiport, options) {
+    hooks.onCall?.();
+    const isOptionsObject =
+      midiport !== null &&
+      typeof midiport === "object" &&
+      // a Pattern here is the double-quoted-string mistake; upstream has a
+      // clear error for it
+      midiport._Pattern !== true;
+    const namesPort =
+      midiport !== undefined && !(isOptionsObject && midiport.port == null);
+    if (!namesPort) {
+      const { name, missing, stored } = hooks.resolve();
+      if (missing) hooks.onMissing?.(stored, name);
+      if (name !== undefined) {
+        midiport = isOptionsObject ? { ...midiport, port: name } : name;
+      }
+    }
+    return options === undefined
+      ? upstreamMidi.call(this, midiport)
+      : upstreamMidi.call(this, midiport, options);
+  }
+  midi._strasbeatDefault = true;
+  PatternClass.prototype.midi = midi;
+}
+
+const _warnedMissingOutputs = new Set();
+
+function _installSelectedOutputDefault() {
+  installMidiOutputDefault(Pattern, {
+    // Evaluating a pattern is a user gesture, and upstream enables WebMidi
+    // from `.midi()` itself — keep our state (and the MIDI bar) in step.
+    onCall: () => {
+      if (_midiOutputState !== "ready") enableMidiOutput();
+    },
+    resolve: () => {
+      const stored = getMidiOutputDevice();
+      const names = getMidiOutputs().map((o) => o.name);
+      return { ...resolveMidiOutputName(stored, names), stored };
+    },
+    onMissing: (stored, fallback) => {
+      if (_warnedMissingOutputs.has(stored)) return;
+      _warnedMissingOutputs.add(stored);
+      const msg = `[midi] selected output "${stored}" is not connected — .midi() is sending to "${fallback}" instead. Pick an output in the MIDI bar.`;
+      console.warn(msg);
+      logger(msg, "warning");
+    },
+  });
 }
 
 /** Get the persisted MIDI output device name. */
@@ -51,6 +234,8 @@ export function setMidiOutputDevice(name) {
   } else {
     localStorage.removeItem(MIDI_OUTPUT_KEY);
   }
+  // A fresh choice gets a fresh "not connected" warning if it ever goes away.
+  _warnedMissingOutputs.clear();
   _notifyMidiOutputListeners();
 }
 
@@ -212,29 +397,13 @@ export async function runUserSetup({ evalScope, samples }) {
           await evalScope(mod);
           console.log(`[user-setup] loaded ${id}`);
 
-          // Proactively enable WebMidi when @strudel/midi loads so the
-          // output device selector can be populated immediately.
+          // When @strudel/midi loads: route bare `.midi()` calls to the
+          // device picked in the MIDI bar, and enable WebMidi right away if
+          // the permission is already held so the selector is populated.
           if (id === "midi" && mod.enableWebMidi && mod.WebMidi) {
             _midiOutputModule = mod;
-            try {
-              await mod.enableWebMidi({
-                onConnected: () => {
-                  _notifyMidiOutputListeners();
-                },
-                onDisconnected: () => {
-                  _notifyMidiOutputListeners();
-                },
-              });
-              _midiOutputReady = true;
-              _notifyMidiOutputListeners();
-              const outputs = Array.from(mod.WebMidi.outputs ?? []);
-              console.log(
-                `[user-setup] WebMidi enabled, ${outputs.length} output(s):`,
-                outputs.map((o) => o.name).join(", ") || "(none)",
-              );
-            } catch (err) {
-              console.warn("[user-setup] enableWebMidi failed:", err);
-            }
+            _installSelectedOutputDefault();
+            await _enableMidiOutputIfPermitted();
           }
         }
         return mod;
