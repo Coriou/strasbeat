@@ -1,4 +1,97 @@
 {
+  "arrange": {
+    "signature": "arrange(sections: ...Array)",
+    "doc": "Allows to arrange multiple patterns together over multiple cycles. Takes a variable number of arrays with two elements specifying the number of cycles and the pattern to use. strasbeat instruments this call so the arrangement timeline strip can show section names and a playhead — audible output is identical to upstream Strudel's arrange.",
+    "params": [
+      {
+        "name": "sections",
+        "type": "...Array",
+        "doc": "`[cycles, pattern]` tuples"
+      }
+    ],
+    "examples": [
+      "arrange(\n  [4, \"<c a f e>(3,8)\"],\n  [2, \"<g a>(5,8)\"]\n).note()"
+    ]
+  },
+  "initHydra": {
+    "signature": "initHydra(options: object)",
+    "doc": "Initialize Hydra visuals into the full-viewport `#hydra-canvas`. Runs fully offline (bundled hydra-synth — never the unpkg CDN). Returns the hydra instance (preserves the upstream/#1784 contract). Re-init with changed options removes the old `#hydra-canvas` first (upstream behavior).  Hydra source chains use Hydra's own functions (osc, noise, …), NOT Strudel mini-notation. Any string passed to a strasbeat helper must be single-quoted (becomes load-bearing for shader('…') in Phase 2). See CLAUDE.md.",
+    "params": [
+      {
+        "name": "options",
+        "type": "object",
+        "doc": "detectAudio (default false — passed to the Hydra constructor to enable mic-reactive sources), contextType (default 'webgl'), pixelRatio (default 1), pixelated (default true), feedStrudel (deferred — only coherent with the full-window increment)."
+      }
+    ],
+    "examples": [
+      "await initHydra()\nosc(10, 0.1, 1.2).color(0.9, 0.3, 0.6).out()"
+    ]
+  },
+  "clearHydra": {
+    "signature": "clearHydra()",
+    "doc": "Stop Hydra, free its WebGL context, remove its canvas, and tell the host. Callable from patterns; the app itself tears down through visuals-host.js (every stop path, every evaluate that no longer asks for Hydra) and on HMR dispose.  This is where the leak is closed. In order:   1. stop OUR render loop  → no orphaned tick survives.   2. hush()                → clears sources/outputs (paints black once).   3. regl.destroy()        → frees all FBOs/textures/programs/buffers AND                              removes regl's own context-loss listeners                              (regl/dist/regl.js:9845).   4. loseContext()         → tells the browser to reclaim the WebGL context                              slot immediately, instead of waiting for GC —                              this is what avoids the ~16-context ceiling that                              force-kills contexts (and the tab) under                              repeated stop→play.   5. remove the canvas + restore the globals hydra-synth overwrote.",
+    "params": [],
+    "examples": []
+  },
+  "H": {
+    "signature": "H(p: Pattern)",
+    "doc": "Guarded value-sampler for driving a Hydra param from a pattern signal. Returns a function that queries the pattern at the current time and yields its active value. Upstream's H() indexes `[0].value` on an empty array and throws the instant the pattern has no active hap — which is most of the time for a sparse pattern, and a throw here crashes the whole render loop. This guard returns the last non-empty value seen (or 0 if none yet). Empty haps are normal, NOT an error, so this does not warn — it just never throws.  Use single quotes when calling H() from a pattern file — Strudel's transpiler rewrites double-quoted strings to mini-notation. See CLAUDE.md.",
+    "params": [
+      {
+        "name": "p",
+        "type": "Pattern",
+        "doc": "any Strudel pattern/signal"
+      }
+    ],
+    "examples": [
+      "osc(10).rotate(H(\"0 0.5 1\"))"
+    ]
+  },
+  "piano": {
+    "signature": "piano()",
+    "doc": "Plays the pattern on the sampled grand piano: selects the `piano` sound, holds each note for its full step (`clip(1)` unless clip is already set), adds a short release, and pans by pitch — low notes to the left, high notes to the right, like sitting at the keyboard.",
+    "params": [],
+    "examples": [
+      "note(\"c3 e3 g3 <b3 c4>\").piano()",
+      "n(\"0 2 4 <6 7>\").scale(\"C4:minor\").piano().room(0.3)"
+    ]
+  },
+  "progression": {
+    "signature": "progression(chords: string, options: object)",
+    "doc": "Turn a one-line chord progression into a playable Strudel pattern.  Accepts absolute chord symbols or Roman numerals (when options.key is set). Voice leading, slash chords, and voicing dictionaries are delegated to strudel/tonal. Returns a real Pattern that chains with .slow(), .gain(), .every(), etc. like any other Strudel source.  Use single quotes in pattern files — the transpiler rewrites double-quoted strings to mini-notation, which silently breaks this function.",
+    "params": [
+      {
+        "name": "chords",
+        "type": "string",
+        "doc": "Space-separated chord symbols or Roman numerals. Each chord lasts one cycle. Per-token modifiers: @N keeps the chord for N cycles (held with the block rhythm; with any other rhythm the figure plays again on each of those cycles), *N plays it N times inside its one cycle (with a rhythm other than block: the rhythm figure runs N times in that cycle)."
+      },
+      {
+        "name": "options",
+        "type": "object",
+        "doc": "sound, dict, rhythm (block/strum/comp/arp-up/arp-down/alberti), bass, style (jazz-comp/pop-pad/lo-fi/folk-strum/piano-bare), key"
+      }
+    ],
+    "examples": [
+      "progression('Cm7 F7 Bb^7 Eb^7')",
+      "progression('ii V I', { key: 'C' })",
+      "progression('C G Am F', { style: 'folk-strum', bass: true })",
+      "progression('Am F C G@2')"
+    ]
+  },
+  "shader": {
+    "signature": "shader(src: string)",
+    "doc": "Compile and render a drop-in fragment shader, with named uniforms driven by the playing pattern's events. Built-in uTime / uResolution are always provided. Auto-uniforms derive from the pattern automatically — type these verbatim into your GLSL:   - drum lanes bd / sd / hh → uKick / uSnare / uHat   - every active sound `name` → u_<name>, with each non-alphanumeric char     replaced by _ and a leading _ so digit-leading names stay legal GLSL     (gm_pad_warm → u_gm_pad_warm, 909-clap → u_909_clap)   - any note/n hap → uKeyVelocity Override/extend any of these with .uniform({ dest, gain }).  SINGLE-QUOTE RULE: the shader source MUST be single-quoted. Strudel's transpiler rewrites every DOUBLE-quoted string literal into a mini(...) call, which would turn your GLSL into a Pattern and break the node. Drum/ note patterns in the same file still use double quotes (correct for s(\"…\")). See CLAUDE.md \"the single-quote rule\".  MULTI-LINE SHADERS: a single-quoted string can't span multiple physical lines, and the transpiler ALSO rewrites backtick template literals into mini(...) — so a `multi-line backtick` source is NOT safe either. Write a readable multi-line shader by concatenating single-quoted lines with '+', each ending in '\\n':   await shader(     'precision mediump float;\\n' +     'uniform float uKick;\\n' +     'void main(){ gl_FragColor = vec4(uKick, 0., 0., 1.); }\\n'   ) Every piece stays single-quoted (none gets mini-rewritten), it parses as plain JS, and the \\n keep GLSL line numbers intact in compile errors.",
+    "params": [
+      {
+        "name": "src",
+        "type": "string",
+        "doc": "single-quoted GLSL fragment shader source (concatenate"
+      }
+    ],
+    "examples": [
+      "await shader('precision mediump float; uniform float uKick; void main(){ gl_FragColor = vec4(uKick,0.,0.,1.); }')"
+    ]
+  },
   "s": {
     "signature": "s(sound: string | Pattern)",
     "doc": "Select a sound / sample by name. When using mininotation, you can also optionally supply 'n' and 'gain' parameters separated by ':'.",
@@ -527,7 +620,7 @@
   },
   "n": {
     "signature": "n(value: number | Pattern)",
-    "doc": "Selects the given index:  - for samples, it picks the sample by index, with wrap around  - for scales, it picks the scale degree  - for voicings, it picks the voice index",
+    "doc": "Selects the given index from the sample map. Numbers too high will wrap around. `n` can also be used to play midi numbers, but it is recommended to use `note` instead.",
     "params": [
       {
         "name": "value",
@@ -539,24 +632,16 @@
       "s(\"bd sd [~ bd] sd,hh*6\").n(\"<0 1>\")"
     ]
   },
-  "i": {
-    "signature": "i(value: number | Pattern)",
-    "doc": "Selects the given degree. Currently used in `xen` and `tune`:",
+  "note": {
+    "signature": "note(value)",
+    "doc": "Plays the given note name or midi number. A note name consists of  - a letter (a-g or A-G) - optional accidentals (b or #) - optional (possibly negative) octave number (0-9). Defaults to 3  Examples of valid note names: `c`, `bb`, `Bb`, `f#`, `c3`, `A4`, `Eb2`, `c#5`  You can also use midi numbers instead of note names, where 69 is mapped to A4 440Hz in 12EDO.",
     "params": [
       {
         "name": "value",
-        "type": "number | Pattern",
+        "type": "",
         "doc": ""
       }
     ],
-    "examples": [
-      "i(\"0 1 2 3 4 5 6 7\").xen(\"<5edo 10edo 15edo hexany15>\")"
-    ]
-  },
-  "note": {
-    "signature": "note()",
-    "doc": "Plays the given note name or midi number. A note name consists of  - a letter (a-g or A-G) - optional accidentals (b or #) - optional (possibly negative) octave number (0-9). Defaults to 3  Examples of valid note names: `c`, `bb`, `Bb`, `f#`, `c3`, `A4`, `Eb2`, `c#5`  You can also use midi numbers instead of note names, where 69 is mapped to A4 440Hz in 12EDO.",
-    "params": [],
     "examples": [
       "note(\"c a f e\")",
       "note(\"c4 a4 f4 e4\")",
@@ -565,17 +650,29 @@
     ]
   },
   "velocity": {
-    "signature": "velocity()",
+    "signature": "velocity(value)",
     "doc": "Sets the velocity from 0 to 1. Is multiplied together with gain.",
-    "params": [],
+    "params": [
+      {
+        "name": "value",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"hh*8\")\n.gain(\".4!2 1 .4!2 1 .4 1\")\n.velocity(\".4 1\")"
     ]
   },
   "vel": {
-    "signature": "vel()",
+    "signature": "vel(value)",
     "doc": "Sets the velocity from 0 to 1. Is multiplied together with gain.",
-    "params": [],
+    "params": [
+      {
+        "name": "value",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"hh*8\")\n.gain(\".4!2 1 .4!2 1 .4 1\")\n.velocity(\".4 1\")"
     ]
@@ -595,11 +692,45 @@
     ]
   },
   "postgain": {
-    "signature": "postgain()",
+    "signature": "postgain(value)",
     "doc": "Gain applied after all effects have been processed.",
-    "params": [],
+    "params": [
+      {
+        "name": "value",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd sd [~ bd] sd,hh*8\")\n.compressor(\"-20:20:10:.002:.02\").postgain(1.5)"
+    ]
+  },
+  "attack": {
+    "signature": "attack(attack: number | Pattern)",
+    "doc": "Amplitude envelope attack time: Specifies how long it takes for the sound to reach its peak value, relative to the onset.",
+    "params": [
+      {
+        "name": "attack",
+        "type": "number | Pattern",
+        "doc": "time in seconds."
+      }
+    ],
+    "examples": [
+      "note(\"c3 e3 f3 g3\").attack(\"<0 .1 .5>\")"
+    ]
+  },
+  "att": {
+    "signature": "att(attack: number | Pattern)",
+    "doc": "Amplitude envelope attack time: Specifies how long it takes for the sound to reach its peak value, relative to the onset.",
+    "params": [
+      {
+        "name": "attack",
+        "type": "number | Pattern",
+        "doc": "time in seconds."
+      }
+    ],
+    "examples": [
+      "note(\"c3 e3 f3 g3\").attack(\"<0 .1 .5>\")"
     ]
   },
   "fmh": {
@@ -648,20 +779,6 @@
   },
   "fmenv": {
     "signature": "fmenv(type: number | Pattern)",
-    "doc": "Ramp type of fm envelope. Exp might be a bit broken..  A number may be added afterwards to control the envelope of any of the 8 individual FMs (e.g. `fmenv4`)",
-    "params": [
-      {
-        "name": "type",
-        "type": "number | Pattern",
-        "doc": "lin | exp"
-      }
-    ],
-    "examples": [
-      "note(\"c e g b g e\")\n.fm(4)\n.fmdecay(.2)\n.fmsustain(0)\n.fmenv(\"<exp lin>\")\n._scope()"
-    ]
-  },
-  "fme": {
-    "signature": "fme(type: number | Pattern)",
     "doc": "Ramp type of fm envelope. Exp might be a bit broken..  A number may be added afterwards to control the envelope of any of the 8 individual FMs (e.g. `fmenv4`)",
     "params": [
       {
@@ -823,34 +940,6 @@
     ],
     "examples": [
       "note(\"d d a# a\").s(\"sawtooth\").chorus(.5)"
-    ]
-  },
-  "attack": {
-    "signature": "attack(attack: number | Pattern)",
-    "doc": "Amplitude envelope attack time: Specifies how long it takes for the sound to reach its peak value, relative to the onset.",
-    "params": [
-      {
-        "name": "attack",
-        "type": "number | Pattern",
-        "doc": "time in seconds."
-      }
-    ],
-    "examples": [
-      "note(\"c3 e3 f3 g3\").attack(\"<0 .1 .5>\")"
-    ]
-  },
-  "att": {
-    "signature": "att(attack: number | Pattern)",
-    "doc": "Amplitude envelope attack time: Specifies how long it takes for the sound to reach its peak value, relative to the onset.",
-    "params": [
-      {
-        "name": "attack",
-        "type": "number | Pattern",
-        "doc": "time in seconds."
-      }
-    ],
-    "examples": [
-      "note(\"c3 e3 f3 g3\").attack(\"<0 .1 .5>\")"
     ]
   },
   "decay": {
@@ -1422,21 +1511,6 @@
       "moreduck: n(run(8)).scale(\"c:minor\").s(\"sawtooth\").delay(.7).orbit(2)\nlessduck: s(\"hh*16\").orbit(5)\nducker: s(\"bd:4!4\").beat(\"0,4,8,11,14\",16).duckorbit(\"2:5\").duckattack(\"0.4:0.1\")"
     ]
   },
-  "datt": {
-    "signature": "datt(time: number | Pattern)",
-    "doc": "The time required for the ducked signal(s) to return to their normal volume.  Can vary across orbits with the ':' mininotation, e.g. `duckonset(\"0:0.003\")`. Note: this requires first applying the effect to multiple orbits with e.g. `duckorbit(\"2:3\")`.",
-    "params": [
-      {
-        "name": "time",
-        "type": "number | Pattern",
-        "doc": "The attack time in seconds"
-      }
-    ],
-    "examples": [
-      "sound: n(run(8)).scale(\"c:minor\").s(\"sawtooth\").delay(.7).orbit(2)\nducker: s(\"bd:4!4\").beat(\"0,4,8,11,14\",16).duckorbit(2).duckattack(\"<0.2 0 0.4>\").duckdepth(1)",
-      "moreduck: n(run(8)).scale(\"c:minor\").s(\"sawtooth\").delay(.7).orbit(2)\nlessduck: s(\"hh*16\").orbit(5)\nducker: s(\"bd:4!4\").beat(\"0,4,8,11,14\",16).duckorbit(\"2:5\").duckattack(\"0.4:0.1\")"
-    ]
-  },
   "byteBeatExpression": {
     "signature": "byteBeatExpression(byteBeatExpression: number | Pattern)",
     "doc": "Create byte beats with custom expressions",
@@ -1453,20 +1527,6 @@
   },
   "bbexpr": {
     "signature": "bbexpr(byteBeatExpression: number | Pattern)",
-    "doc": "Create byte beats with custom expressions",
-    "params": [
-      {
-        "name": "byteBeatExpression",
-        "type": "number | Pattern",
-        "doc": "bitwise expression for creating bytebeat"
-      }
-    ],
-    "examples": [
-      "s(\"bytebeat\").bbexpr('t*(t>>15^t>>66)')"
-    ]
-  },
-  "bb": {
-    "signature": "bb(byteBeatExpression: number | Pattern)",
     "doc": "Create byte beats with custom expressions",
     "params": [
       {
@@ -1564,36 +1624,8 @@
       "n(run(8)).scale(\"D:pentatonic\").s(\"pulse\").pw(\"0.5\").pwrate(\"<5 .1 25>\").pwsweep(\"<0.3 .8>\")"
     ]
   },
-  "pwr": {
-    "signature": "pwr(rate: number | Pattern)",
-    "doc": "Controls the lfo rate for the pulsewidth of the pulse oscillator",
-    "params": [
-      {
-        "name": "rate",
-        "type": "number | Pattern",
-        "doc": ""
-      }
-    ],
-    "examples": [
-      "n(run(8)).scale(\"D:pentatonic\").s(\"pulse\").pw(\"0.5\").pwrate(\"<5 .1 25>\").pwsweep(\"<0.3 .8>\")"
-    ]
-  },
   "pwsweep": {
     "signature": "pwsweep(sweep: number | Pattern)",
-    "doc": "Controls the lfo sweep for the pulsewidth of the pulse oscillator",
-    "params": [
-      {
-        "name": "sweep",
-        "type": "number | Pattern",
-        "doc": ""
-      }
-    ],
-    "examples": [
-      "n(run(8)).scale(\"D:pentatonic\").s(\"pulse\").pw(\"0.5\").pwrate(\"<5 .1 25>\").pwsweep(\"<0.3 .8>\")"
-    ]
-  },
-  "pws": {
-    "signature": "pws(sweep: number | Pattern)",
     "doc": "Controls the lfo sweep for the pulsewidth of the pulse oscillator",
     "params": [
       {
@@ -1734,7 +1766,7 @@
   },
   "channel": {
     "signature": "channel(channel: number | Pattern)",
-    "doc": "Choose the channel the pattern is sent to",
+    "doc": "Choose the channel the pattern is sent to in superdirt",
     "params": [
       {
         "name": "channel",
@@ -2876,20 +2908,6 @@
       "note(\"d d a# a\".fast(2)).s(\"sawtooth\").delay(.8).delaytime(1/2).delayspeed(\"<2 .5 -1 -2>\")"
     ]
   },
-  "delaytime": {
-    "signature": "delaytime(delay: number | Pattern)",
-    "doc": "Sets the time of the delay effect in seconds.",
-    "params": [
-      {
-        "name": "delay",
-        "type": "number | Pattern",
-        "doc": "in seconds"
-      }
-    ],
-    "examples": [
-      "note(\"d d a# a\".fast(2))\n.s(\"sawtooth\")\n.delay(.8)\n.delaytime(1/2)\n.delayspeed(\"<2 .5 -1 -2>\")"
-    ]
-  },
   "delaysync": {
     "signature": "delaysync(cycles: number | Pattern)",
     "doc": "Sets the time of the delay effect in cycles.",
@@ -2904,37 +2922,9 @@
       "s(\"bd bd\").delay(.25).delaysync(\"<1 2 3 5>\".div(8))"
     ]
   },
-  "delays": {
-    "signature": "delays(cycles: number | Pattern)",
-    "doc": "Sets the time of the delay effect in cycles.",
-    "params": [
-      {
-        "name": "cycles",
-        "type": "number | Pattern",
-        "doc": "delay length in cycles"
-      }
-    ],
-    "examples": [
-      "s(\"bd bd\").delay(.25).delaysync(\"<1 2 3 5>\".div(8))"
-    ]
-  },
-  "ds": {
-    "signature": "ds(cycles: number | Pattern)",
-    "doc": "Sets the time of the delay effect in cycles.",
-    "params": [
-      {
-        "name": "cycles",
-        "type": "number | Pattern",
-        "doc": "delay length in cycles"
-      }
-    ],
-    "examples": [
-      "s(\"bd bd\").delay(.25).delaysync(\"<1 2 3 5>\".div(8))"
-    ]
-  },
   "detune": {
     "signature": "detune(amount: number | Pattern)",
-    "doc": "Set detune for stacked voices of supported oscillators.",
+    "doc": "Set detune for stacked voices of supported oscillators",
     "params": [
       {
         "name": "amount",
@@ -2948,7 +2938,7 @@
   },
   "det": {
     "signature": "det(amount: number | Pattern)",
-    "doc": "Set detune for stacked voices of supported oscillators.",
+    "doc": "Set detune for stacked voices of supported oscillators",
     "params": [
       {
         "name": "amount",
@@ -2962,7 +2952,7 @@
   },
   "unison": {
     "signature": "unison(numvoices: number | Pattern)",
-    "doc": "Set number of stacked voices for supported oscillators.",
+    "doc": "Set number of stacked voices for supported oscillators",
     "params": [
       {
         "name": "numvoices",
@@ -2986,34 +2976,6 @@
     ],
     "examples": [
       "note(\"d f a a# a d3\").fast(2).s(\"supersaw\").spread(\"<0 .3 1>\")"
-    ]
-  },
-  "fadeTime": {
-    "signature": "fadeTime(time: number | Pattern)",
-    "doc": "Used when using `begin`/`end` or `chop`/`striate` and friends, to change the fade out time of the 'grain' envelope.",
-    "params": [
-      {
-        "name": "time",
-        "type": "number | Pattern",
-        "doc": "between 0 and 1"
-      }
-    ],
-    "examples": [
-      "s(\"oh*4\").end(.1).fadeTime(\"<0 .2 .4 .8>\").osc()"
-    ]
-  },
-  "fadeOutTime": {
-    "signature": "fadeOutTime(time: number | Pattern)",
-    "doc": "Used when using `begin`/`end` or `chop`/`striate` and friends, to change the fade out time of the 'grain' envelope.",
-    "params": [
-      {
-        "name": "time",
-        "type": "number | Pattern",
-        "doc": "between 0 and 1"
-      }
-    ],
-    "examples": [
-      "s(\"oh*4\").end(.1).fadeTime(\"<0 .2 .4 .8>\").osc()"
     ]
   },
   "freq": {
@@ -3276,34 +3238,6 @@
       "s(\"bd rim sd rim bd ~ cp rim\").pan(sine.slow(2))"
     ]
   },
-  "panspan": {
-    "signature": "panspan(span: number | Pattern)",
-    "doc": "Controls how much multichannel output is fanned out",
-    "params": [
-      {
-        "name": "span",
-        "type": "number | Pattern",
-        "doc": "between -inf and inf, negative is backwards ordering"
-      }
-    ],
-    "examples": [
-      "s(\"[bd hh]*2\").pan(\"<.5 1 .5 0>\").panspan(\"<0 .5 1>\").osc()"
-    ]
-  },
-  "pansplay": {
-    "signature": "pansplay(spread: number | Pattern)",
-    "doc": "Controls how much multichannel output is spread",
-    "params": [
-      {
-        "name": "spread",
-        "type": "number | Pattern",
-        "doc": "between 0 and 1"
-      }
-    ],
-    "examples": [
-      "s(\"[bd hh]*2\").pan(\"<.5 1 .5 0>\").pansplay(\"<0 .5 1>\").osc()"
-    ]
-  },
   "chord": {
     "signature": "chord(symbols: string | Pattern)",
     "doc": "The chord to voice",
@@ -3332,6 +3266,20 @@
       "addVoicings('house', {\n'': ['7 12 16', '0 7 16', '4 7 12'],\n'm': ['0 3 7']\n})\nchord(\"<Am C D F Am E Am E>\")\n.dict('house').anchor(66)\n.voicing().room(.5)"
     ]
   },
+  "anchor": {
+    "signature": "anchor(anchorNote: string | Pattern)",
+    "doc": "The top note to align the voicing to. Defaults to c5",
+    "params": [
+      {
+        "name": "anchorNote",
+        "type": "string | Pattern",
+        "doc": "the note to align the voicings to"
+      }
+    ],
+    "examples": [
+      "anchor(\"<c4 g4 c5 g5>\").chord(\"C\").voicing()"
+    ]
+  },
   "offset": {
     "signature": "offset(shift: number | Pattern)",
     "doc": "Sets how the voicing is offset from the anchored position",
@@ -3346,10 +3294,16 @@
       "chord(\"<Am C D F Am E Am E>\").offset(\"<0 1 2 3 4 5>\") // alter the voicing each time"
     ]
   },
-  "registerControl": {
-    "signature": "registerControl()",
-    "doc": "How many octaves are voicing steps spread apart, defaults to 1   @name octaves  @tags tonal  @param {number | Pattern} count the number of octaves  @example  chord(\"<Am C D F Am E Am E>\").octaves(\"<2 4>\").voicing()",
-    "params": [],
+  "octaves": {
+    "signature": "octaves(value)",
+    "doc": "How many octaves are voicing steps spread apart, defaults to 1   @name octaves  @param {number | Pattern} count the number of octaves  @example  chord(\"<Am C D F Am E Am E>\").octaves(\"<2 4>\").voicing()",
+    "params": [
+      {
+        "name": "value",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": []
   },
   "mode": {
@@ -3667,20 +3621,6 @@
       "s(\"bd*4\").bank(\"tr909\").distort(2).distortvol(0.8)"
     ]
   },
-  "distortion": {
-    "signature": "distortion(volume: number | Pattern)",
-    "doc": "Postgain for waveshaping distortion.",
-    "params": [
-      {
-        "name": "volume",
-        "type": "number | Pattern",
-        "doc": "linear postgain of the distortion"
-      }
-    ],
-    "examples": [
-      "s(\"bd*4\").bank(\"tr909\").distort(2).distortvol(0.8)"
-    ]
-  },
   "distvol": {
     "signature": "distvol(volume: number | Pattern)",
     "doc": "Postgain for waveshaping distortion.",
@@ -3726,9 +3666,15 @@
     ]
   },
   "compressor": {
-    "signature": "compressor()",
+    "signature": "compressor(value)",
     "doc": "Dynamics Compressor. The params are `compressor(\"threshold:ratio:knee:attack:release\")` More info [here](https://developer.mozilla.org/en-US/docs/Web/API/DynamicsCompressorNode?retiredLocale=de#instance_properties)",
-    "params": [],
+    "params": [
+      {
+        "name": "value",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd sd [~ bd] sd,hh*8\")\n.compressor(\"-20:20:10:.002:.02\")"
     ]
@@ -3740,7 +3686,7 @@
       {
         "name": "speed",
         "type": "number | Pattern",
-        "doc": "-inf to inf, negative numbers play the sample backwards."
+        "doc": "inf to inf, negative numbers play the sample backwards."
       }
     ],
     "examples": [
@@ -3755,7 +3701,7 @@
       {
         "name": "factor",
         "type": "number | Pattern",
-        "doc": "-inf to inf, negative numbers play the sample backwards."
+        "doc": "inf to inf, negative numbers play the sample backwards."
       }
     ],
     "examples": [
@@ -3779,7 +3725,7 @@
   },
   "density": {
     "signature": "density(density: number | Pattern)",
-    "doc": "crackle noise density",
+    "doc": "Noise crackle density",
     "params": [
       {
         "name": "density",
@@ -3849,18 +3795,6 @@
   },
   "color": {
     "signature": "color(color: string)",
-    "doc": "Sets the color of the hap in visualizations like pianoroll or highlighting.",
-    "params": [
-      {
-        "name": "color",
-        "type": "string",
-        "doc": "Hexadecimal or CSS color name"
-      }
-    ],
-    "examples": []
-  },
-  "colour": {
-    "signature": "colour(color: string)",
     "doc": "Sets the color of the hap in visualizations like pianoroll or highlighting.",
     "params": [
       {
@@ -4144,9 +4078,15 @@
     ]
   },
   "scrub": {
-    "signature": "scrub()",
+    "signature": "scrub(beginPat)",
     "doc": "Allows you to scrub an audio file like a tape loop by passing values that represents the position in the audio file in the optional array syntax ex: \"0.5:2\", the second value controls the speed of playback",
-    "params": [],
+    "params": [
+      {
+        "name": "beginPat",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "samples('github:switchangel/pad')\ns(\"swpad:0\").scrub(\"{0.1!2 .25@3 0.7!2 <0.8:1.5>}%8\")",
       "samples('github:yaxu/clean-breaks/main');\ns(\"amen/4\").fit().scrub(\"{0@3 0@2 4@3}%8\".div(16))"
@@ -4159,7 +4099,7 @@
       {
         "name": "config",
         "type": "Object",
-        "doc": "LFO configuration."
+        "doc": "LFO configuration. Keys: control, subControl, rate, depth, depthabs, dcoffset, shape, skew, curve, sync, fxi."
       },
       {
         "name": "id",
@@ -4182,7 +4122,7 @@
       {
         "name": "config",
         "type": "Object",
-        "doc": "Envelope configuration."
+        "doc": "Envelope configuration. Keys: control, subControl, depth, depthabs, attack, decay, sustain, release, acurve, dcurve, rcurve, fxi."
       },
       {
         "name": "id",
@@ -4205,7 +4145,7 @@
       {
         "name": "config",
         "type": "Object",
-        "doc": "Bus modulation configuration."
+        "doc": "Bus modulation configuration. Keys: bus, control, subControl, depth, depthabs, dc, fxi."
       },
       {
         "name": "id",
@@ -4400,12 +4340,18 @@
       "sound(\"hh\").euclidish(7,12,sine.slow(8))\n.pan(sine.slow(8))"
     ]
   },
-  "clearScope": {
-    "signature": "clearScope()",
-    "doc": "Clears all user-defined variables and functions from the scope. This removes variables created during block-based evaluation.",
-    "params": [],
+  "timeline": {
+    "signature": "timeline(timeline: number | Pattern)",
+    "doc": "Allows you to switch a pattern between different 'timelines'. This is particularly useful when live coding, for example when you want to cue a pattern up to play from its start.  Timelines are specified by number, so that if you had a pattern like `n(\"<0 1 2 3>\").s(\"num\").timeline(1)` playing, then changed the '1' to '2', it would always align '0' to the nearest cycle. You will likely want to trigger an evaluation a little bit before the cycle starts, to avoid missing events.  After the first use, a timeline will continue with the same 'offset'. That is, if you change a pattern without changing its timeline number, it will stay on that timeline without resetting.  Rather than incrementing a timeline to reset it, it's easier to negate it, e.g. by switching between `-2` and `2`. This is because when you negate a timeline it will always reset.  You can also pattern the timeline if you want, to create strange resetting patterns.",
+    "params": [
+      {
+        "name": "timeline",
+        "type": "number | Pattern",
+        "doc": "The timeline that the pattern should play on."
+      }
+    ],
     "examples": [
-      "// After defining variables in blocks:\n// let myVar = 5\n// function myFunc() { return 10; }\nclearScope() // removes myVar and myFunc from scope"
+      "n(\"<0 1 2 3>(3,8)\")\n  .sound(\"num\")\n  // resets the timeline every two cycles, by negating the timeline.\n  // in a lot of cases this will be edited by a human live coder\n  // rather than patterned!\n  .timeline(\"<2 -2>\".slow(2))"
     ]
   },
   "withValue": {
@@ -4443,7 +4389,7 @@
       {
         "name": "hap_test",
         "type": "Function",
-        "doc": "- a function which returns false for haps to be removed from the pattern"
+        "doc": "a function which returns false for haps to be removed from the pattern"
       }
     ],
     "examples": [
@@ -4464,14 +4410,16 @@
       "const drums = s(\"bd sd bd sd\")\nkick: drums.filterValues((v) => v.s === 'bd').duck(2)\nsnare: drums.filterValues((v) => v.s === 'sd')\nbass: s(\"saw!4\").note(\"G#1\").lpf(80).lpenv(4).orbit(2)"
     ]
   },
-  "asNumber": {
-    "signature": "asNumber()",
-    "doc": "Returns a new pattern with all values parsed as numerals.",
-    "params": [],
-    "examples": []
-  },
   "layer": {
     "signature": "layer()",
+    "doc": "Layers the result of the given function(s). Like `superimpose`, but without the original pattern:",
+    "params": [],
+    "examples": [
+      "\"<0 2 4 6 ~ 4 ~ 2 0!3 ~!5>*8\"\n  .layer(x=>x.add(\"0,2\"))\n  .scale('C minor').note()"
+    ]
+  },
+  "apply": {
+    "signature": "apply()",
     "doc": "Layers the result of the given function(s). Like `superimpose`, but without the original pattern:",
     "params": [],
     "examples": [
@@ -4511,47 +4459,31 @@
     ]
   },
   "arpWith": {
-    "signature": "arpWith()",
+    "signature": "arpWith(func)",
     "doc": "Selects indices in in stacked notes.",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"<[c,eb,g]!2 [c,f,ab] [d,f,ab]>\")\n.arpWith(haps => haps[2])"
     ]
   },
   "arp": {
-    "signature": "arp()",
+    "signature": "arp(indices)",
     "doc": "Selects indices in in stacked notes.",
-    "params": [],
+    "params": [
+      {
+        "name": "indices",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"<[c,eb,g]!2 [c,f,ab] [d,f,ab]>\")\n.arp(\"0 [0,2] 1 [0,2]\")"
-    ]
-  },
-  "set": {
-    "signature": "set(pat: Pattern)",
-    "doc": "When called on a pattern `a`, with a input pattern `b` (`a.set(b)`), combines `a` and `b` such that anything defined in `b` and anything defined in `a` that is *not* defined in `b` will be in the resulting pattern.  The structure is maintained from `a`, because the default pattern alignment is `in`, see the section on `Pattern Alignment` in the technical manual in the docs  This is the inverse of `keep`  See examples below",
-    "params": [
-      {
-        "name": "pat",
-        "type": "Pattern",
-        "doc": ""
-      }
-    ],
-    "examples": [
-      "// because input pattern has `s` set,\n// it overrides the \"sine\" declared earlier\nnote(\"c a f e\").s(\"sine\").set(s(\"triangle\"))"
-    ]
-  },
-  "keep": {
-    "signature": "keep(pat: Pattern)",
-    "doc": "When called on a pattern `a`, with a input pattern `b` (`a.keep(b)`), combines `a` and `b` such that anything defined in `a`, and anything defined in `b` that is *not* defined in `a` will be in the resulting pattern  The structure is maintained from `a`, because the default pattern alignment is `in`, see the section on `Pattern Alignment` in the technical manual in the docs  This is the inverse of `set`  See examples below",
-    "params": [
-      {
-        "name": "pat",
-        "type": "Pattern",
-        "doc": ""
-      }
-    ],
-    "examples": [
-      "// notes, already defined, will stay \"c a f e\",\n// while \"s\", not defined, will be set to \"piano\"\nnote(\"c a f e\").keep(note(\"e f a c\").s(\"piano\"))"
     ]
   },
   "add": {
@@ -4586,49 +4518,59 @@
     "examples": []
   },
   "struct": {
-    "signature": "struct()",
+    "signature": "struct(...args)",
     "doc": "Applies the given structure to the pattern:",
-    "params": [],
+    "params": [
+      {
+        "name": "...args",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"c,eb,g\")\n  .struct(\"x ~ x ~ ~ x ~ x ~ ~ ~ x ~ x ~ ~\")\n  .slow(2)"
     ]
   },
   "mask": {
-    "signature": "mask()",
+    "signature": "mask(...args)",
     "doc": "Returns silence when mask is 0 or \"~\"",
-    "params": [],
+    "params": [
+      {
+        "name": "...args",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"c [eb,g] d [eb,g]\").mask(\"<1 [0 1]>\")"
     ]
   },
   "reset": {
-    "signature": "reset()",
+    "signature": "reset(...args)",
     "doc": "Resets the pattern to the start of the cycle for each onset of the reset pattern.",
-    "params": [],
+    "params": [
+      {
+        "name": "...args",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"[<bd lt> sd]*2, hh*8\").reset(\"<x@3 x(5,8)>\")"
     ]
   },
   "restart": {
-    "signature": "restart()",
+    "signature": "restart(...args)",
     "doc": "Restarts the pattern for each onset of the restart pattern. While reset will only reset the current cycle, restart will start from cycle 0.",
-    "params": [],
-    "examples": [
-      "s(\"[<bd lt> sd]*2, hh*8\").restart(\"<x@3 x(5,8)>\")"
-    ]
-  },
-  "setDefaultJoin": {
-    "signature": "setDefaultJoin(method: string)",
-    "doc": "Sets the default method of combining events from two patterns (aka [alignment](https://strudel.cc/technical-manual/alignment/)) in Strudel. The default method is 'in', meaning that patterns to the left will (typically) dictate the event timings when combined with patterns to the right. By changing alignment to 'out', the opposite will happen. With 'mix', they will combine their event timings.  Note that we say the _default_ method, because alignments can also be set explicitly with calls like 'add.mix', 'set.squeeze', etc.",
     "params": [
       {
-        "name": "method",
-        "type": "string",
-        "doc": "Default join method to use. Options: 'in', 'out', 'mix', 'squeeze', 'squeezeout', 'reset', 'restart', 'poly'"
+        "name": "...args",
+        "type": "",
+        "doc": ""
       }
     ],
     "examples": [
-      "setDefaultJoin('mix') // also try 'in', 'out', 'squeeze', etc.\ns(\"saw\").vel(\"1 0.5\").note(\"F A C E\").delay(\"0 0.2 0.3\")"
+      "s(\"[<bd lt> sd]*2, hh*8\").restart(\"<x@3 x(5,8)>\")"
     ]
   },
   "gap": {
@@ -4646,7 +4588,7 @@
     ]
   },
   "silence": {
-    "signature": "silence()",
+    "signature": "silence",
     "doc": "Does absolutely nothing..",
     "params": [],
     "examples": [
@@ -4654,68 +4596,156 @@
     ]
   },
   "sequenceP": {
-    "signature": "sequenceP()",
+    "signature": "sequenceP(pats)",
     "doc": "Takes a list of patterns, and returns a pattern of lists.",
-    "params": [],
+    "params": [
+      {
+        "name": "pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": []
   },
   "stack": {
-    "signature": "stack()",
+    "signature": "stack(...pats)",
     "doc": "The given items are played at the same time at the same length.",
-    "params": [],
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "stack(\"g3\", \"b3\", [\"e4\", \"d4\"]).note()\n// \"g3,b3,[e4 d4]\".note()",
       "// As a chained function:\ns(\"hh*4\").stack(\n  note(\"c4(5,8)\")\n)"
     ]
   },
   "polyrhythm": {
-    "signature": "polyrhythm()",
+    "signature": "polyrhythm(...pats)",
     "doc": "The given items are played at the same time at the same length.",
-    "params": [],
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "stack(\"g3\", \"b3\", [\"e4\", \"d4\"]).note()\n// \"g3,b3,[e4 d4]\".note()",
       "// As a chained function:\ns(\"hh*4\").stack(\n  note(\"c4(5,8)\")\n)"
     ]
   },
   "pr": {
-    "signature": "pr()",
+    "signature": "pr(...pats)",
     "doc": "The given items are played at the same time at the same length.",
-    "params": [],
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "stack(\"g3\", \"b3\", [\"e4\", \"d4\"]).note()\n// \"g3,b3,[e4 d4]\".note()",
       "// As a chained function:\ns(\"hh*4\").stack(\n  note(\"c4(5,8)\")\n)"
     ]
   },
   "slowcat": {
-    "signature": "slowcat()",
+    "signature": "slowcat(...pats)",
     "doc": "Concatenation: combines a list of patterns, switching between them successively, one per cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "slowcat(\"e5\", \"b4\", [\"d5\", \"c5\"])"
     ]
   },
   "cat": {
-    "signature": "cat()",
+    "signature": "cat(...pats)",
     "doc": "Concatenation: combines a list of patterns, switching between them successively, one per cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "slowcat(\"e5\", \"b4\", [\"d5\", \"c5\"])"
     ]
   },
-  "arrange": {
-    "signature": "arrange()",
-    "doc": "Allows to arrange multiple patterns together over multiple cycles. Takes a variable number of arrays with two elements specifying the number of cycles and the pattern to use.",
-    "params": [],
-    "examples": [
-      "arrange(\n  [4, \"<c a f e>(3,8)\"],\n  [2, \"<g a>(5,8)\"]\n).note()"
-    ]
+  "slowcatPrime": {
+    "signature": "slowcatPrime(items: ...any)",
+    "doc": "Concatenation: combines a list of patterns, switching between them successively, one per cycle. Unlike slowcat, this version will skip cycles.",
+    "params": [
+      {
+        "name": "items",
+        "type": "...any",
+        "doc": "The items to concatenate"
+      }
+    ],
+    "examples": []
   },
   "seqPLoop": {
-    "signature": "seqPLoop()",
+    "signature": "seqPLoop(...parts)",
     "doc": "Similarly to `arrange`, allows you to arrange multiple patterns together over multiple cycles. Unlike `arrange`, you specify a start and stop time for each pattern rather than duration, which means that patterns can overlap.",
-    "params": [],
+    "params": [
+      {
+        "name": "...parts",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
-      "seqPLoop(\n  [0, 2, \"bd(3,8)\"],\n  [1, 3, \"cp(3,8)\"]\n).sound()"
+      "seqPLoop([0, 2, \"bd(3,8)\"],\n         [1, 3, \"cp(3,8)\"]\n        )\n  .sound()"
+    ]
+  },
+  "sequence": {
+    "signature": "sequence(...pats)",
+    "doc": "See `fastcat`",
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "seq": {
+    "signature": "seq(...pats)",
+    "doc": "Like **cat**, but the items are crammed into one cycle.",
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "seq(\"e5\", \"b4\", [\"d5\", \"c5\"]).note()\n// \"e5 b4 [d5 c5]\".note()",
+      "// As a chained function:\ns(\"hh*4\").seq(\n  note(\"c4(5,8)\")\n)"
+    ]
+  },
+  "fastcat": {
+    "signature": "fastcat(...pats)",
+    "doc": "Like **cat**, but the items are crammed into one cycle.",
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "seq(\"e5\", \"b4\", [\"d5\", \"c5\"]).note()\n// \"e5 b4 [d5 c5]\".note()",
+      "// As a chained function:\ns(\"hh*4\").seq(\n  note(\"c4(5,8)\")\n)"
     ]
   },
   "register": {
@@ -4767,25 +4797,58 @@
     ]
   },
   "range": {
-    "signature": "range()",
+    "signature": "range(min, max)",
     "doc": "Assumes a numerical pattern, containing unipolar values in the range 0 .. 1. Returns a new pattern with values scaled to the given min/max range. Most useful in combination with continuous patterns.",
-    "params": [],
+    "params": [
+      {
+        "name": "min",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "max",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"[bd sd]*2,hh*8\")\n.cutoff(sine.range(500,4000))"
     ]
   },
   "rangex": {
-    "signature": "rangex()",
+    "signature": "rangex(min, max)",
     "doc": "Assumes a numerical pattern, containing unipolar values in the range 0 .. 1 Returns a new pattern with values scaled to the given min/max range, following an exponential curve.",
-    "params": [],
+    "params": [
+      {
+        "name": "min",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "max",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"[bd sd]*2,hh*8\")\n.cutoff(sine.rangex(500,4000))"
     ]
   },
   "range2": {
-    "signature": "range2()",
+    "signature": "range2(min, max)",
     "doc": "Assumes a numerical pattern, containing bipolar values in the range -1 .. 1 Returns a new pattern with values scaled to the given min/max range.",
-    "params": [],
+    "params": [
+      {
+        "name": "min",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "max",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"[bd sd]*2,hh*8\")\n.cutoff(sine2.range2(500,4000))"
     ]
@@ -4798,28 +4861,84 @@
       "ratio(\"1, 5:4, 3:2\").mul(110)\n.freq().s(\"piano\")"
     ]
   },
+  "compress": {
+    "signature": "compress(b, e)",
+    "doc": "Compress each cycle into the given timespan, leaving a gap",
+    "params": [
+      {
+        "name": "b",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "e",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "cat(\n  s(\"bd sd\").compress(.25,.75),\n  s(\"~ bd sd ~\")\n)"
+    ]
+  },
   "fastGap": {
-    "signature": "fastGap()",
+    "signature": "fastGap(factor)",
     "doc": "speeds up a pattern like fast, but rather than it playing multiple times as fast would it instead leaves a gap in the remaining space of the cycle. For example, the following will play the sound pattern \"bd sn\" only once but compressed into the first half of the cycle, i.e. twice as fast.",
-    "params": [],
+    "params": [
+      {
+        "name": "factor",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd sd\").fastGap(2)"
     ]
   },
   "fastgap": {
-    "signature": "fastgap()",
+    "signature": "fastgap(factor)",
     "doc": "speeds up a pattern like fast, but rather than it playing multiple times as fast would it instead leaves a gap in the remaining space of the cycle. For example, the following will play the sound pattern \"bd sn\" only once but compressed into the first half of the cycle, i.e. twice as fast.",
-    "params": [],
+    "params": [
+      {
+        "name": "factor",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd sd\").fastGap(2)"
     ]
   },
   "focus": {
-    "signature": "focus()",
+    "signature": "focus(b, e)",
     "doc": "Similar to `compress`, but doesn't leave gaps, and the 'focus' can be bigger than a cycle",
-    "params": [],
+    "params": [
+      {
+        "name": "b",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "e",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd hh sd hh\").focus(1/4, 3/4)"
+    ]
+  },
+  "ply": {
+    "signature": "ply(factor)",
+    "doc": "The ply function repeats each event the given number of times.",
+    "params": [
+      {
+        "name": "factor",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "s(\"bd ~ sd cp\").ply(\"<1 2 3>\")"
     ]
   },
   "fast": {
@@ -4837,9 +4956,15 @@
     ]
   },
   "hurry": {
-    "signature": "hurry()",
+    "signature": "hurry(r)",
     "doc": "Both speeds up the pattern (like 'fast') and the sample playback (like 'speed').",
-    "params": [],
+    "params": [
+      {
+        "name": "r",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd sd:2\").hurry(\"<1 2 4 3>\").slow(1.5)"
     ]
@@ -4873,17 +4998,39 @@
     ]
   },
   "inside": {
-    "signature": "inside()",
+    "signature": "inside(factor, f)",
     "doc": "Carries out an operation 'inside' a cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "factor",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "f",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"0 1 2 3 4 3 2 1\".inside(4, rev).scale('C major').note()\n// \"0 1 2 3 4 3 2 1\".slow(4).rev().fast(4).scale('C major').note()"
     ]
   },
   "outside": {
-    "signature": "outside()",
+    "signature": "outside(factor, f)",
     "doc": "Carries out an operation 'outside' a cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "factor",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "f",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"<[0 1] 2 [3 4] 5>\".outside(4, rev).scale('C major').note()\n// \"<[0 1] 2 [3 4] 5>\".fast(4).rev().slow(4).scale('C major').note()"
     ]
@@ -4945,12 +5092,18 @@
       "note(\"c3 d3 e3 g3\").every(4, x=>x.rev())"
     ]
   },
-  "apply": {
-    "signature": "apply()",
-    "doc": "Applies the given function to the pattern. Like layer, but with a single function:",
-    "params": [],
+  "cpm": {
+    "signature": "cpm(cpm)",
+    "doc": "Plays the pattern at the given cycles per minute.",
+    "params": [
+      {
+        "name": "cpm",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
-      "\"<c3 eb3 g3>\".scale('C minor').apply(scaleTranspose(\"0,2,4\")).note()"
+      "s(\"<bd sd>,hh*2\").cpm(90) // = 90 bpm"
     ]
   },
   "early": {
@@ -4982,9 +5135,20 @@
     ]
   },
   "zoom": {
-    "signature": "zoom()",
+    "signature": "zoom(s, e)",
     "doc": "Plays a portion of a pattern, specified by the beginning and end of a time span. The new resulting pattern is played over the time period of the original pattern:",
-    "params": [],
+    "params": [
+      {
+        "name": "s",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "e",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd*2 hh*3 [sd bd]*2 perc\").zoom(0.25, 0.75)\n// s(\"hh*3 [sd bd]*2\") // equivalent"
     ]
@@ -5160,6 +5324,20 @@
       "// This is the same as `<[g e] [d c]>`. If `rev()` is used, you get\n// the same as `<[d c] [g e]>`, where each cycle reverses, but the order of\n// cycles stays the same.\nnote(\"<[c d] [e g]>\").revv()"
     ]
   },
+  "pressBy": {
+    "signature": "pressBy(r)",
+    "doc": "Like press, but allows you to specify the amount by which each event is shifted. pressBy(0.5) is the same as press, while pressBy(1/3) shifts each event by a third of its timespan.",
+    "params": [
+      {
+        "name": "r",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "stack(s(\"hh*4\"),\n      s(\"bd mt sd ht\").pressBy(\"<0 0.5 0.25>\")\n     ).slow(2)"
+    ]
+  },
   "press": {
     "signature": "press()",
     "doc": "Syncopates a rhythm, by shifting each event halfway into its timespan.",
@@ -5185,25 +5363,53 @@
     ]
   },
   "juxBy": {
-    "signature": "juxBy()",
+    "signature": "juxBy(by, func)",
     "doc": "Jux with adjustable stereo width. 0 = mono, 1 = full stereo.",
-    "params": [],
+    "params": [
+      {
+        "name": "by",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd lt [~ ht] mt cp ~ bd hh\").juxBy(\"<0 .5 1>/2\", rev)"
     ]
   },
   "juxby": {
-    "signature": "juxby()",
+    "signature": "juxby(by, func)",
     "doc": "Jux with adjustable stereo width. 0 = mono, 1 = full stereo.",
-    "params": [],
+    "params": [
+      {
+        "name": "by",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd lt [~ ht] mt cp ~ bd hh\").juxBy(\"<0 .5 1>/2\", rev)"
     ]
   },
   "jux": {
-    "signature": "jux()",
+    "signature": "jux(func)",
     "doc": "The jux function creates strange stereo effects, by applying a function to a pattern, but only in the right-hand channel.",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd lt [~ ht] mt cp ~ bd hh\").jux(rev)",
       "s(\"bd lt [~ ht] mt cp ~ bd hh\").jux(press)",
@@ -5439,25 +5645,43 @@
     ]
   },
   "iterBack": {
-    "signature": "iterBack()",
+    "signature": "iterBack(times)",
     "doc": "Like `iter`, but plays the subdivisions in reverse order. Known as iter' in tidalcycles",
-    "params": [],
+    "params": [
+      {
+        "name": "times",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"0 1 2 3\".scale('A minor')).iterBack(4)"
     ]
   },
   "iterback": {
-    "signature": "iterback()",
+    "signature": "iterback(times)",
     "doc": "Like `iter`, but plays the subdivisions in reverse order. Known as iter' in tidalcycles",
-    "params": [],
+    "params": [
+      {
+        "name": "times",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"0 1 2 3\".scale('A minor')).iterBack(4)"
     ]
   },
   "repeatCycles": {
-    "signature": "repeatCycles()",
+    "signature": "repeatCycles(n)",
     "doc": "Repeats each cycle the given number of times.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(irand(12).add(34)).segment(4).repeatCycles(2).s(\"gm_acoustic_guitar_nylon\")"
     ]
@@ -5487,65 +5711,153 @@
     ]
   },
   "chunkBack": {
-    "signature": "chunkBack()",
+    "signature": "chunkBack(n, func)",
     "doc": "Like `chunk`, but cycles through the parts in reverse order. Known as chunk' in tidalcycles",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"0 1 2 3\".chunkBack(4, x=>x.add(7))\n.scale(\"A:minor\").note()"
     ]
   },
   "chunkback": {
-    "signature": "chunkback()",
+    "signature": "chunkback(n, func)",
     "doc": "Like `chunk`, but cycles through the parts in reverse order. Known as chunk' in tidalcycles",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"0 1 2 3\".chunkBack(4, x=>x.add(7))\n.scale(\"A:minor\").note()"
     ]
   },
   "fastChunk": {
-    "signature": "fastChunk()",
+    "signature": "fastChunk(n, func)",
     "doc": "Like `chunk`, but the cycles of the source pattern aren't repeated for each set of chunks.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"<0 8> 1 2 3 4 5 6 7\"\n.scale(\"C2:major\").note()\n.fastChunk(4, x => x.color('red')).slow(2)"
     ]
   },
   "fastchunk": {
-    "signature": "fastchunk()",
+    "signature": "fastchunk(n, func)",
     "doc": "Like `chunk`, but the cycles of the source pattern aren't repeated for each set of chunks.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"<0 8> 1 2 3 4 5 6 7\"\n.scale(\"C2:major\").note()\n.fastChunk(4, x => x.color('red')).slow(2)"
     ]
   },
   "chunkInto": {
-    "signature": "chunkInto()",
+    "signature": "chunkInto(n, func)",
     "doc": "Like `chunk`, but the function is applied to a looped subcycle of the source pattern.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "sound(\"bd sd ht lt bd - cp lt\").chunkInto(4, hurry(2))\n  .bank(\"tr909\")"
     ]
   },
   "chunkinto": {
-    "signature": "chunkinto()",
+    "signature": "chunkinto(n, func)",
     "doc": "Like `chunk`, but the function is applied to a looped subcycle of the source pattern.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "sound(\"bd sd ht lt bd - cp lt\").chunkInto(4, hurry(2))\n  .bank(\"tr909\")"
     ]
   },
   "chunkBackInto": {
-    "signature": "chunkBackInto()",
+    "signature": "chunkBackInto(n, func)",
     "doc": "Like `chunkInto`, but moves backwards through the chunks.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "sound(\"bd sd ht lt bd - cp lt\").chunkInto(4, hurry(2))\n  .bank(\"tr909\")"
     ]
   },
   "chunkbackinto": {
-    "signature": "chunkbackinto()",
+    "signature": "chunkbackinto(n, func)",
     "doc": "Like `chunkInto`, but moves backwards through the chunks.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "sound(\"bd sd ht lt bd - cp lt\").chunkInto(4, hurry(2))\n  .bank(\"tr909\")"
     ]
@@ -5657,33 +5969,102 @@
     "examples": []
   },
   "pace": {
-    "signature": "pace()",
+    "signature": "pace(targetSteps)",
     "doc": "*Experimental*  Speeds a pattern up or down, to fit to the given number of steps per cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "targetSteps",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "sound(\"bd sd cp\").pace(4)\n// The same as sound(\"{bd sd cp}%4\") or sound(\"<bd sd cp>*4\")"
     ]
   },
   "polymeter": {
-    "signature": "polymeter()",
+    "signature": "polymeter(...args)",
     "doc": "*Experimental*  Aligns the steps of the patterns, creating polymeters. The patterns are repeated until they all fit the cycle. For example, in the below the first pattern is repeated twice, and the second is repeated three times, to fit the lowest common multiple of six steps.",
-    "params": [],
+    "params": [
+      {
+        "name": "...args",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "// The same as note(\"{c eb g, c2 g2}%6\")\npolymeter(\"c eb g\", \"c2 g2\").note()"
     ]
   },
   "pm": {
-    "signature": "pm()",
+    "signature": "pm(...args)",
     "doc": "*Experimental*  Aligns the steps of the patterns, creating polymeters. The patterns are repeated until they all fit the cycle. For example, in the below the first pattern is repeated twice, and the second is repeated three times, to fit the lowest common multiple of six steps.",
-    "params": [],
+    "params": [
+      {
+        "name": "...args",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "// The same as note(\"{c eb g, c2 g2}%6\")\npolymeter(\"c eb g\", \"c2 g2\").note()"
     ]
   },
+  "stepcat": {
+    "signature": "stepcat(...timepats)",
+    "doc": "'Concatenates' patterns like `fastcat`, but proportional to a number of steps per cycle. The steps can either be inferred from the pattern, or provided as a [length, pattern] pair. Has the alias `timecat`.",
+    "params": [
+      {
+        "name": "...timepats",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "stepcat([3,\"e3\"],[1, \"g3\"]).note()\n// the same as \"e3@3 g3\".note()",
+      "stepcat(\"bd sd cp\",\"hh hh\").sound()\n// the same as \"bd sd cp hh hh\".sound()"
+    ]
+  },
+  "timeCat": {
+    "signature": "timeCat(...timepats)",
+    "doc": "'Concatenates' patterns like `fastcat`, but proportional to a number of steps per cycle. The steps can either be inferred from the pattern, or provided as a [length, pattern] pair. Has the alias `timecat`.",
+    "params": [
+      {
+        "name": "...timepats",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "stepcat([3,\"e3\"],[1, \"g3\"]).note()\n// the same as \"e3@3 g3\".note()",
+      "stepcat(\"bd sd cp\",\"hh hh\").sound()\n// the same as \"bd sd cp hh hh\".sound()"
+    ]
+  },
+  "timecat": {
+    "signature": "timecat(...timepats)",
+    "doc": "'Concatenates' patterns like `fastcat`, but proportional to a number of steps per cycle. The steps can either be inferred from the pattern, or provided as a [length, pattern] pair. Has the alias `timecat`.",
+    "params": [
+      {
+        "name": "...timepats",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "stepcat([3,\"e3\"],[1, \"g3\"]).note()\n// the same as \"e3@3 g3\".note()",
+      "stepcat(\"bd sd cp\",\"hh hh\").sound()\n// the same as \"bd sd cp hh hh\".sound()"
+    ]
+  },
   "stepalt": {
-    "signature": "stepalt()",
+    "signature": "stepalt(...groups)",
     "doc": "*Experimental*  Concatenates patterns stepwise, according to an inferred 'steps per cycle'. Similar to `stepcat`, but if an argument is a list, the whole pattern will alternate between the elements in the list.",
-    "params": [],
+    "params": [
+      {
+        "name": "...groups",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "stepalt([\"bd cp\", \"mt\"], \"bd\").sound()\n// The same as \"bd cp bd mt bd\".sound()"
     ]
@@ -5742,9 +6123,15 @@
     ]
   },
   "shrink": {
-    "signature": "shrink()",
+    "signature": "shrink(amount)",
     "doc": "*Experimental*  Progressively shrinks the pattern by 'n' steps until there's nothing left, or if a second value is given (using mininotation list syntax with `:`), that number of times. A positive number will progressively drop steps from the start of a pattern, and a negative number from the end.",
-    "params": [],
+    "params": [
+      {
+        "name": "amount",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"tha dhi thom nam\".shrink(\"1\").sound()\n.bank(\"mridangam\")",
       "\"tha dhi thom nam\".shrink(\"-1\").sound()\n.bank(\"mridangam\")",
@@ -5753,9 +6140,15 @@
     ]
   },
   "grow": {
-    "signature": "grow()",
+    "signature": "grow(amount)",
     "doc": "*Experimental*  Progressively grows the pattern by 'n' steps until the full pattern is played, or if a second value is given (using mininotation list syntax with `:`), that number of times. A positive number will progressively grow steps from the start of a pattern, and a negative number from the end.",
-    "params": [],
+    "params": [
+      {
+        "name": "amount",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"tha dhi thom nam\".grow(\"1\").sound()\n.bank(\"mridangam\")",
       "\"tha dhi thom nam\".grow(\"-1\").sound()\n.bank(\"mridangam\")",
@@ -5764,33 +6157,62 @@
     ]
   },
   "tour": {
-    "signature": "tour()",
+    "signature": "tour(pat, ...many)",
     "doc": "*Experimental*  Inserts a pattern into a list of patterns. On the first repetition it will be inserted at the end of the list, then moved backwards through the list on successive repetitions. The patterns are added together stepwise, with all repetitions taking place over a single cycle. Using `pace` to set the number of steps per cycle is therefore usually recommended.",
-    "params": [],
+    "params": [
+      {
+        "name": "pat",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "...many",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "\"[c g]\".tour(\"e f\", \"e f g\", \"g f e c\").note()\n   .sound(\"folkharp\")\n   .pace(8)"
     ]
   },
   "zip": {
-    "signature": "zip()",
+    "signature": "zip(...pats)",
     "doc": "*Experimental*  'zips' together the steps of the provided patterns. This can create a long repetition, taking place over a single, dense cycle. Using `pace` to set the number of steps per cycle is therefore usually recommended.",
-    "params": [],
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "zip(\"e f\", \"e f g\", \"g [f e] a f4 c\").note()\n   .sound(\"folkharp\")\n   .pace(8)"
     ]
   },
   "chop": {
-    "signature": "chop()",
+    "signature": "chop(n)",
     "doc": "Cuts each sample into the given number of parts, allowing you to explore a technique known as 'granular synthesis'. It turns a pattern of samples into a pattern of parts of samples.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "samples({ rhodes: 'https://cdn.freesound.org/previews/132/132051_316502-lq.mp3' })\ns(\"rhodes\")\n .chop(4)\n .rev() // reverse order of chops\n .loopAt(2) // fit sample into 2 cycles"
     ]
   },
   "striate": {
-    "signature": "striate()",
+    "signature": "striate(n)",
     "doc": "Cuts each sample into the given number of parts, triggering progressive portions of each sample at each loop.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"numbers:0 numbers:1 numbers:2\").striate(6).slow(3)"
     ]
@@ -5804,26 +6226,54 @@
     ]
   },
   "slice": {
-    "signature": "slice()",
+    "signature": "slice(npat, ipat)",
     "doc": "Chops samples into the given number of slices, triggering those slices with a given pattern of slice numbers. Instead of a number, it also accepts a list of numbers from 0 to 1 to slice at specific points.",
-    "params": [],
+    "params": [
+      {
+        "name": "npat",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "ipat",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "samples('github:tidalcycles/dirt-samples')\ns(\"breaks165\").slice(8, \"0 1 <2 2*2> 3 [4 0] 5 6 7\".every(3, rev)).slow(0.75)",
       "samples('github:tidalcycles/dirt-samples')\ns(\"breaks125\").fit().slice([0,.25,.5,.75], \"0 1 1 <2 3>\")"
     ]
   },
   "onTriggerTime": {
-    "signature": "onTriggerTime()",
+    "signature": "onTriggerTime(func)",
     "doc": "make something happen on event time uses browser timeout which is innacurate for audio tasks",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd!8\").onTriggerTime((hap) => {console.log(hap)})"
     ]
   },
   "splice": {
-    "signature": "splice()",
+    "signature": "splice(npat, ipat)",
     "doc": "Works the same as slice, but changes the playback speed of each slice to match the duration of its step.",
-    "params": [],
+    "params": [
+      {
+        "name": "npat",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "ipat",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "samples('github:tidalcycles/dirt-samples')\ns(\"breaks165\")\n.splice(8,  \"0 1 [2 3 0]@2 3 0@2 7\")"
     ]
@@ -5837,17 +6287,56 @@
     ]
   },
   "loopAtCps": {
-    "signature": "loopAtCps()",
-    "doc": "Makes the sample fit the given number of cycles and cps value, by changing the speed. deprecated: use loopAt or fit instead, together with setCps / setCpm.",
-    "params": [],
+    "signature": "loopAtCps(factor, cps)",
+    "doc": "Makes the sample fit the given number of cycles and cps value, by changing the speed. Please note that at some point cps will be given by a global clock and this function will be deprecated/removed.",
+    "params": [
+      {
+        "name": "factor",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "cps",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "samples({ rhodes: 'https://cdn.freesound.org/previews/132/132051_316502-lq.mp3' })\ns(\"rhodes\").loopAtCps(4,1.5).cps(1.5)"
     ]
   },
+  "ref": {
+    "signature": "ref(accessor)",
+    "doc": "exposes a custom value at query time. basically allows mutating state without evaluation",
+    "params": [
+      {
+        "name": "accessor",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
   "xfade": {
-    "signature": "xfade()",
+    "signature": "xfade(a, pos, b)",
     "doc": "Cross-fades between left and right from 0 to 1: - 0 = (full left, no right) - .5 = (both equal) - 1 = (no left, full right)",
-    "params": [],
+    "params": [
+      {
+        "name": "a",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "pos",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "xfade(s(\"bd*2\"), \"<0 .25 .5 .75 1>\", s(\"hh*8\"))"
     ]
@@ -5862,9 +6351,25 @@
     ]
   },
   "morph": {
-    "signature": "morph()",
+    "signature": "morph(frompat, topat, bypat)",
     "doc": "Takes two binary rhythms represented as lists of 1s and 0s, and a number between 0 and 1 that morphs between them. The two lists should contain the same number of true values.",
-    "params": [],
+    "params": [
+      {
+        "name": "frompat",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "topat",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "bypat",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "sound(\"hh\").struct(morph([1,0,1,0,1,0,1,0], // straight rhythm\n                         [1,1,0,1,0,1,0], // wonky rhythm\n                         0.25 // creates a slightly wonky rhythm\n                        )\n                  )",
       "sound(\"hh\").struct(morph(\"1:0:1:0:1:0:1:0\", // straight rhythm\n                         \"1:1:0:1:0:1:0\", // wonky rhythm\n                         sine.slow(8) // slowly morph between the rhythms\n                        )\n                  )"
@@ -6007,9 +6512,15 @@
     "examples": []
   },
   "parray": {
-    "signature": "parray()",
+    "signature": "parray(pats)",
     "doc": "Turns a list of patterns into a single pattern which outputs list-values",
-    "params": [],
+    "params": [
+      {
+        "name": "pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": []
   },
   "partials": {
@@ -6042,28 +6553,283 @@
     ]
   },
   "FX": {
-    "signature": "FX()",
+    "signature": "FX(...effects)",
     "doc": "Establishes an FX chain. Can be called by chaining .FX(fx1).FX(fx2).. calls and/or in a single .FX(fx1, fx2, ..) call. The fx1, .. are _patterns_ which establish the controls of the given effect. See examples.",
-    "params": [],
+    "params": [
+      {
+        "name": "...effects",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "$: s(\"[sbd <hh [bd | lt | oh]>]*4\").dec(.4)\n  .FX(\n    phaser(0.5).gain(2),\n    bpf(800),\n    distort(1.3),\n    room(0.2),\n    delay(0.5).gain(1.25),\n    distort(0.3),\n  ).fxr(1.7) // sets release time of effects (like delay)",
       "$: s(\"saw\").fm(0.5)\n  .delay(0.3) // outer effects are applied *last*\n  .FX(coarse(4)) // first coarse\n  .FX(lpf(500).lpe(4).lpa(1).lpd(2)) // then lpf\n  .FX(distort(1)) // then distort"
     ]
   },
-  "K": {
-    "signature": "K(expr: KabelsalatExpression | Function)",
-    "doc": "Produces a [Kabelsalat](https://kabel.salat.dev/) modular sound engine. This can be used as either an effect (by including `audioin()` at the beginning of your kabel expression) or as a sound source (via any expression which doesn't start with `audioin()`).  Some helpers you have available to you:   * Strudel mini notation works fine in K(..) via \"\" or ``   * More complex Strudel expressions (like \"0 1 2\".fast(4) or irand(24)) can be     written by wrapping them in `S(..)` inside your Kabel code   * We expose Strudel's note frequency under `sFreq` and Strudel's gate     information under `sGate`   * You can use more complex multi-line expressions (like `let x = a; let y = b; x.lpf(y);`)     by wrapping them inside a function in K (see example).",
+  "pick": {
+    "signature": "pick(pat: Pattern, xs: *)",
+    "doc": "Picks patterns (or plain values) either from a list (by index) or a lookup table (by name). Similar to `inhabit`, but maintains the structure of the original patterns.",
     "params": [
       {
-        "name": "expr",
-        "type": "KabelsalatExpression | Function",
-        "doc": "Kabelsalat graph definition"
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
       }
     ],
     "examples": [
-      "note(\"A c e\".fast(4)).transpose(\"<0 2 4 6 8>\")\n  .scale(\"F:minor\").transpose(\"12\")\n  .s(\"saw\")\n  .K(\n    // audioin().mul(sGate.adsr(0.001, 0.3, 0, 0.2)) // as effect\n    saw(saw(sFreq / \"2!3 16\").mul(8).add(sFreq).lag(\"0!3 0.1\")).mul(0.3) // as source\n    .mul(sGate.adsr(0, 0.15, 0.5, \"0.1!3 1\"))\n    .lpf(sGate.adsr(0, 0.2, 0.3, 0.2).mul(1).add(0))\n    .add(x => x.delay(S(\"0.3 0.2\".fast(2))).mul(0.7))\n    .add(x => x.delay(\"0.03 [0.08 0.01] 0.01 0.013\").mul(0.77)).mul(0.7)\n    .add(x => x.delay(.13).mul(0.7))\n    .out()\n  )",
-      "n(\"<0 1 <2 3 2 4>>*16\")\n  .scale(\"G#2:minor\").sometimes(x => x.transpose(\"12 | 24\"))\n  .K(() => {\n    const att = S(rand.range(0, 0.05))\n    const dec = S(rand.range(0.05, 0.2))\n    let f = n(sFreq);\n    const mod = sine(f).mul(\"0.1 | 0.2 | 0.3\")\n      .add(\"[[1.5 1] | 1 | 2 | 4 | [6 4@3]]*2\")\n    saw(f.mul(mod))\n    .mul(sGate.ad(att, dec))\n    .add(x => x.delay(0.4).mul(0.3))\n    .out()\n  }).fxr(1).room(0.3)"
+      "note(\"<0 1 2!2 3>\".pick([\"g a\", \"e f\", \"f g f g\" , \"g c d\"]))",
+      "sound(\"<0 1 [2,0]>\".pick([\"bd sd\", \"cp cp\", \"hh hh\"]))",
+      "sound(\"<0!2 [0,1] 1>\".pick([\"bd(3,8)\", \"sd sd\"]))",
+      "s(\"<a!2 [a,b] b>\".pick({a: \"bd(3,8)\", b: \"sd sd\"}))"
     ]
+  },
+  "pickmod": {
+    "signature": "pickmod(pat: Pattern, xs: *)",
+    "doc": "The same as `pick`, but if you pick a number greater than the size of the list, it wraps around, rather than sticking at the maximum value. For example, if you pick the fifth pattern of a list of three, you'll get the second one.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "pickF": {
+    "signature": "pickF(pat: Pattern, lookup: Pattern, funcs: function[])",
+    "doc": "pickF lets you use a pattern of numbers to pick which function to apply to another pattern.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "lookup",
+        "type": "Pattern",
+        "doc": "a pattern of indices"
+      },
+      {
+        "name": "funcs",
+        "type": "function[]",
+        "doc": "the array of functions from which to pull"
+      }
+    ],
+    "examples": [
+      "s(\"bd [rim hh]\").pickF(\"<0 1 2>\", [rev,jux(rev),fast(2)])",
+      "note(\"<c2 d2>(3,8)\").s(\"square\")\n    .pickF(\"<0 2> 1\", [jux(rev),fast(2),x=>x.lpf(800)])"
+    ]
+  },
+  "pickmodF": {
+    "signature": "pickmodF(pat: Pattern, lookup: Pattern, funcs: function[])",
+    "doc": "The same as `pickF`, but if you pick a number greater than the size of the functions list, it wraps around, rather than sticking at the maximum value.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "lookup",
+        "type": "Pattern",
+        "doc": "a pattern of indices"
+      },
+      {
+        "name": "funcs",
+        "type": "function[]",
+        "doc": "the array of functions from which to pull"
+      }
+    ],
+    "examples": []
+  },
+  "pickOut": {
+    "signature": "pickOut(pat: Pattern, xs: *)",
+    "doc": "Similar to `pick`, but it applies an outerJoin instead of an innerJoin.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "pickmodOut": {
+    "signature": "pickmodOut(pat: Pattern, xs: *)",
+    "doc": "The same as `pickOut`, but if you pick a number greater than the size of the list, it wraps around, rather than sticking at the maximum value.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "pickRestart": {
+    "signature": "pickRestart(pat: Pattern, xs: *)",
+    "doc": "Similar to `pick`, but the choosen pattern is restarted when its index is triggered.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "pickmodRestart": {
+    "signature": "pickmodRestart(pat: Pattern, xs: *)",
+    "doc": "The same as `pickRestart`, but if you pick a number greater than the size of the list, it wraps around, rather than sticking at the maximum value.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "\"<a@2 b@2 c@2 d@2>\".pickRestart({\n        a: n(\"0 1 2 0\"),\n        b: n(\"2 3 4 ~\"),\n        c: n(\"[4 5] [4 3] 2 0\"),\n        d: n(\"0 -3 0 ~\")\n      }).scale(\"C:major\").s(\"piano\")"
+    ]
+  },
+  "pickReset": {
+    "signature": "pickReset(pat: Pattern, xs: *)",
+    "doc": "Similar to `pick`, but the choosen pattern is reset when its index is triggered.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "pickmodReset": {
+    "signature": "pickmodReset(pat: Pattern, xs: *)",
+    "doc": "The same as `pickReset`, but if you pick a number greater than the size of the list, it wraps around, rather than sticking at the maximum value.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "inhabit": {
+    "signature": "inhabit(pat: Pattern, xs: *)",
+    "doc": "Picks patterns (or plain values) either from a list (by index) or a lookup table (by name). Similar to `pick`, but cycles are squeezed into the target ('inhabited') pattern.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "\"<a b [a,b]>\".inhabit({a: s(\"bd(3,8)\"),\n                            b: s(\"cp sd\")\n                           })",
+      "s(\"a@2 [a b] a\".inhabit({a: \"bd(3,8)\", b: \"sd sd\"})).slow(4)"
+    ]
+  },
+  "pickSqueeze": {
+    "signature": "pickSqueeze(pat: Pattern, xs: *)",
+    "doc": "Picks patterns (or plain values) either from a list (by index) or a lookup table (by name). Similar to `pick`, but cycles are squeezed into the target ('inhabited') pattern.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "\"<a b [a,b]>\".inhabit({a: s(\"bd(3,8)\"),\n                            b: s(\"cp sd\")\n                           })",
+      "s(\"a@2 [a b] a\".inhabit({a: \"bd(3,8)\", b: \"sd sd\"})).slow(4)"
+    ]
+  },
+  "inhabitmod": {
+    "signature": "inhabitmod(pat: Pattern, xs: *)",
+    "doc": "The same as `inhabit`, but if you pick a number greater than the size of the list, it wraps around, rather than sticking at the maximum value. For example, if you pick the fifth pattern of a list of three, you'll get the second one.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "pickmodSqueeze": {
+    "signature": "pickmodSqueeze(pat: Pattern, xs: *)",
+    "doc": "The same as `inhabit`, but if you pick a number greater than the size of the list, it wraps around, rather than sticking at the maximum value. For example, if you pick the fifth pattern of a list of three, you'll get the second one.",
+    "params": [
+      {
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      },
+      {
+        "name": "xs",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": []
   },
   "squeeze": {
     "signature": "squeeze(pat: Pattern, xs: *)",
@@ -6098,14 +6864,20 @@
       "setcpm(140/4) // =140 bpm in 4/4\n$: s(\"bd*4,[- sd]*2\").bank('tr707')"
     ]
   },
-  "all": {
-    "signature": "all()",
-    "doc": "Applies a function to all the running patterns. Note that the patterns are groups together into a single `stack` before the function is applied. This is probably what you want, but see `each` for a version that applies the function to each pattern separately. ``` $: sound(\"bd - cp sd\") $: sound(\"hh*8\") all(fast(\"<2 3>\")) ``` ``` $: sound(\"bd - cp sd\") $: sound(\"hh*8\") all(x => x.pianoroll()) ```",
-    "params": [],
+  "each": {
+    "signature": "each(transform)",
+    "doc": "Applies a function to each of the running patterns separately. This is intended for future use with upcoming 'stepwise' features. See `all` for a version that applies the function to all the patterns stacked together into a single pattern. ``` $: sound(\"bd - cp sd\") $: sound(\"hh*8\") each(fast(\"<2 3>\")) ```",
+    "params": [
+      {
+        "name": "transform",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": []
   },
   "saw": {
-    "signature": "saw()",
+    "signature": "saw",
     "doc": "A sawtooth signal between 0 and 1.",
     "params": [],
     "examples": [
@@ -6114,13 +6886,13 @@
     ]
   },
   "saw2": {
-    "signature": "saw2()",
+    "signature": "saw2",
     "doc": "A sawtooth signal between -1 and 1 (like `saw`, but bipolar).",
     "params": [],
     "examples": []
   },
   "isaw": {
-    "signature": "isaw()",
+    "signature": "isaw",
     "doc": "A sawtooth signal between 1 and 0 (like `saw`, but flipped).",
     "params": [],
     "examples": [
@@ -6129,19 +6901,19 @@
     ]
   },
   "isaw2": {
-    "signature": "isaw2()",
+    "signature": "isaw2",
     "doc": "A sawtooth signal between 1 and -1 (like `saw2`, but flipped).",
     "params": [],
     "examples": []
   },
   "sine2": {
-    "signature": "sine2()",
+    "signature": "sine2",
     "doc": "A sine signal between -1 and 1 (like `sine`, but bipolar).",
     "params": [],
     "examples": []
   },
   "sine": {
-    "signature": "sine()",
+    "signature": "sine",
     "doc": "A sine signal between 0 and 1.",
     "params": [],
     "examples": [
@@ -6149,7 +6921,7 @@
     ]
   },
   "cosine": {
-    "signature": "cosine()",
+    "signature": "cosine",
     "doc": "A cosine signal between 0 and 1.",
     "params": [],
     "examples": [
@@ -6157,13 +6929,13 @@
     ]
   },
   "cosine2": {
-    "signature": "cosine2()",
+    "signature": "cosine2",
     "doc": "A cosine signal between -1 and 1 (like `cosine`, but bipolar).",
     "params": [],
     "examples": []
   },
   "square": {
-    "signature": "square()",
+    "signature": "square",
     "doc": "A square signal between 0 and 1.",
     "params": [],
     "examples": [
@@ -6171,13 +6943,13 @@
     ]
   },
   "square2": {
-    "signature": "square2()",
+    "signature": "square2",
     "doc": "A square signal between -1 and 1 (like `square`, but bipolar).",
     "params": [],
     "examples": []
   },
   "tri": {
-    "signature": "tri()",
+    "signature": "tri",
     "doc": "A triangle signal between 0 and 1.",
     "params": [],
     "examples": [
@@ -6185,13 +6957,13 @@
     ]
   },
   "tri2": {
-    "signature": "tri2()",
+    "signature": "tri2",
     "doc": "A triangle signal between -1 and 1 (like `tri`, but bipolar).",
     "params": [],
     "examples": []
   },
   "itri": {
-    "signature": "itri()",
+    "signature": "itri",
     "doc": "An inverted triangle signal between 1 and 0 (like `tri`, but flipped).",
     "params": [],
     "examples": [
@@ -6199,19 +6971,19 @@
     ]
   },
   "itri2": {
-    "signature": "itri2()",
+    "signature": "itri2",
     "doc": "An inverted triangle signal between -1 and 1 (like `itri`, but bipolar).",
     "params": [],
     "examples": []
   },
   "time": {
-    "signature": "time()",
+    "signature": "time",
     "doc": "A signal representing the cycle time.",
     "params": [],
     "examples": []
   },
   "mousex": {
-    "signature": "mousex()",
+    "signature": "mousex",
     "doc": "The mouse's x position value ranges from 0 to 1.",
     "params": [],
     "examples": [
@@ -6219,7 +6991,7 @@
     ]
   },
   "mousey": {
-    "signature": "mousey()",
+    "signature": "mousey",
     "doc": "The mouse's y position value ranges from 0 to 1.",
     "params": [],
     "examples": [
@@ -6233,7 +7005,7 @@
       {
         "name": "mod",
         "type": "string",
-        "doc": "- Mode. One of 'legacy', 'precise'"
+        "doc": "Mode. One of 'legacy', 'precise'"
       }
     ],
     "examples": [
@@ -6241,9 +7013,15 @@
     ]
   },
   "run": {
-    "signature": "run()",
+    "signature": "run(n)",
     "doc": "A discrete pattern of numbers from 0 to n-1",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "n(run(4)).scale(\"C4:pentatonic\")\n// n(\"0 1 2 3\").scale(\"C4:pentatonic\")"
     ]
@@ -6255,7 +7033,7 @@
       {
         "name": "n",
         "type": "number",
-        "doc": "- input number to convert to binary"
+        "doc": "input number to convert to binary"
       }
     ],
     "examples": [
@@ -6269,12 +7047,12 @@
       {
         "name": "n",
         "type": "number",
-        "doc": "- input number to convert to binary"
+        "doc": "input number to convert to binary"
       },
       {
         "name": "nBits",
         "type": "number",
-        "doc": "- pattern length, defaults to 16"
+        "doc": "pattern length, defaults to 16"
       }
     ],
     "examples": [
@@ -6288,7 +7066,7 @@
       {
         "name": "n",
         "type": "number",
-        "doc": "- input number to convert to binary"
+        "doc": "input number to convert to binary"
       }
     ],
     "examples": []
@@ -6300,12 +7078,12 @@
       {
         "name": "n",
         "type": "number",
-        "doc": "- input number to convert to binary"
+        "doc": "input number to convert to binary"
       },
       {
         "name": "nBits",
         "type": "number",
-        "doc": "- pattern length, defaults to 16"
+        "doc": "pattern length, defaults to 16"
       }
     ],
     "examples": []
@@ -6325,18 +7103,30 @@
     ]
   },
   "shuffle": {
-    "signature": "shuffle()",
+    "signature": "shuffle(n)",
     "doc": "Slices a pattern into the given number of parts, then plays those parts in random order. Each part will be played exactly once per cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"c d e f\").sound(\"piano\").shuffle(4)",
       "seq(\"c d e f\".shuffle(4), \"g\").note().sound(\"piano\")"
     ]
   },
   "scramble": {
-    "signature": "scramble()",
+    "signature": "scramble(n)",
     "doc": "Slices a pattern into the given number of parts, then plays those parts at random. Similar to `shuffle`, but parts might be played more than once, or not at all, per cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "n",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "note(\"c d e f\").sound(\"piano\").scramble(4)",
       "seq(\"c d e f\".scramble(4), \"g\").note().sound(\"piano\")"
@@ -6374,7 +7164,7 @@
     ]
   },
   "rand": {
-    "signature": "rand()",
+    "signature": "rand",
     "doc": "A continuous pattern of random numbers, between 0 and 1.",
     "params": [],
     "examples": [
@@ -6382,7 +7172,7 @@
     ]
   },
   "rand2": {
-    "signature": "rand2()",
+    "signature": "rand2",
     "doc": "A continuous pattern of random numbers, between -1 and 1",
     "params": [],
     "examples": []
@@ -6394,7 +7184,7 @@
       {
         "name": "probability",
         "type": "number",
-        "doc": "- a number between 0 and 1"
+        "doc": "a number between 0 and 1"
       }
     ],
     "examples": [
@@ -6402,7 +7192,7 @@
     ]
   },
   "brand": {
-    "signature": "brand()",
+    "signature": "brand",
     "doc": "A continuous pattern of 0 or 1 (binary random)",
     "params": [],
     "examples": [
@@ -6486,18 +7276,30 @@
     "examples": []
   },
   "chooseCycles": {
-    "signature": "chooseCycles()",
+    "signature": "chooseCycles(...xs)",
     "doc": "Picks one of the elements at random each cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "...xs",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "chooseCycles(\"bd\", \"hh\", \"sd\").s().fast(8)",
       "s(\"bd | hh | sd\").fast(8)"
     ]
   },
   "randcat": {
-    "signature": "randcat()",
+    "signature": "randcat(...xs)",
     "doc": "Picks one of the elements at random each cycle.",
-    "params": [],
+    "params": [
+      {
+        "name": "...xs",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "chooseCycles(\"bd\", \"hh\", \"sd\").s().fast(8)",
       "s(\"bd | hh | sd\").fast(8)"
@@ -6518,9 +7320,15 @@
     ]
   },
   "wchooseCycles": {
-    "signature": "wchooseCycles()",
+    "signature": "wchooseCycles(...pairs)",
     "doc": "Picks one of the elements at random each cycle by giving a probability to each element",
-    "params": [],
+    "params": [
+      {
+        "name": "...pairs",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "wchooseCycles([\"bd\",10], [\"hh\",1], [\"sd\",1]).s().fast(8)",
       "wchooseCycles([\"c c c\",5], [\"a a a\",3], [\"f f f\",1]).fast(4).note()",
@@ -6528,9 +7336,15 @@
     ]
   },
   "wrandcat": {
-    "signature": "wrandcat()",
+    "signature": "wrandcat(...pairs)",
     "doc": "Picks one of the elements at random each cycle by giving a probability to each element",
-    "params": [],
+    "params": [
+      {
+        "name": "...pairs",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "wchooseCycles([\"bd\",10], [\"hh\",1], [\"sd\",1]).s().fast(8)",
       "wchooseCycles([\"c c c\",5], [\"a a a\",3], [\"f f f\",1]).fast(4).note()",
@@ -6538,7 +7352,7 @@
     ]
   },
   "perlin": {
-    "signature": "perlin()",
+    "signature": "perlin",
     "doc": "Generates a continuous pattern of [perlin noise](https://en.wikipedia.org/wiki/Perlin_noise), in the range 0..1.",
     "params": [],
     "examples": [
@@ -6546,7 +7360,7 @@
     ]
   },
   "berlin": {
-    "signature": "berlin()",
+    "signature": "berlin",
     "doc": "Generates a continuous pattern of [berlin noise](conceived by Jame Coyne and Jade Rowland as a joke but turned out to be surprisingly cool and useful, like perlin noise but with sawtooth waves), in the range 0..1.",
     "params": [],
     "examples": [
@@ -6560,7 +7374,7 @@
       {
         "name": "amount",
         "type": "number",
-        "doc": "- a number between 0 and 1"
+        "doc": "a number between 0 and 1"
       }
     ],
     "examples": [
@@ -6585,7 +7399,7 @@
       {
         "name": "amount",
         "type": "number",
-        "doc": "- a number between 0 and 1"
+        "doc": "a number between 0 and 1"
       }
     ],
     "examples": [
@@ -6609,12 +7423,12 @@
       {
         "name": "probability",
         "type": "number | Pattern",
-        "doc": "- a number between 0 and 1"
+        "doc": "a number between 0 and 1"
       },
       {
         "name": "function",
         "type": "function",
-        "doc": "- the transformation to apply"
+        "doc": "the transformation to apply"
       }
     ],
     "examples": [
@@ -6628,7 +7442,7 @@
       {
         "name": "function",
         "type": "function",
-        "doc": "- the transformation to apply"
+        "doc": "the transformation to apply"
       }
     ],
     "examples": [
@@ -6642,12 +7456,12 @@
       {
         "name": "probability",
         "type": "number | Pattern",
-        "doc": "- a number between 0 and 1"
+        "doc": "a number between 0 and 1"
       },
       {
         "name": "function",
         "type": "function",
-        "doc": "- the transformation to apply"
+        "doc": "the transformation to apply"
       }
     ],
     "examples": [
@@ -6655,41 +7469,71 @@
     ]
   },
   "someCycles": {
-    "signature": "someCycles()",
+    "signature": "someCycles(func)",
     "doc": "Shorthand for `.someCyclesBy(0.5, fn)`",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd,hh*8\").someCycles(x=>x.speed(\"0.5\"))"
     ]
   },
   "often": {
-    "signature": "often()",
+    "signature": "often(func)",
     "doc": "Shorthand for `.sometimesBy(0.75, fn)`",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"hh*8\").often(x=>x.speed(\"0.5\"))"
     ]
   },
   "rarely": {
-    "signature": "rarely()",
+    "signature": "rarely(func)",
     "doc": "Shorthand for `.sometimesBy(0.25, fn)`",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"hh*8\").rarely(x=>x.speed(\"0.5\"))"
     ]
   },
   "almostNever": {
-    "signature": "almostNever()",
+    "signature": "almostNever(func)",
     "doc": "Shorthand for `.sometimesBy(0.1, fn)`",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"hh*8\").almostNever(x=>x.speed(\"0.5\"))"
     ]
   },
   "almostAlways": {
-    "signature": "almostAlways()",
+    "signature": "almostAlways(func)",
     "doc": "Shorthand for `.sometimesBy(0.9, fn)`",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"hh*8\").almostAlways(x=>x.speed(\"0.5\"))"
     ]
@@ -6703,17 +7547,34 @@
     ]
   },
   "always": {
-    "signature": "always()",
+    "signature": "always(func)",
     "doc": "Shorthand for `.sometimesBy(1, fn)` (always calls fn)",
-    "params": [],
+    "params": [
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"hh*8\").always(x=>x.speed(\"0.5\"))"
     ]
   },
   "whenKey": {
-    "signature": "whenKey()",
+    "signature": "whenKey(input, func)",
     "doc": "Do something on a keypress, or array of keypresses [Key name reference](https://developer.mozilla.org/en-US/docs/Web/API/UI_Events/Keyboard_event_key_values)",
-    "params": [],
+    "params": [
+      {
+        "name": "input",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "func",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": [
       "s(\"bd(5,8)\").whenKey(\"Control:j\", x => x.segment(16).color(\"red\")).whenKey(\"Control:i\", x => x.fast(2).color(\"blue\"))"
     ]
@@ -6727,7 +7588,7 @@
     ]
   },
   "cyclesPer": {
-    "signature": "cyclesPer()",
+    "signature": "cyclesPer",
     "doc": "A pattern measuring the duration of events, in cycles per event. `cyclesPer` doesn't have structure itself, but takes structure, and therefore event durations, from the pattern that it is combined with. For example `cyclesPer.struct(\"1 1 [1 1] 1\")` would give the same as `\"0.25 0.25 [0.125 0.125] 0.25\"`. See also its reciprocal, `per`, also known as `perCycle`.",
     "params": [],
     "examples": [
@@ -6736,7 +7597,7 @@
     ]
   },
   "per": {
-    "signature": "per()",
+    "signature": "per",
     "doc": "A pattern measuring the 'shortness' of events, or in other words, the duration of pattern events, in events per cycle. `per` doesn't have structure itself, but takes structure, and therefore event durations, from the pattern that it is combined with. For example `per.struct(\"1 1 [1 1] 1\")` would give the same as `\"4 4 [8 8] 4\"`. See also its reciprocal, `cyclesPer`.",
     "params": [],
     "examples": [
@@ -6744,7 +7605,7 @@
     ]
   },
   "perCycle": {
-    "signature": "perCycle()",
+    "signature": "perCycle",
     "doc": "A pattern measuring the 'shortness' of events, or in other words, the duration of pattern events, in events per cycle. `per` doesn't have structure itself, but takes structure, and therefore event durations, from the pattern that it is combined with. For example `per.struct(\"1 1 [1 1] 1\")` would give the same as `\"4 4 [8 8] 4\"`. See also its reciprocal, `cyclesPer`.",
     "params": [],
     "examples": [
@@ -6752,7 +7613,7 @@
     ]
   },
   "perx": {
-    "signature": "perx()",
+    "signature": "perx",
     "doc": "Like `per` but measures the shortness of events according to an exponential curve. In particular, where the event duration halves, the returned value increases by one. `perx.struct(\"1 1 [1 [1 1]] 1\")` would therefore be the same as `\"3 3 [4 [5 5]] 3\"`.",
     "params": [],
     "examples": []
@@ -7069,6 +7930,120 @@
       "n(\"<0 4 <2 3> 1>*3\")\n.off(1/8, add(n(5)))\n.off(1/5, add(n(7)))\n.scale(\"d3:minor:pentatonic\")\n.s('sine')\n.dec(.3).room(.5)\n._spectrum()"
     ]
   },
+  "samples": {
+    "signature": "samples(sampleMap, baseUrl, options)",
+    "doc": "Loads a collection of samples to use with `s`",
+    "params": [
+      {
+        "name": "sampleMap",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "baseUrl",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "options",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "samples('github:tidalcycles/dirt-samples');\ns(\"[bd ~]*2, [~ hh]*2, ~ sd\")",
+      "samples({\n bd: '808bd/BD0000.WAV',\n sd: '808sd/SD0010.WAV'\n }, 'https://raw.githubusercontent.com/tidalcycles/Dirt-Samples/master/');\ns(\"[bd ~]*2, [~ hh]*2, ~ sd\")"
+    ]
+  },
+  "setMaxPolyphony": {
+    "signature": "setMaxPolyphony(Max: number)",
+    "doc": "Set the max polyphony. If notes are ringing out via `release` then they will start to die out in first-in-first-out order once the max polyphony has been hit",
+    "params": [
+      {
+        "name": "Max",
+        "type": "number",
+        "doc": "polyphony. Defaults to 128"
+      }
+    ],
+    "examples": [
+      "setMaxPolyphony(4)\nn(irand(24).seg(8)).scale(\"C#3:minor\").room(1).release(4).gain(0.5)"
+    ]
+  },
+  "setGainCurve": {
+    "signature": "setGainCurve(function: Function)",
+    "doc": "Apply a function to all gains provided in patterns. Can be used to rescale gain to be quadratic, exponential, etc. rather than linear",
+    "params": [
+      {
+        "name": "function",
+        "type": "Function",
+        "doc": "to apply to all gain values"
+      }
+    ],
+    "examples": [
+      "setGainCurve((x) => x * x) // quadratic gain\ns(\"bd*4\").gain(0.5) // equivalent to 0.25 gain normally"
+    ]
+  },
+  "aliasBank": {
+    "signature": "aliasBank(bank: string, alias: string)",
+    "doc": "Register an alias for a bank of sounds. Optionally accepts a single argument map of bank aliases. Optionally accepts a single argument string of a path to a JSON file containing bank aliases.",
+    "params": [
+      {
+        "name": "bank",
+        "type": "string",
+        "doc": "The bank to alias"
+      },
+      {
+        "name": "alias",
+        "type": "string",
+        "doc": "The alias to use for the bank"
+      }
+    ],
+    "examples": []
+  },
+  "soundAlias": {
+    "signature": "soundAlias(original: string, alias: string)",
+    "doc": "Register an alias for a sound.",
+    "params": [
+      {
+        "name": "original",
+        "type": "string",
+        "doc": "The original sound name"
+      },
+      {
+        "name": "alias",
+        "type": "string",
+        "doc": "The alias to use for the sound"
+      }
+    ],
+    "examples": []
+  },
+  "tables": {
+    "signature": "tables(url, frameLen, json, options)",
+    "doc": "Loads a collection of wavetables to use with `s`",
+    "params": [
+      {
+        "name": "url",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "frameLen",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "json",
+        "type": "",
+        "doc": ""
+      },
+      {
+        "name": "options",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
   "pianoroll": {
     "signature": "pianoroll(options: Object, cycles: integer, playhead: number, vertical: boolean, labels: boolean, flipTime: boolean, flipValues: boolean, overscan: number, hideNegative: boolean, smear: boolean, fold: boolean, active: string, inactive: string, background: string, playheadColor: string, fill: boolean, fillActive: boolean, stroke: boolean, strokeActive: boolean, hideInactive: boolean, colorizeInactive: boolean, fontFamily: string, minMidi: integer, maxMidi: integer, autorange: boolean)",
     "doc": "Visualises a pattern as a scrolling 'pianoroll', displayed in the background of the editor. To show a pianoroll for all running patterns, use `all(pianoroll)`. To have a pianoroll appear below a pattern instead, prefix with `_`, e.g.: `sound(\"bd sd\")._pianoroll()`.",
@@ -7338,9 +8313,15 @@
     ]
   },
   "wordfall": {
-    "signature": "wordfall()",
+    "signature": "wordfall(options)",
     "doc": "Displays a vertical pianoroll with event labels. Supports all the same options as pianoroll.",
-    "params": [],
+    "params": [
+      {
+        "name": "options",
+        "type": "",
+        "doc": ""
+      }
+    ],
     "examples": []
   },
   "pitchwheel": {
@@ -7481,219 +8462,618 @@
       "note(\"c2 a2 eb2\")\n.euclid(5,8)\n.s('sawtooth')\n.lpenv(4).lpf(300)\n._spiral({ steady: .96 })"
     ]
   },
-  "readInputs": {
-    "signature": "readInputs()",
-    "doc": "Read next web audio block to input buffers",
-    "params": [],
-    "examples": []
-  },
-  "getDuration,getDur": {
-    "signature": "getDuration,getDur(sampleName: string)",
-    "doc": "Returns the duration, in seconds, of the given sample. Has optional param `n` (for instance, the `2` in `s(\"casio:2\")`)  Note: `must` be called with await, otherwise you'll get a pending Promise object.",
+  "markcss": {
+    "signature": "markcss(value)",
+    "doc": "Overrides the css of highlighted events. Make sure to use single quotes!",
     "params": [
       {
-        "name": "sampleName",
-        "type": "string",
+        "name": "value",
+        "type": "",
         "doc": ""
       }
     ],
     "examples": [
-      "// Set a patterns cycle length to exactly the length of the sample\nsamples('github:tidalcycles/dirt-samples')\nlet k = await getDuration('sax')\ns(\"sax\").cps(1/k)"
+      "note(\"c a f e\")\n.markcss('text-decoration:underline')"
     ]
   },
-  "samples": {
-    "signature": "samples()",
-    "doc": "Loads a collection of samples to use with `s`",
-    "params": [],
-    "examples": [
-      "samples('github:tidalcycles/dirt-samples');\ns(\"[bd ~]*2, [~ hh]*2, ~ sd\")",
-      "samples({\n bd: '808bd/BD0000.WAV',\n sd: '808sd/SD0010.WAV'\n }, 'https://raw.githubusercontent.com/tidalcycles/Dirt-Samples/master/');\ns(\"[bd ~]*2, [~ hh]*2, ~ sd\")"
-    ]
-  },
-  "setMaxPolyphony": {
-    "signature": "setMaxPolyphony(Max: number)",
-    "doc": "Set the max polyphony. If notes are ringing out via `release` then they will start to die out in first-in-first-out order once the max polyphony has been hit",
+  "slider": {
+    "signature": "slider(value: number, min: number, max: number, step: number)",
+    "doc": "Displays a slider widget to allow the user manipulate a value",
     "params": [
       {
-        "name": "Max",
+        "name": "value",
         "type": "number",
-        "doc": "polyphony. Defaults to 128"
+        "doc": "Initial value"
+      },
+      {
+        "name": "min",
+        "type": "number",
+        "doc": "Minimum value - optional, defaults to 0"
+      },
+      {
+        "name": "max",
+        "type": "number",
+        "doc": "Maximum value - optional, defaults to 1"
+      },
+      {
+        "name": "step",
+        "type": "number",
+        "doc": "Step size - optional"
+      }
+    ],
+    "examples": []
+  },
+  "defaultmidimap": {
+    "signature": "defaultmidimap(mapping)",
+    "doc": "configures the default midimap, which is used when no \"midimap\" port is set Needs @strudel/midi — enable it in Settings → Packages.",
+    "params": [
+      {
+        "name": "mapping",
+        "type": "",
+        "doc": ""
       }
     ],
     "examples": [
-      "setMaxPolyphony(4)\nn(irand(24).seg(8)).scale(\"C#3:minor\").room(1).release(4).gain(0.5)"
-    ]
+      "defaultmidimap({ lpf: 74 })\n$: note(\"c a f e\").midi();\n$: lpf(sine.slow(4).segment(16)).midi();"
+    ],
+    "requires": "@strudel/midi"
   },
-  "setGainCurve": {
-    "signature": "setGainCurve(function: Function)",
-    "doc": "Apply a function to all gains provided in patterns. Can be used to rescale gain to be quadratic, exponential, etc. rather than linear",
+  "midimaps": {
+    "signature": "midimaps(map)",
+    "doc": "Adds midimaps to the registry. Inside each midimap, control names (e.g. lpf) are mapped to cc numbers. Needs @strudel/midi — enable it in Settings → Packages.",
     "params": [
       {
-        "name": "function",
-        "type": "Function",
-        "doc": "to apply to all gain values"
+        "name": "map",
+        "type": "",
+        "doc": ""
       }
     ],
     "examples": [
-      "setGainCurve((x) => x * x) // quadratic gain\ns(\"bd*4\").gain(0.5) // equivalent to 0.25 gain normally"
-    ]
+      "midimaps({ mymap: { lpf: 74 } })\n$: note(\"c a f e\")\n.lpf(sine.slow(4))\n.midimap('mymap')\n.midi()",
+      "midimaps({ mymap: {\n  lpf: { ccn: 74, min: 0, max: 20000, exp: 0.5 }\n}})\n$: note(\"c a f e\")\n.lpf(sine.slow(2).range(400,2000))\n.midimap('mymap')\n.midi()"
+    ],
+    "requires": "@strudel/midi"
   },
-  "aliasBank": {
-    "signature": "aliasBank(bank: string, alias: string)",
-    "doc": "Register an alias for a bank of sounds. Optionally accepts a single argument map of bank aliases. Optionally accepts a single argument string of a path to a JSON file containing bank aliases.",
+  "midi": {
+    "signature": "midi(midiport: string | number, options: object)",
+    "doc": "MIDI output: Opens a MIDI output port. Needs @strudel/midi — enable it in Settings → Packages.",
     "params": [
       {
-        "name": "bank",
-        "type": "string",
-        "doc": "- The bank to alias"
+        "name": "midiport",
+        "type": "string | number",
+        "doc": "MIDI device name or index defaulting to 0"
       },
-      {
-        "name": "alias",
-        "type": "string",
-        "doc": "- The alias to use for the bank"
-      }
-    ],
-    "examples": []
-  },
-  "soundAlias": {
-    "signature": "soundAlias(original: string, alias: string)",
-    "doc": "Register an alias for a sound.",
-    "params": [
-      {
-        "name": "original",
-        "type": "string",
-        "doc": "- The original sound name"
-      },
-      {
-        "name": "alias",
-        "type": "string",
-        "doc": "- The alias to use for the sound"
-      }
-    ],
-    "examples": []
-  },
-  "tables": {
-    "signature": "tables()",
-    "doc": "Loads a collection of wavetables to use with `s`",
-    "params": [],
-    "examples": []
-  },
-  "primeArrangementParser": {
-    "signature": "primeArrangementParser(parsedList: Array)",
-    "doc": "Called by eval-feedback.js right before editor.evaluate fires. Stashes the parser's output so the wrapper can recover human-readable labels.",
-    "params": [
-      {
-        "name": "parsedList",
-        "type": "Array",
-        "doc": "output of parseArrangements(editor.code)"
-      }
-    ],
-    "examples": []
-  },
-  "subscribeRegistry": {
-    "signature": "subscribeRegistry()",
-    "doc": "Subscribe to registry/solo-state changes. Fires immediately with the current snapshot, then on every subsequent emit(). Returns an unsubscribe.",
-    "params": [],
-    "examples": []
-  },
-  "resetRegistry": {
-    "signature": "resetRegistry()",
-    "doc": "Reset the registry at the start of each evaluate. Solo state is intentionally NOT reset — it persists across evaluates so the user can iterate on a soloed section without re-toggling after each Cmd+Enter, and so WAV export respects the soloed selection.",
-    "params": [],
-    "examples": []
-  },
-  "markEvalAppliedFor": {
-    "signature": "markEvalAppliedFor()",
-    "doc": "Called by eval-feedback once the evaluate resolves successfully. Snapshots the buffer text that produced the current registry so the UI can detect post-eval edits and downgrade to a parser preview.",
-    "params": [],
-    "examples": []
-  },
-  "endEvaluate": {
-    "signature": "endEvaluate()",
-    "doc": "Called by eval-feedback after _editorEvaluate resolves (or throws). This is the only safe point to reconcile solo state against the fresh registry — during eval, the registry can briefly be empty or mid-build and would misleadingly fail the validity check.",
-    "params": [],
-    "examples": []
-  },
-  "setSolo": {
-    "signature": "setSolo()",
-    "doc": "Toggle the solo for a given arrange/section coordinate. If the same coordinate is already soloed, clears the solo. Any other coordinate replaces the current solo.  Callers are expected to trigger a re-evaluate after this (so the wrapper fires again and substitutes the soloed pattern into the scheduler). The UI does `setSolo(...); editor.evaluate();`.",
-    "params": [],
-    "examples": []
-  },
-  "validateSolo": {
-    "signature": "validateSolo()",
-    "doc": "Check whether the current solo coordinate still points at a valid section in the latest registry. If the user edited the arrange out of existence (or removed the section), the solo is silently cleared and the UI goes back to normal.  Only runs when NOT mid-eval — during an evaluate the registry can be transiently empty (reset at start, populates as wrappers fire), and a naive check would clear solo mid-flight. eval-feedback calls this via endEvaluate() at the right moment.",
-    "params": [],
-    "examples": []
-  },
-  "initHydra": {
-    "signature": "initHydra(options: object)",
-    "doc": "Initialize Hydra visuals into the full-viewport `#hydra-canvas`. Runs fully offline (bundled hydra-synth — never the unpkg CDN). Returns the hydra instance (preserves the upstream/#1784 contract). Re-init with changed options removes the old `#hydra-canvas` first (upstream behavior).  Hydra source chains use Hydra's own functions (osc, noise, …), NOT Strudel mini-notation. Any string passed to a strasbeat helper must be single-quoted (becomes load-bearing for shader('…') in Phase 2). See CLAUDE.md.",
-    "params": [
       {
         "name": "options",
         "type": "object",
-        "doc": "detectAudio (default false — passed to the Hydra constructor to enable mic-reactive sources), contextType (default 'webgl'), pixelRatio (default 1), pixelated (default true), feedStrudel (deferred — only coherent with the full-window increment)."
+        "doc": "Additional MIDI configuration options"
       }
     ],
     "examples": [
-      "await initHydra()\nosc(10, 0.1, 1.2).color(0.9, 0.3, 0.6).out()"
+      "note(\"c4\").midichan(1).midi('IAC Driver Bus 1')",
+      "note(\"c4\").midichan(1).midi('IAC Driver Bus 1', { controller: true, latency: 50 })"
+    ],
+    "requires": "@strudel/midi"
+  },
+  "midin": {
+    "signature": "midin(input: string | number)",
+    "doc": "MIDI input: Opens a MIDI input port to receive MIDI control change messages.  The output is a function that accepts a midi cc value to query as well as (optionally) a midi channel Needs @strudel/midi — enable it in Settings → Packages.",
+    "params": [
+      {
+        "name": "input",
+        "type": "string | number",
+        "doc": "MIDI device name or index defaulting to 0"
+      }
+    ],
+    "examples": [
+      "const cc = await midin('IAC Driver Bus 1')\nnote(\"c a f e\").lpf(cc(0).range(0, 1000)).lpq(cc(1).range(0, 10)).sound(\"sawtooth\")",
+      "const allCC = await midin('IAC Driver Bus 1')\nconst cc = (ccNum) => allCC(ccNum, 2) // just channel 2\nnote(\"c a f e\").s(\"saw\")\n  .when(cc(0).gt(0), x => x.postgain(0))"
+    ],
+    "requires": "@strudel/midi"
+  },
+  "midikeys": {
+    "signature": "midikeys(input: string | number)",
+    "doc": "MIDI keyboard: Opens a MIDI input port to receive MIDI keyboard messages.  The note length is fixed as Superdough is not currently set up for undetermined note durations Needs @strudel/midi — enable it in Settings → Packages.",
+    "params": [
+      {
+        "name": "input",
+        "type": "string | number",
+        "doc": "MIDI device name or index defaulting to 0"
+      }
+    ],
+    "examples": [
+      "const kb = await midikeys('Arturia KeyStep 32')\nkb().s(\"tri\").lpf(80).lpe(6).lpd(0.1).room(2).delay(0.35)",
+      "const kb = await midikeys('Arturia KeyStep 32')\nkb(\"0.5 1\")\n  .s(\"saw\")\n  .add(note(rand.mul(0.3)))\n  .lpf(1000).lpe(2).room(0.5)"
+    ],
+    "requires": "@strudel/midi"
+  },
+  "osc": {
+    "signature": "osc()",
+    "doc": "Sends each hap as an OSC message, which can be picked up by SuperCollider or any other OSC-enabled software. For more info, read [MIDI & OSC in the docs](https://strudel.cc/learn/input-output/) Needs @strudel/osc — enable it in Settings → Packages.",
+    "params": [],
+    "examples": [],
+    "requires": "@strudel/osc"
+  },
+  "csoundm": {
+    "signature": "csoundm(instrument)",
+    "doc": "Sends notes to Csound for rendering with MIDI semantics. The hap value is translated to these Csound pfields:   p1 -- Csound instrument either as a number (1-based, can be a fraction),        or as a string name.  p2 -- time in beats (usually seconds) from start of performance.  p3 -- duration in beats (usually seconds).  p4 -- MIDI key number (as a real number, not an integer but in [0, 127].  p5 -- MIDI velocity (as a real number, not an integer but in [0, 127].  p6 -- Strudel controls, as a string. Needs @strudel/csound — enable it in Settings → Packages.",
+    "params": [
+      {
+        "name": "instrument",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [],
+    "requires": "@strudel/csound"
+  },
+  "delaytime": {
+    "signature": "delaytime(delay: number | Pattern)",
+    "doc": "Sets the time of the delay effect in seconds.",
+    "params": [
+      {
+        "name": "delay",
+        "type": "number | Pattern",
+        "doc": "in seconds"
+      }
+    ],
+    "examples": [
+      "note(\"d d a# a\".fast(2))\n.s(\"sawtooth\")\n.delay(.8)\n.delaytime(1/2)"
     ]
   },
-  "clearHydra": {
-    "signature": "clearHydra()",
-    "doc": "Stop Hydra, remove its canvas, and flip the Visuals mode unavailable. Called from patterns AND from the stop path / HMR dispose (Task 3).",
+  "fadeTime": {
+    "signature": "fadeTime(time: number | Pattern)",
+    "doc": "Used when using `begin`/`end` or `chop`/`striate` and friends, to change the fade out time of the 'grain' envelope.",
+    "params": [
+      {
+        "name": "time",
+        "type": "number | Pattern",
+        "doc": "between 0 and 1"
+      }
+    ],
+    "examples": [
+      "s(\"oh*4\").end(.1).fadeTime(\"<0 .2 .4 .8>\").osc()"
+    ]
+  },
+  "fadeOutTime": {
+    "signature": "fadeOutTime(time: number | Pattern)",
+    "doc": "Used when using `begin`/`end` or `chop`/`striate` and friends, to change the fade out time of the 'grain' envelope.",
+    "params": [
+      {
+        "name": "time",
+        "type": "number | Pattern",
+        "doc": "between 0 and 1"
+      }
+    ],
+    "examples": [
+      "s(\"oh*4\").end(.1).fadeTime(\"<0 .2 .4 .8>\").osc()"
+    ]
+  },
+  "panspan": {
+    "signature": "panspan(span: number | Pattern)",
+    "doc": "Controls how much multichannel output is fanned out",
+    "params": [
+      {
+        "name": "span",
+        "type": "number | Pattern",
+        "doc": "between -inf and inf, negative is backwards ordering"
+      }
+    ],
+    "examples": [
+      "s(\"[bd hh]*2\").pan(\"<.5 1 .5 0>\").panspan(\"<0 .5 1>\").osc()"
+    ]
+  },
+  "pansplay": {
+    "signature": "pansplay(spread: number | Pattern)",
+    "doc": "Controls how much multichannel output is spread",
+    "params": [
+      {
+        "name": "spread",
+        "type": "number | Pattern",
+        "doc": "between 0 and 1"
+      }
+    ],
+    "examples": [
+      "s(\"[bd hh]*2\").pan(\"<.5 1 .5 0>\").pansplay(\"<0 .5 1>\").osc()"
+    ]
+  },
+  "asNumber": {
+    "signature": "asNumber()",
+    "doc": "Returns a new pattern with all values parsed as numerals.",
     "params": [],
     "examples": []
   },
-  "H": {
-    "signature": "H(p: Pattern)",
-    "doc": "Guarded value-sampler for driving a Hydra param from a pattern signal. Returns a function that queries the pattern at the current time and yields its active value. Upstream's H() indexes `[0].value` on an empty array and throws the instant the pattern has no active hap — which is most of the time for a sparse pattern, and a throw here crashes the whole render loop. This guard returns the last non-empty value seen (or 0 if none yet). Empty haps are normal, NOT an error, so this does not warn — it just never throws.  Use single quotes when calling H() from a pattern file — Strudel's transpiler rewrites double-quoted strings to mini-notation. See CLAUDE.md.",
+  "set": {
+    "signature": "set(pat: Pattern)",
+    "doc": "When called on a pattern `a`, with a input pattern `b` (`a.set(b)`), combines `a` and `b` such that anything defined in `b` and anything defined in `a` that is *not* defined in `b` will be in the resulting pattern.  The structure is maintained from `a`, because the default pattern alignment is `in`, see the section on `Pattern Alignment` in the technical manual in the docs  This is the inverse of `keep`  See examples below",
     "params": [
       {
-        "name": "p",
+        "name": "pat",
         "type": "Pattern",
-        "doc": "any Strudel pattern/signal"
+        "doc": ""
       }
     ],
     "examples": [
-      "osc(10).rotate(H(\"0 0.5 1\"))"
+      "// because input pattern has `s` set,\n// it overrides the \"sine\" declared earlier\nnote(\"c a f e\").s(\"sine\").set(s(\"triangle\"))"
     ]
   },
-  "progression": {
-    "signature": "progression(chords: string, options: object)",
-    "doc": "Turn a one-line chord progression into a playable Strudel pattern.  Accepts absolute chord symbols or Roman numerals (when options.key is set). Voice leading, slash chords, and voicing dictionaries are delegated to strudel/tonal. Returns a real Pattern that chains with .slow(), .gain(), .every(), etc. like any other Strudel source.  Use single quotes in pattern files — the transpiler rewrites double-quoted strings to mini-notation, which silently breaks this function.",
+  "keep": {
+    "signature": "keep(pat: Pattern)",
+    "doc": "When called on a pattern `a`, with a input pattern `b` (`a.keep(b)`), combines `a` and `b` such that anything defined in `a`, and anything defined in `b` that is *not* defined in `a` will be in the resulting pattern  The structure is maintained from `a`, because the default pattern alignment is `in`, see the section on `Pattern Alignment` in the technical manual in the docs  This is the inverse of `set`  See examples below",
     "params": [
       {
-        "name": "chords",
-        "type": "string",
-        "doc": "Space-separated chord symbols or Roman numerals. Per-token modifiers: @N weight (like Strudel's @), *N repeat (like *)."
+        "name": "pat",
+        "type": "Pattern",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "// notes, already defined, will stay \"c a f e\",\n// while \"s\", not defined, will be set to \"piano\"\nnote(\"c a f e\").keep(note(\"e f a c\").s(\"piano\"))"
+    ]
+  },
+  "mod": {
+    "signature": "mod()",
+    "doc": "Divides each number by the given factor and returns the remainder",
+    "params": [],
+    "examples": []
+  },
+  "pow": {
+    "signature": "pow()",
+    "doc": "Raises each number to the power of the given factor",
+    "params": [],
+    "examples": []
+  },
+  "band": {
+    "signature": "band()",
+    "doc": "Performs a bitwise `and` on each number and the given factor",
+    "params": [],
+    "examples": []
+  },
+  "bor": {
+    "signature": "bor()",
+    "doc": "Performs a bitwise `or` on each number and the given factor",
+    "params": [],
+    "examples": []
+  },
+  "bxor": {
+    "signature": "bxor()",
+    "doc": "Performs a bitwise `xor` on each number and the given factor",
+    "params": [],
+    "examples": []
+  },
+  "blshift": {
+    "signature": "blshift()",
+    "doc": "Performs a bitwise `left shift` on each number by the given factor",
+    "params": [],
+    "examples": []
+  },
+  "brshift": {
+    "signature": "brshift()",
+    "doc": "Performs a bitwise `right shift` on each number by the given factor",
+    "params": [],
+    "examples": []
+  },
+  "lt": {
+    "signature": "lt(a: any, b: any)",
+    "doc": "performs a < b",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
       },
       {
-        "name": "options",
-        "type": "object",
-        "doc": "sound, dict, rhythm (block/strum/comp/arp-up/arp-down/alberti), bass, style (jazz-comp/pop-pad/lo-fi/folk-strum/piano-bare), key"
+        "name": "b",
+        "type": "any",
+        "doc": ""
       }
     ],
-    "examples": [
-      "progression('Cm7 F7 Bb^7 Eb^7')",
-      "progression('ii V I', { key: 'C' })",
-      "progression('C G Am F', { style: 'folk-strum', bass: true })",
-      "progression('Am F C G@2')"
-    ]
+    "examples": []
   },
-  "shader": {
-    "signature": "shader(src: string)",
-    "doc": "Compile and render a drop-in fragment shader, with named uniforms driven by the playing pattern's events. Built-in uTime / uResolution are always provided. Auto-uniforms derive from the pattern automatically — type these verbatim into your GLSL:   - drum lanes bd / sd / hh → uKick / uSnare / uHat   - every active sound `name` → u_<name>, with each non-alphanumeric char     replaced by _ and a leading _ so digit-leading names stay legal GLSL     (gm_pad_warm → u_gm_pad_warm, 909-clap → u_909_clap)   - any note/n hap → uKeyVelocity Override/extend any of these with .uniform({ dest, gain }).  SINGLE-QUOTE RULE: the shader source MUST be single-quoted. Strudel's transpiler rewrites every DOUBLE-quoted string literal into a mini(...) call, which would turn your GLSL into a Pattern and break the node. Drum/ note patterns in the same file still use double quotes (correct for s(\"…\")). See CLAUDE.md \"the single-quote rule\".  MULTI-LINE SHADERS: a single-quoted string can't span multiple physical lines, and the transpiler ALSO rewrites backtick template literals into mini(...) — so a `multi-line backtick` source is NOT safe either. Write a readable multi-line shader by concatenating single-quoted lines with '+', each ending in '\\n':   await shader(     'precision mediump float;\\n' +     'uniform float uKick;\\n' +     'void main(){ gl_FragColor = vec4(uKick, 0., 0., 1.); }\\n'   ) Every piece stays single-quoted (none gets mini-rewritten), it parses as plain JS, and the \\n keep GLSL line numbers intact in compile errors.",
+  "gt": {
+    "signature": "gt(a: any, b: any)",
+    "doc": "performs a > b",
     "params": [
       {
-        "name": "src",
-        "type": "string",
-        "doc": "single-quoted GLSL fragment shader source (concatenate"
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "lte": {
+    "signature": "lte(a: any, b: any)",
+    "doc": "performs a <= b",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "gte": {
+    "signature": "gte(a: any, b: any)",
+    "doc": "performs a >= b",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "eq": {
+    "signature": "eq(a: any, b: any)",
+    "doc": "performs a == b",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "eqt": {
+    "signature": "eqt(a: any, b: any)",
+    "doc": "performs a === b (strictly equal)",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "ne": {
+    "signature": "ne(a: any, b: any)",
+    "doc": "performs a != b",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "net": {
+    "signature": "net(a: any, b: any)",
+    "doc": "performs a !== b (strictly not equal)",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "and": {
+    "signature": "and(a: any, b: any)",
+    "doc": "performs a && b",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "or": {
+    "signature": "or(a: any, b: any)",
+    "doc": "performs a || b",
+    "params": [
+      {
+        "name": "a",
+        "type": "any",
+        "doc": ""
+      },
+      {
+        "name": "b",
+        "type": "any",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "stackLeft": {
+    "signature": "stackLeft(...pats)",
+    "doc": "The input patterns are aligned to the left, with silence padded to the shorter pattern(s) in the final steps if there's a stepcount disparity. See also `stackRight` and `stackCenter/stackCentre`",
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
       }
     ],
     "examples": [
-      "await shader('precision mediump float; uniform float uKick; void main(){ gl_FragColor = vec4(uKick,0.,0.,1.); }')"
+      "stackLeft(\"0 1 2 3\", \"3 4\", \"[4 5 6] 7 8 9 10\").scale(\"c:minor\").note()",
+      "// chainable\n\"0 1 2 3\".stackLeft(\"3 4\", \"[4 5 6] 7 8 9 10\").scale(\"c:minor\").note()"
     ]
+  },
+  "stackRight": {
+    "signature": "stackRight(...pats)",
+    "doc": "The input patterns are aligned to the right, with silence padded to the shorter pattern(s) in the initial steps if there's a stepcount disparity. See also `stackLeft` and `stackCenter/stackCentre`",
+    "params": [
+      {
+        "name": "...pats",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "stackRight(\"0 1 2 3\", \"3 4\", \"[4 5 6] 7 8 9 10\").scale(\"c:minor\").note()",
+      "// chainable\n\"0 1 2 3\".stackRight(\"3 4\", \"[4 5 6] 7 8 9 10\").scale(\"c:minor\").note()"
+    ]
+  },
+  "hsla": {
+    "signature": "hsla(hue: Number, saturation: Number, lightness: Number, alpha: Number)",
+    "doc": "Sets the pattern's color to the given [hsla](https://www.w3schools.com/htmL/html_colors_hsl.asp)",
+    "params": [
+      {
+        "name": "hue",
+        "type": "Number",
+        "doc": "(0 - 360)"
+      },
+      {
+        "name": "saturation",
+        "type": "Number",
+        "doc": "percentage (0 - 100)"
+      },
+      {
+        "name": "lightness",
+        "type": "Number",
+        "doc": "percentage (0 - 100)"
+      },
+      {
+        "name": "alpha",
+        "type": "Number",
+        "doc": "(transparency) (0.0 - 1.0)"
+      }
+    ],
+    "examples": []
+  },
+  "hsl": {
+    "signature": "hsl(hue: Number, saturation: Number, lightness: Number)",
+    "doc": "Sets the pattern's color to the given [hsl](https://www.w3schools.com/htmL/html_colors_hsl.asp)",
+    "params": [
+      {
+        "name": "hue",
+        "type": "Number",
+        "doc": "(0 - 360)"
+      },
+      {
+        "name": "saturation",
+        "type": "Number",
+        "doc": "percentage (0 - 100)"
+      },
+      {
+        "name": "lightness",
+        "type": "Number",
+        "doc": "percentage (0 - 100)"
+      }
+    ],
+    "examples": []
+  },
+  "all": {
+    "signature": "all(transform)",
+    "doc": "Applies a function to all the running patterns. Note that the patterns are grouped together into a single `stack` before the function is applied. This is probably what you want, but see `each` for a version that applies the function to each pattern separately.  **Note:** Patterns must be labeled (e.g. with `$:`) to be picked up by `all`. An unlabeled pattern such as `note(\"c4\")` is not registered and will produce no audio when `all` is present. Use `$: note(\"c4\")` instead. ``` $: sound(\"bd - cp sd\") $: sound(\"hh*8\") all(fast(\"<2 3>\")) ``` ``` $: sound(\"bd - cp sd\") $: sound(\"hh*8\") all(x => x.pianoroll()) ```",
+    "params": [
+      {
+        "name": "transform",
+        "type": "",
+        "doc": ""
+      }
+    ],
+    "examples": []
+  },
+  "signal": {
+    "signature": "signal(func: *)",
+    "doc": "Creates a signal given by the input function",
+    "params": [
+      {
+        "name": "func",
+        "type": "*",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "// sawtooth signal definition\nsignal(t=>t%1).segment(16).range(30,40).note()",
+      "signal(t=>Math.pow(t,2)%1).range(40, 60).add(5).segment(16)\n.off(0, x=>x.add(7))\n.note()\n.s(\"gm_electric_guitar_jazz,gm_epiano\")\n  .gain(1.7)\n.pianoroll()"
+    ]
+  },
+  "mouseX": {
+    "signature": "mouseX",
+    "doc": "The mouse's x position value ranges from 0 to 1.",
+    "params": [],
+    "examples": [
+      "n(mousex.segment(4).range(0,7)).scale(\"C:minor\")"
+    ]
+  },
+  "mouseY": {
+    "signature": "mouseY",
+    "doc": "The mouse's y position value ranges from 0 to 1.",
+    "params": [],
+    "examples": [
+      "n(mousey.segment(4).range(0,7)).scale(\"C:minor\")"
+    ]
+  },
+  "getFrequency": {
+    "signature": "getFrequency(input: Hap | note | number)",
+    "doc": "Given a hap, returns the frequency of the note or freq, if defined  Given a note, returns the frequency of that note `getFreq('c3')`  Given a midi note number, returns the frequency of that midi note `getFreq('c3')`",
+    "params": [
+      {
+        "name": "input",
+        "type": "Hap | note | number",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "i(\"4 8 9 10 - - 5 7 9 11 - -\").tune(\"tranh3\")\n.mul(getFreq('c3'))\n.freq().clip(.5).room(1)"
+    ]
+  },
+  "tune": {
+    "signature": "tune(scale: (string | number[] ))",
+    "doc": "Deprecated.  Assumes pattern contains numerical scale degrees on the `i` control (see examples below). Accepts a scale name or list of frequencies (see all available names at the link on the reference). Returns a new pattern with all values mapped to a frequency ratio. Similar to `xen`. Needs @strudel/xen — enable it in Settings → Packages.",
+    "params": [
+      {
+        "name": "scale",
+        "type": "(string | number[] )",
+        "doc": ""
+      }
+    ],
+    "examples": [
+      "i(\"0 1 2 3 4 5\").tune(\"hexany15\").mul(\"220\").freq()",
+      "// You can set your root to be a\n// particular note with getFreq:\ni(\"4 8 9 10 - - 5 7 9 11 - -\").tune(\"tranh3\")\n  .mul(getFreq('c3'))\n  .freq().clip(.5).room(1)",
+      "// You can also give tune a list of\n// frequencies to use as the scale:\ni(\"0 1 2 3 4\").tune([\n  261.6255653006,\n  302.72962012827,\n  350.29154279212,\n  405.32593044476,\n  469.00678383895,\n  523.2511306012\n]).mul(220).freq();"
+    ],
+    "requires": "@strudel/xen"
   }
 }

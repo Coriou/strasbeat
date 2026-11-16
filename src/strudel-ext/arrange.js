@@ -33,6 +33,7 @@ let parsedQueue = [];
  * Called by eval-feedback.js right before editor.evaluate fires. Stashes
  * the parser's output so the wrapper can recover human-readable labels.
  * @param {Array} parsedList  output of parseArrangements(editor.code)
+ * @noAutocomplete
  */
 export function primeArrangementParser(parsedList) {
   parsedQueue = Array.isArray(parsedList) ? parsedList.slice() : [];
@@ -71,6 +72,7 @@ function emit() {
 /**
  * Subscribe to registry/solo-state changes. Fires immediately with the
  * current snapshot, then on every subsequent emit(). Returns an unsubscribe.
+ * @noAutocomplete
  */
 export function subscribeRegistry(fn) {
   subscribers.add(fn);
@@ -91,6 +93,7 @@ export function getRegistry() {
  * intentionally NOT reset — it persists across evaluates so the user can
  * iterate on a soloed section without re-toggling after each Cmd+Enter,
  * and so WAV export respects the soloed selection.
+ * @noAutocomplete
  */
 export function resetRegistry() {
   registry = [];
@@ -98,7 +101,10 @@ export function resetRegistry() {
   emit();
 }
 
-/** Called by eval-feedback before _editorEvaluate fires. */
+/**
+ * Called by eval-feedback before _editorEvaluate fires.
+ * @noAutocomplete
+ */
 export function beginEvaluate() {
   evalInProgress = true;
 }
@@ -107,6 +113,7 @@ export function beginEvaluate() {
  * Called by eval-feedback once the evaluate resolves successfully.
  * Snapshots the buffer text that produced the current registry so the
  * UI can detect post-eval edits and downgrade to a parser preview.
+ * @noAutocomplete
  */
 export function markEvalAppliedFor(code) {
   lastAppliedCode = typeof code === "string" ? code : null;
@@ -122,6 +129,7 @@ export function getLastAppliedCode() {
  * This is the only safe point to reconcile solo state against the
  * fresh registry — during eval, the registry can briefly be empty or
  * mid-build and would misleadingly fail the validity check.
+ * @noAutocomplete
  */
 export function endEvaluate() {
   evalInProgress = false;
@@ -152,6 +160,7 @@ export function getSoloKey() {
  * Callers are expected to trigger a re-evaluate after this (so the
  * wrapper fires again and substitutes the soloed pattern into the
  * scheduler). The UI does `setSolo(...); editor.evaluate();`.
+ * @noAutocomplete
  */
 export function setSolo(arrangeIndex, sectionIndex) {
   if (
@@ -183,6 +192,7 @@ export function clearSolo() {
  * transiently empty (reset at start, populates as wrappers fire), and a
  * naive check would clear solo mid-flight. eval-feedback calls this via
  * endEvaluate() at the right moment.
+ * @noAutocomplete
  */
 export function validateSolo() {
   if (evalInProgress) return;
