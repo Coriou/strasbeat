@@ -28,8 +28,16 @@ Everything below is custom to this repo — Strudel itself ships none of
 it.
 
 - **Design-system shell**: top bar with brand/pattern menu/settings, left
-  rail patterns library (search + keyboard nav), editor canvas, transport
-  bar (BPM/cycle/playhead/MIDI pill), collapsible Canvas2D piano roll.
+  rail patterns library (search + keyboard nav), pattern tabs, editor
+  canvas, transport bar (BPM/cycle/playhead/MIDI pill), collapsible
+  bottom panel (piano roll, scope, beat grid, visuals).
+- **Works on phones and tablets**: below 900 px the rails collapse to
+  strips and open over the editor instead of squeezing it; below 600 px
+  the chrome condenses further. Touch screens get larger targets.
+- **Keyboard-accessible library and tabs**: the patterns library is a
+  tree with one tab stop (arrows, type-to-find, Enter to open, F2 to
+  rename, Shift+F10 for the menu); arrows move between pattern tabs and
+  Delete closes the focused one.
 - **IDE-grade editor extensions** (CodeMirror 6, layered on
   `StrudelMirror`):
   - **Autocomplete chain** for sounds, banks, chords, scales, modes,
@@ -47,7 +55,16 @@ it.
     stopped it only edits the number).
 - **Custom Canvas2D piano roll** with per-layer color, beat/cycle
   gridlines, click-to-locate, and active-row labels — written from
-  scratch (not Strudel's built-in renderer).
+  scratch (not Strudel's built-in renderer). It honours `.color()`.
+- **Strudel draw functions in the bottom panel**: `.punchcard()`,
+  `.spiral()`, `.wordfall()` and your own `.onPaint()` draw into a
+  "Custom" mode that appears when a pattern uses one.
+- **strudel.cc's default sounds**: short drum-machine bank names
+  (`.bank("tr909")`, `"tr808"`, `"linn"`, …), the sampled grand piano
+  (`s("piano")`, `.piano()`), the VCSL instruments (`kalimba`, `gong`,
+  …), wavetables (`wt_*`) and mridangam are available without any setup,
+  so patterns pasted from strudel.cc find their sounds. One deliberate
+  difference: `bd`, `sd`, `hh` and friends come from dirt-samples here.
 - **Hardware MIDI bridge** (`src/midi-bridge.js`): live play through
   `superdough` with envelope-tuned presets (piano, EP, organ, pluck,
   pad, …), plus a *capture phrase → save as pattern file* flow.
@@ -78,7 +95,7 @@ pnpm dev       # http://localhost:5173
 pnpm build     # production bundle into dist/
 pnpm preview   # serve the production build
 pnpm test      # node --test (pattern-shape assertions, no audio)
-pnpm gen:docs  # rebuild src/editor/strudel-docs.json from upstream JSDoc
+pnpm gen:docs  # rebuild src/editor/strudel-docs.json (only functions the installed packages can run)
 ```
 
 The browser autoplay policy needs a click before audio can start. After
@@ -238,7 +255,7 @@ or `window.patterns` is fair game from devtools:
 ```js
 strasbeat.findSounds('909')          // every 909-tagged sound
 strasbeat.hasSound('gm_pad_warm')    // verify a name before pasting
-strasbeat.countSounds()              // total registered sounds (~1000+)
+strasbeat.countSounds()              // total registered sounds (~1,850)
 strasbeat.probeRender(4)             // render 4 cycles offline, return stats
 editor.code                          // current editor buffer
 editor.evaluate()                    // evaluate + play

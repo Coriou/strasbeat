@@ -44,12 +44,15 @@ the editor).
 `@strudel/codemirror`) into `#editor`, auto-discovers `patterns/*.js` via
 `import.meta.glob`, and wires every panel and toolbar button together. The
 heavy lifting is split into focused modules: `boot.js` runs the prebake
-state machine (evalScope, soundfonts, samples), `eval-feedback.js`
+state machine (evalScope, soundfonts, the default sample maps listed in
+`default-samples.js`), `eval-feedback.js`
 monkey-patches `editor.evaluate`/`editor.stop` with request sequencing,
 error tracking, sound validation, and silence detection (the pure rules
-live in `eval-state.js`), `panels.js` creates and registers the six
-right-rail panels (Learn, Sounds, Reference, Console, Export, Settings —
-package and sample setup lives inside Settings), `capture.js` owns the
+live in `eval-state.js`), `panels.js` registers the six right-rail panels
+(Learn, Sounds, Reference, Console, Export, Settings — package and sample
+setup lives inside Settings; only the console is in the entry chunk, the
+other five load on first open through `ui/lazy-panel.js`), `capture.js`
+owns the
 MIDI capture preview modal, `export.js` handles WAV rendering, `share.js`
 the URL codec and share-link arrival, and `command-palette-actions.js`
 maps keyboard shortcuts to commands. `storage-guard.js` is imported first
@@ -71,9 +74,11 @@ playing) and the capture preview (`capture.js`, which plays a take without
 touching the buffer).
 
 The shell is a design-system layout (top bar with brand + pattern menu +
-share/settings, left rail patterns library, editor canvas, transport bar
-with cps/bpm + cycle + playhead + MIDI pill, collapsible piano roll at the
-bottom) and the editor is extended with a Prettier-based formatter, a
+share/settings, left rail patterns library, tab strip + editor canvas,
+transport bar with cps/bpm + cycle + playhead + MIDI pill, and a
+collapsible bottom panel whose modes are Roll, Scope, Beat grid, Visuals
+and Custom). It has three layouts by viewport width — see "Responsive
+layout and keyboard models" below. The editor is extended with a Prettier-based formatter, a
 VSCode-style keymap, a Figma-style numeric drag-to-scrub, an autocomplete
 chain (sounds / banks / chords / scales / modes / functions /
 mini-notation), hover docs, and a signature hint pill — all CodeMirror 6
@@ -89,7 +94,10 @@ mismatched `Origin` or `Sec-Fetch-Site`), requires
 `content-type: application/json` (415), and answers 409 instead of
 replacing an existing file unless the body says `overwrite: true`. It also
 proxies `/strudel-cc/*` → `https://strudel.cc/*`
-to work around missing CORS headers on Strudel's sample manifests.
+to work around missing CORS headers on Strudel's sample manifests, and it
+shapes the bundle: `@strudel/codemirror` is built from its source modules
+and two small plugins stub what the app does not use (see "Bundle shape
+and lazy loading").
 
 `src/midi-bridge.js` listens on Web MIDI directly, routes noteons through
 `superdough()` (the same one-shot audio entry point Strudel's pattern engine
@@ -110,11 +118,13 @@ strasbeat/
 ├── src/
 │   ├── main.js             # orchestration: editor construction, panel wiring, toolbar
 │   ├── boot.js             # prebake state machine (evalScope, soundfonts, samples)
+│   ├── default-samples.js  # the default sample maps as data + the name-precedence rule
+│   ├── lazy-import.js      # lazyImport()/once(): every on-demand import() goes through here
 │   ├── eval-feedback.js    # patched evaluate/stop, error tracking, sound validation
 │   ├── eval-state.js       # pure evaluate/stop sequencer + engine-log classification
 │   ├── storage-guard.js    # in-memory localStorage stand-in when storage is blocked (imported first)
 │   ├── capture.js          # MIDI capture preview modal + capture handler
-│   ├── panels.js           # right-rail panel creation & registration
+│   ├── panels.js           # right-rail panel registration (console eager, five lazy)
 │   ├── export.js           # WAV render (renderPatternToBuffer) + encode + download
 │   ├── share.js            # URL share codec + share-link arrival as a user pattern
 │   ├── editor-actions.js   # sound preview, insert, try example, insert template
@@ -138,18 +148,26 @@ strasbeat/
 │   │   ├── numeric-scrubber.js  # Figma-style drag-to-scrub
 │   │   ├── hover-docs.js   # CM6 hoverTooltip for Strudel functions
 │   │   ├── signature-hint.js    # signature pill above cursor
-│   │   ├── strudel-docs.json    # generated JSDoc index (pnpm gen:docs)
+│   │   ├── strudel-docs.json    # generated JSDoc index (pnpm gen:docs) — its own chunk
+│   │   ├── docs-store.js   # getDocs()/onDocsLoaded(): the index, loaded after the editor mounts
+│   │   ├── lazy-keymaps.js # stand-in for the Vim/Emacs packages; fetches them on first use
+│   │   ├── doc-sync.js     # one doc-change signal for every view that renders the buffer
 │   │   ├── error-marks.js  # inline error decorations + gutter markers
 │   │   ├── track-labels.js # track mute/solo label parsing
 │   │   ├── mini-notation-tokens.js  # tokeniser for mini-notation strings
 │   │   └── completions/    # sound, bank, chord, scale, mode, function, mini-notation
 │   ├── ui/
-│   │   ├── left-rail.js        # patterns library (search, keyboard nav)
+│   │   ├── left-rail.js        # patterns library: an ARIA tree (search, one tab stop, keyboard menu)
+│   │   ├── tab-strip.js        # open-pattern tabs: a tablist with roving focus
+│   │   ├── roving.js           # pure index math for roving focus (tabs, tree, menu)
+│   │   ├── responsive.js       # layout breakpoints + rail rules, mirrored from shell.css
 │   │   ├── transport.js        # BPM, cycle, playhead readouts, status, MIDI pill
 │   │   ├── midi-bar.js         # MIDI bar (mini-keyboard, presets, capture, controls)
 │   │   ├── midi-import-dialog.js # MIDI file import dialog
 │   │   ├── piano-roll.js       # Canvas2D renderer (per-layer color, click-to-locate)
+│   │   ├── bottom-canvas.js    # owner of the #roll canvas: paint gating, Strudel painters
 │   │   ├── right-rail.js       # resizable panel host
+│   │   ├── lazy-panel.js       # panel handle that loads its module on first open
 │   │   ├── sound-browser.js    # sound search + preview + insert
 │   │   ├── reference-panel.js  # function reference + in-use highlighting
 │   │   ├── console-panel.js    # log/warn/error console
@@ -168,6 +186,7 @@ strasbeat/
 │   ├── strudel-ext/        # runtime helpers wired into Strudel's evalScope()
 │   │   ├── index.js            # barrel — anything exported here becomes a global in patterns
 │   │   ├── progression.js      # progression() helper (chords + voicing + rhythm + style)
+│   │   ├── piano.js            # .piano() Pattern method (strudel.cc's REPL defines it outside the packages)
 │   │   ├── visuals-host.js     # shared lifecycle for the Hydra and shader layers
 │   │   ├── styles.js           # style presets (jazz-comp, pop-pad, lo-fi, folk-strum, piano-bare)
 │   │   └── roman.js            # Roman-numeral → absolute chord parser (used by progression())
@@ -175,15 +194,16 @@ strasbeat/
 ├── patterns/               # *.js — each one default-exports a Strudel string
 ├── scripts/
 │   ├── build-strudel-docs.mjs   # extracts JSDoc → strudel-docs.json
+│   ├── strudel-scope.mjs        # every name pattern code can call, from the installed packages
 │   ├── build-learn-index.mjs    # builds learn panel content index
 │   └── test-format.mjs
 ├── design/
 │   ├── README.md           # how to use the design specs
 │   ├── SYSTEM.md           # design system (type, color, spacing, layout)
 │   ├── PATTERN-STYLE.md    # modern Strudel pattern idioms
-│   └── work/               # task specs (01-shell through 16-midi-import)
-├── vite.config.js          # /api/save middleware + strudel.cc proxy
-├── vercel.json             # production deployment config (ci/** branches don't deploy)
+│   └── work/               # task specs (01-shell through 28-upgrade-session)
+├── vite.config.js          # /api/save middleware, strudel.cc proxy, bundle-shaping plugins
+├── vercel.json             # production config (immutable /assets, ci/** branches don't deploy)
 ├── .github/workflows/ci.yml # pnpm test + pnpm build on PRs, main and ci/** branches
 ├── README.md               # user-facing front door
 ├── STRUDEL.md              # mini-notation cheatsheet (incl. progression() reference)
@@ -214,10 +234,24 @@ Add a `/** ... */` JSDoc block with `@param` and `@example` tags directly
 above the exported function — `pnpm gen:docs` (alias for
 `node scripts/build-strudel-docs.mjs`) will pick it up and add it to
 `src/editor/strudel-docs.json` so it appears in hover docs, signature
-hints, and autocomplete. Run `pnpm gen:docs` after adding or changing the
-JSDoc and commit the updated JSON alongside the code. For internal helpers
-that pattern authors shouldn't call directly, use `// comments` (not
-`/** */`) or add `@noAutocomplete` to the JSDoc.
+hints, autocomplete and the Reference panel. Run `pnpm gen:docs` after
+adding or changing the JSDoc and commit the updated JSON alongside the
+code. For internal helpers that pattern authors shouldn't call directly,
+use `// comments` (not `/** */`) or add `@noAutocomplete` to the JSDoc.
+
+**The docs index describes what the installed packages can run.**
+`pnpm gen:docs` first collects every callable name from the runtime scope
+(`scripts/strudel-scope.mjs` imports the installed packages the way
+`boot.js` does, plus each opt-in package), and only then looks for JSDoc:
+in `src/strudel-ext/`, then in the sources shipped in `node_modules`, and
+last in the `strudel-source/` clone — which may contribute text for a
+name that exists here, never a new name. Upstream `main` runs ahead of
+the published packages, so unreleased functions stay out until a release
+ships them; entries from opt-in packages carry a `requires` hint. The
+script exits 1 (leaving the JSON untouched) when `strudel-source/` is
+missing. `src/editor/strudel-docs.test.js` fails if the committed index
+names something that is not callable — expect it after a package upgrade,
+and regenerate.
 
 Anything you put here is *strasbeat-specific* — it doesn't exist in
 upstream Strudel and won't show up in `strudel.cc/learn/`. Reflect that
@@ -240,6 +274,11 @@ Current helpers:
     `patterns/06-progression-demo.js`. Spec:
     `design/work/07-chord-progression.md`. Tests:
     `progression.test.js` and `roman.test.js`.
+
+- **`.piano()`** — the Pattern method strudel.cc's REPL defines next to
+  its piano sample map (`piano` sound, `clip(1)`, short release, pan by
+  pitch). Not in any published package, so it lives in
+  `src/strudel-ext/piano.js`, imported by the barrel for its side effect.
 
 The dispatch is delegated where possible: chord parsing and voicing
 dictionaries belong to `@strudel/tonal`; this module owns only the
@@ -297,7 +336,7 @@ pattern:
 ```js
 strasbeat.findSounds('piano')   // names containing "piano"
 strasbeat.hasSound('gm_piano')  // true / false
-strasbeat.countSounds()         // total registered sounds (~1000+)
+strasbeat.countSounds()         // total registered sounds (~1,850)
 ```
 
 If you write `sound("not_a_real_name")`, the pattern produces **no audible
@@ -305,6 +344,149 @@ events with no error**. The MIDI bridge surfaces unknown preset sounds as a
 console warning (`[midi] preset "X" uses sound "Y" which is not in the
 loaded soundMap`) — copy the same defensive style if you add new
 synthesis/sample features.
+
+### What boot loads, and who owns a sound name
+
+Boot registers what strudel.cc's own REPL registers by default: synths,
+ZZFX, the GM soundfonts, dirt-samples, tidal-drum-machines (plus its
+alias table, so `.bank("tr909")` works as well as `.bank("RolandTR909")`),
+uzu-drumkit, and the piano, VCSL, wavetable (`wt_*`) and mridangam maps.
+Only manifests are fetched; audio loads on first use. The maps are data
+in `src/default-samples.js` (tidal-drum-machines alone is registered
+inline in `boot.js`); each has its own 15 s timeout and a sentence saying
+what goes silent if it fails (`getBootFailures()`). The soundfont helpers (`loadSoundfont`, …) are in
+pattern scope. Nothing here is opt-in any more — the opt-in packages in
+Settings are xen, midi, osc, csound and serial.
+
+**Name precedence:** several maps define the same names — `bd sd hh cp cb
+cr ht lt mt` (dirt-samples and uzu-drumkit) and `sax` (dirt-samples and
+VCSL). dirt-samples wins every name it shares, whatever order the
+manifests arrive in (`createNamePrecedence`: the owner `claim`s its
+names, every other map registers through `yieldTo`). That differs from
+strudel.cc, where `bd` is uzu-drumkit, and it is deliberate: existing
+patterns index dirt-samples' larger folders (`bd:7`). A new default map
+must register through `names.yieldTo(...)`; the alias table must be
+applied after the drum-machine map is in (`aliasBank` walks the sounds
+registered so far).
+
+`slider()` / `sliderWithID` are imported from the `@strudel/codemirror`
+entry, the same module instance the editor uses — a second copy has its
+own value store and never hears the widgets.
+
+### Bundle shape and lazy loading
+
+The entry chunk holds what is needed to paint the editor and take a
+keystroke. Loaded on demand, each as its own chunk:
+
+- **the docs index** (`strudel-docs.json`, ≈200 kB) — right after the
+  editor mounts. Read it through `getDocs()` in `src/editor/docs-store.js`
+  at the moment of use (it is `{}` until the chunk lands), or subscribe
+  with `onDocsLoaded` if you derive something from it once. Never import
+  the JSON directly;
+- **five panels** (Learn, Sounds, Reference, Export, Settings) — on first
+  open, warmed at idle after boot. `createLazyPanel` hands out a handle
+  at once; calls made before the module loads are remembered (latest per
+  method) and replayed, and one-shot requests are dropped if the load
+  fails. The console stays eager: it is where errors are shown;
+- **the Vim and Emacs keymaps** — when that profile is selected or is the
+  stored one. Until the chunk is in, the editor is on its base keymap and
+  the keymap chip says LOADING or RETRY rather than naming a mode;
+- as before: Prettier, hydra-synth, and the opt-in packages.
+
+Rules:
+
+- **Every new on-demand `import()` goes through `lazyImport`**
+  (`src/lazy-import.js`), with the `import()` literal at the call site. A
+  chunk fetch fails when the network is gone or a deploy has replaced the
+  hashed file; `lazyImport` reports that in the status line and console
+  and rethrows, and caches nothing, so calling again retries. Wrap with
+  `once()` to share one in-flight load.
+- **`@strudel/codemirror` is built from its source modules**, not its
+  prebuilt bundle (`resolve.alias` in `vite.config.js`). The prebuilt
+  file inlines upstream's ≈540 kB `doc.json` and statically imports Vim
+  and Emacs; from source, `doc.json` resolves to an empty list (safe
+  because strasbeat replaces upstream's autocomplete; upstream's
+  Ctrl+hover tooltip consequently shows nothing) and the two keymap
+  packages resolve to `src/editor/lazy-keymaps.js`. Always import the bare
+  `@strudel/codemirror` specifier so every import lands on the one copy.
+- **The `optimizeDeps.include` list is required, not a warm-up.** The
+  package is excluded from pre-bundling so the plugin redirects apply in
+  dev too; the dependencies only it imports must then be listed, or dev
+  serves them raw and loads a second copy of `@lezer/*`. When upstream's
+  source gains a dependency strasbeat's own code does not import, add it.
+- **Strudel packages must stay singletons.** A second `Pattern` class
+  breaks `instanceof` and `register` silently. Do not add a
+  `manualChunks` function that sweeps `node_modules` into a vendor chunk:
+  it would also pull the lazy-only packages into the initial graph,
+  evaluate before `storage-guard.js`, and cycle with the entry's
+  top-level await.
+- **`storage-guard.js` stays the first import of `main.js`.**
+- escodegen's `source-map` dependency is stubbed in the production build
+  (Strudel's transpiler never asks for a source map; the stub throws if
+  that changes). `/assets/*` is served `immutable` (`vercel.json`).
+
+### The bottom canvas and views of the buffer
+
+`src/ui/bottom-canvas.js` owns the `#roll` canvas, shared by the piano
+roll, the scope and Strudel's own draw functions. One rule for all three:
+paint only when the canvas can be seen and there is something new to
+show.
+
+- While playing, the Drawer calls `bottomCanvas.draw(haps, time)` every
+  frame; nothing is painted while the pane is collapsed, another mode
+  (Beat grid, Visuals) covers the canvas, or the tab is in the
+  background. While stopped there is no frame loop: the last frame is
+  kept and repainted on resize, display change, mode switch or hover.
+  Geometry comes from one ResizeObserver; no frame reads layout.
+- The Drawer's hap window is the roll's four cycles only while the roll
+  or a painter needs it; otherwise `main.js` narrows it to `[0, 0]`
+  (highlighting and shader uniforms only need "now"). `main.js`
+  intercepts `drawer.setDrawTime` and `drawer.invalidate` for this —
+  don't call the originals from new code.
+- Painters registered by a pattern (`.punchcard()`, `.spiral()`,
+  `.wordfall()`, `.onPaint(fn)`) draw into this canvas under the
+  **Custom** mode, which is offered and selected once when a pattern has
+  one. Painters that bring their own canvas (the inline `._punchcard()`
+  widgets) run every frame regardless. `.pianoroll()`, `.scope()` and
+  `.pitchwheel()` still draw on Strudel's unmanaged full-page canvas.
+- The roll honours `hap.value.color`, and click-to-locate maps through
+  edits made since the evaluate (it does nothing when the frame belongs
+  to another tab).
+
+Views that render the buffer (track bar, arrange bar, beat grid, the
+bottom canvas) **subscribe to `docSync`** (`src/editor/doc-sync.js`) —
+never append their own `updateListener`, which would exist in one tab's
+state only. The parsers (`parseLabels`, the arrange and drum-lane
+parsers) memoise their last result per buffer text, so a subscriber
+compares what it got with what it rendered and **does nothing when the
+parse result is unchanged**; the beat grid builds nothing at all while
+hidden. Keep new views to that shape. The transport readout follows the
+playback state (1 Hz poll when idle, none while the tab is hidden) and
+animates by `transform`; the arrange bar's loop stops when playback does.
+
+### Responsive layout and keyboard models
+
+Three layouts, switched at 900 px and 600 px: **docked** (≥ 900 px, rails
+are grid columns), **overlay** (600–899 px, rails pinned to 36 px strips;
+an opened rail floats over the editor behind a scrim, Escape closes it)
+and **compact** (< 600 px, the left strip goes too and the top bar and
+transport condense). The right rail can never squeeze the editor under
+360 px. The stored "rail open" flag is a docked-layout preference: a
+narrow viewport neither reads nor writes it. The breakpoints and the
+width arithmetic live twice — in the stylesheets and in
+`src/ui/responsive.js` — and `responsive.test.js` reads the CSS to keep
+them equal; change them together. `pointer: coarse` makes the top bar and
+transport 48 px and enlarges hit areas.
+
+The patterns library is an ARIA **tree** (one tab stop; arrows, Home/End,
+type-to-find, Enter, F2, Shift+F10 for a keyboard-operable menu; `inert`
+when the rail is collapsed) and the tab strip a **tablist** whose tabs and
+close buttons are siblings (arrows move, Delete closes). Both get their
+index math from `src/ui/roving.js` and keep focus across re-renders —
+when changing how either renders, preserve the focused item rather than
+replacing all children blindly. The text tokens' contrast ratios are
+asserted in `src/ui/responsive.test.js`; focus is one `--focus-ring`
+outline (see `design/SYSTEM.md`).
 
 ### WAV export: DO NOT use upstream `renderPatternAudio`
 
