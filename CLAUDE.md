@@ -211,6 +211,8 @@ strasbeat/
 ├── vite.config.js          # /api/save middleware, strudel.cc proxy, bundle-shaping plugins
 ├── vercel.json             # production config (immutable /assets, ci/** branches don't deploy)
 ├── .github/workflows/ci.yml # pnpm test + pnpm build on PRs, main and ci/** branches
+├── .github/workflows/smoke.yml # opt-in browser smoke test (ci/smoke-* branches only)
+├── .github/smoke/smoke.mjs # the Playwright script it runs against `vite preview`
 ├── README.md               # user-facing front door
 ├── STRUDEL.md              # mini-notation cheatsheet (incl. progression() reference)
 ├── strudel-source/         # full upstream repo, READ-ONLY reference, gitignored
@@ -717,6 +719,24 @@ a PR (`git push origin <branch>:ci/<name>`); `vercel.json` keeps them from
 creating preview deployments. Tests are `node:test` files listed
 explicitly in the `test` script in `package.json` — a new `*.test.js` does
 not run until it is added there.
+
+**Browser smoke test (opt-in).** `.github/workflows/smoke.yml` builds the
+app, serves it with `vite preview` and drives it in headless Chromium with
+`.github/smoke/smoke.mjs`: boot, play/stop, evaluate outcomes, every panel,
+completions, visuals, a stored Vim profile, three viewport widths. It runs
+only for branches named `ci/smoke-*` and from the Actions tab — never on
+`main` or pull requests:
+
+```sh
+git push origin HEAD:ci/smoke-<name>       # start it for the current commit
+gh run list --branch ci/smoke-<name>       # then: gh run view <id> --log
+git push origin --delete ci/smoke-<name>   # remove the branch afterwards
+```
+
+Screenshots and `report.json` are uploaded as the run's `smoke` artifact.
+The runner image and the Playwright version are pinned in the workflow;
+bump them deliberately. When a fix has a browser-visible effect, add a
+check for it to the script. Nothing here is run locally.
 
 ## License note
 

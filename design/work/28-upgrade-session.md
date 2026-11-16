@@ -1398,7 +1398,9 @@ later work changed them); 14–21 are new.
     workflow that runs only on `ci/smoke-*` branches (so ordinary CI stays
     fast), when the performance lane lands and can share its runner
     setup.
-    - Decision: —
+    - Decision: committed now as an opt-in workflow
+      (`.github/workflows/smoke.yml`, `.github/smoke/smoke.mjs`): `ci/smoke-*`
+      pushes and manual runs only. `CLAUDE.md` § CI says how to run it.
 
 ## 8. Needs human verification
 
