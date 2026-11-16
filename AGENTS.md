@@ -58,7 +58,8 @@ The maintainer's machine must stay lightly loaded.
   node scripts/ci-run.mjs test                 # pnpm test, pnpm build, bundle ceilings
   node scripts/ci-run.mjs smoke                # … + the browser smoke test and the
                                                #   service-worker lifecycle test
-  node scripts/ci-run.mjs perf                 # … + the performance rig, against main
+  node scripts/ci-run.mjs perf                 # tests and build + the performance rig,
+                                               #   against main (no smoke test)
   node scripts/ci-run.mjs perf --base <ref>    # the rig, against another commit
   node scripts/ci-run.mjs perf --scenarios a,b # the rig, those journeys only
   ```
