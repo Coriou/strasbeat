@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm test)",
+      "Bash(node --import ./scripts/test-register.mjs --test *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(gh run watch *)"
+    ],
+    "deny": [
+      "Edit(strudel-source/**)"
+    ]
+  }
+}

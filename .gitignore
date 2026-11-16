@@ -19,3 +19,6 @@ _midi
 
 # Superpowers / Claude Code working directory
 .superpowers/
+
+# Per-machine Claude Code permissions (.claude/settings.json is the shared one)
+.claude/settings.local.json
