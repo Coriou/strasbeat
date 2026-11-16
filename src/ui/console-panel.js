@@ -53,7 +53,10 @@ import { extractErrorLine } from "../editor/error-marks.js";
 import { makeIcon } from "./icons.js";
 
 const SEARCH_DEBOUNCE_MS = 150;
-const MAX_ENTRIES = 500;
+// Retained entries (and DOM rows). Repeats of the same line collapse into
+// one entry with a ×N counter, so a pattern that logs the same error for
+// every hap neither floods the list nor pushes real history out of it.
+const MAX_ENTRIES = 1000;
 // Pixels of slack at the bottom of the scroll region that still count as
 // "the user is looking at the tail". ~20px matches the standard terminal
 // rule-of-thumb and survives the zero-scroll case on first paint.
@@ -90,6 +93,23 @@ export function createConsolePanel({
   let levelButtons = {};
   let mounted = false;
   let searchTimer = null;
+
+  // DOM work is batched: pushEntry() only updates the buffer and asks for
+  // one flush per animation frame, and nothing is touched at all while the
+  // panel isn't the rail's visible tab (activate() catches up).
+  let visible = false;
+  let flushHandle = 0;
+  /** @type {Map<number, HTMLElement>} entry id → its row, when rendered */
+  const rowById = new Map();
+  /** Highest entry id already reflected in the DOM. */
+  let renderedThroughId = 0;
+  /** Rendered entries whose repeat count changed since the last flush. */
+  const repeatDirty = new Set();
+  /** Ids evicted from the buffer whose rows are still in the DOM. */
+  let evictedIds = [];
+  let forceScroll = false;
+  /** Entries passing the current filters — kept in step, never recounted. */
+  let visibleCount = 0;
 
   // ─── Right-rail panel spec ────────────────────────────────────────────
 
@@ -182,13 +202,15 @@ export function createConsolePanel({
     render();
   }
 
-  function activate() {
+  function activate({ focus = true } = {}) {
     if (!mounted) return;
-    // Pin the viewport to the tail on re-open so the user lands on the
-    // newest output, then surface the search field so the first keystroke
-    // can refine the filter.
+    visible = true;
+    // Catch up on whatever arrived while the tab was hidden, then pin the
+    // viewport to the tail so the user lands on the newest output, and
+    // surface the search field so the first keystroke can refine the filter.
+    flush();
     listEl.scrollTop = listEl.scrollHeight;
-    if (searchInput) {
+    if (focus && searchInput) {
       searchInput.focus();
       searchInput.select();
     }
@@ -196,6 +218,7 @@ export function createConsolePanel({
 
   function deactivate() {
     clearTimeout(searchTimer);
+    visible = false;
   }
 
   // ─── Public helpers — the host calls these from log hooks ─────────────
@@ -221,10 +244,7 @@ export function createConsolePanel({
 
   function clear() {
     entries = [];
-    if (mounted) {
-      listEl.replaceChildren();
-      updateCount();
-    }
+    if (mounted) render();
     onClear();
   }
 
@@ -232,47 +252,102 @@ export function createConsolePanel({
 
   function pushEntry(level, rawMessage, data) {
     const message = stringify(rawMessage);
+    const now = Date.now();
+
+    // The same line again, back to back: count it on the existing entry
+    // instead of adding a row.
+    const last = entries[entries.length - 1];
+    if (last && isRepeat(last, level, message, data)) {
+      last.count += 1;
+      last.timestamp = now;
+      if (rowById.has(last.id)) repeatDirty.add(last);
+      scheduleFlush();
+      return last.id;
+    }
+
     const entry = {
       id: nextId++,
       level,
       message,
-      timestamp: Date.now(),
+      timestamp: now,
       data,
       location: extractEntryLocation(level, message, data),
+      count: 1,
     };
     entries.push(entry);
+    if (isVisible(entry)) visibleCount++;
+    // Dividers always force-scroll: the visual purpose of a divider is
+    // "look here, something new just happened".
+    if (level === "divider") forceScroll = true;
 
-    // Evict oldest beyond the buffer cap. We pair the DOM removal with
-    // the buffer eviction so there's exactly one DOM node per live
-    // entry — no stragglers, no virtualisation bookkeeping.
+    // Evict oldest beyond the buffer cap. The row (if any) is removed on
+    // the next flush, so there's exactly one DOM node per live entry.
     while (entries.length > MAX_ENTRIES) {
       const removed = entries.shift();
-      if (mounted) {
-        const stale = listEl.querySelector(`[data-entry-id="${removed.id}"]`);
-        if (stale) stale.remove();
-      }
+      if (isVisible(removed)) visibleCount--;
+      repeatDirty.delete(removed);
+      if (rowById.has(removed.id)) evictedIds.push(removed.id);
     }
 
-    if (!mounted) return entry.id;
+    scheduleFlush();
+    return entry.id;
+  }
 
-    // Auto-scroll lock — measure BEFORE appending so we know whether the
-    // user was already pinned to the tail. Dividers always force-scroll
-    // too, since the visual purpose of a divider is "look here, something
-    // new just happened".
+  function scheduleFlush() {
+    if (!mounted || !visible || flushHandle) return;
+    flushHandle = requestAnimationFrame(() => {
+      flushHandle = 0;
+      flush();
+    });
+  }
+
+  // Bring the DOM up to date with the buffer: drop evicted rows, refresh
+  // changed repeat counters, append everything new. One layout read
+  // (the scroll-lock check) and one write per frame, however many lines
+  // arrived.
+  function flush() {
+    if (!mounted) return;
+    if (flushHandle) {
+      cancelAnimationFrame(flushHandle);
+      flushHandle = 0;
+    }
+    // Auto-scroll lock — measure BEFORE mutating so we know whether the
+    // user was already pinned to the tail.
     const stuckToBottom = isScrolledToBottom();
 
-    if (isVisible(entry)) {
-      const node = buildEntryNode(entry);
-      listEl.appendChild(node);
+    for (const id of evictedIds) {
+      rowById.get(id)?.remove();
+      rowById.delete(id);
     }
+    evictedIds = [];
+
+    for (const entry of repeatDirty) {
+      const row = rowById.get(entry.id);
+      if (row) syncRepeat(row, entry);
+    }
+    repeatDirty.clear();
+
+    let frag = null;
+    // New entries are a suffix of the buffer — walk back to the first one.
+    let start = entries.length;
+    while (start > 0 && entries[start - 1].id > renderedThroughId) start--;
+    for (let i = start; i < entries.length; i++) {
+      const entry = entries[i];
+      if (!isVisible(entry)) continue;
+      frag ??= document.createDocumentFragment();
+      frag.appendChild(buildEntryNode(entry));
+    }
+    if (entries.length > 0) {
+      renderedThroughId = entries[entries.length - 1].id;
+    }
+    if (frag) listEl.appendChild(frag);
     updateCount();
 
-    if (stuckToBottom || level === "divider") {
+    if (stuckToBottom || forceScroll) {
       // scrollTop rather than scrollIntoView to avoid shifting focus.
       listEl.scrollTop = listEl.scrollHeight;
     }
-
-    return entry.id;
+    forceScroll = false;
   }
 
   function scrollToEntry(entryId) {
@@ -296,7 +371,7 @@ export function createConsolePanel({
 
     render();
 
-    const node = listEl.querySelector(`[data-entry-id="${entryId}"]`);
+    const node = rowById.get(entryId);
     if (!node) return;
     node.scrollIntoView({ block: "center" });
   }
@@ -316,16 +391,22 @@ export function createConsolePanel({
   }
 
   // Full re-render after a filter change. Rebuilds the scroll region
-  // from the current buffer; cheap at 500-entry scale.
+  // from the current buffer; cheap at this scale.
   function render() {
     if (!listEl) return;
     const wasAtBottom = isScrolledToBottom();
     listEl.replaceChildren();
+    rowById.clear();
+    repeatDirty.clear();
+    evictedIds = [];
+    visibleCount = 0;
     const frag = document.createDocumentFragment();
     for (const entry of entries) {
       if (!isVisible(entry)) continue;
+      visibleCount++;
       frag.appendChild(buildEntryNode(entry));
     }
+    renderedThroughId = entries.length ? entries[entries.length - 1].id : 0;
     listEl.appendChild(frag);
     updateCount();
     if (wasAtBottom) {
@@ -340,12 +421,10 @@ export function createConsolePanel({
       countEl.textContent = "empty";
       return;
     }
-    let visible = 0;
-    for (const e of entries) {
-      if (isVisible(e)) visible++;
-    }
     countEl.textContent =
-      visible === total ? `${total} entries` : `${visible} of ${total}`;
+      visibleCount === total
+        ? `${total} entries`
+        : `${visibleCount} of ${total}`;
   }
 
   // ─── Entry DOM builders ───────────────────────────────────────────────
@@ -358,7 +437,7 @@ export function createConsolePanel({
       `console-panel__entry console-panel__entry--${entry.level}`,
     );
     row.dataset.entryId = String(entry.id);
-    row.setAttribute("role", "listitem");
+    rowById.set(entry.id, row);
 
     const ts = el("span", "console-panel__ts", formatTime(entry.timestamp));
     row.appendChild(ts);
@@ -390,12 +469,30 @@ export function createConsolePanel({
     }
 
     row.appendChild(body);
+    if (entry.count > 1) syncRepeat(row, entry);
     return row;
+  }
+
+  // Show (or update) the ×N counter on a row, and move its timestamp to
+  // the latest occurrence.
+  function syncRepeat(row, entry) {
+    row.querySelector(".console-panel__ts").textContent = formatTime(
+      entry.timestamp,
+    );
+    let badge = row.querySelector(".console-panel__repeat");
+    if (!badge) {
+      badge = el("span", "console-panel__repeat");
+      // Repeats never carry a hap card, so the message row is always there.
+      row.querySelector(".console-panel__message-row").appendChild(badge);
+    }
+    badge.textContent = `×${entry.count}`;
+    badge.title = `Repeated ${entry.count} times`;
   }
 
   function buildDividerNode(entry) {
     const row = el("div", "console-panel__divider");
     row.dataset.entryId = String(entry.id);
+    rowById.set(entry.id, row);
     row.setAttribute("role", "separator");
     const labelText = entry.message
       ? `${entry.message} · ${formatTime(entry.timestamp)}`
@@ -566,6 +663,16 @@ function stringify(value) {
   } catch {
     return String(value);
   }
+}
+
+/**
+ * Whether a new line is the previous entry over again. Entries that carry
+ * a hap are never merged: each one renders its own span/value card.
+ */
+function isRepeat(last, level, message, data) {
+  if (level === "divider" || last.level !== level) return false;
+  if (last.message !== message) return false;
+  return !extractHap(last) && !extractHap({ data });
 }
 
 function formatTime(ms) {

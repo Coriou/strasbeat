@@ -421,3 +421,19 @@
     padding-right: var(--space-1);
   }
 }
+
+/* The pills set their own `display`, which would otherwise win over the
+   UA's `[hidden] { display: none }` and leave the Wavetable / User pills
+   showing with nothing behind them. */
+.sound-browser__pill[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sound-browser *,
+  .sound-browser *::before,
+  .sound-browser *::after {
+    transition: none;
+    animation: none;
+  }
+}

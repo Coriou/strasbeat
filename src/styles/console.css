@@ -356,3 +356,28 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+/* Repeat counter on a line that came in several times in a row. */
+.console-panel__repeat {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 var(--space-2);
+  background: var(--surface-2);
+  color: var(--text-mut);
+  border: 1px solid color-mix(in oklch, var(--border) 72%, var(--border-soft));
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .console-panel *,
+  .console-panel *::before,
+  .console-panel *::after {
+    transition: none;
+    animation: none;
+  }
+}
