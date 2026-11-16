@@ -55,7 +55,6 @@ describe("the installed sound map", () => {
   test("is the store the batching relies on", () => {
     assert.equal(typeof soundMap.setKey, "function");
     assert.equal(typeof soundMap.set, "function");
-    assert.equal(typeof soundMap.lc, "number");
     assert.equal(typeof soundMap.value, "object");
   });
 
@@ -126,9 +125,31 @@ describe("installSoundMapBatching", () => {
     }
   });
 
+  test("a reader comparing by identity sees a burst, with no listener", async () => {
+    // The completion providers cache their name lists on this identity.
+    installSoundMapBatching(soundMap);
+    registerSound("early", trigger);
+    await Promise.resolve();
+    const before = soundMap.get();
+    registerSound("late_1", trigger);
+    registerSound("late_2", trigger);
+    assert.equal(soundMap.get(), before, "no copy inside the burst");
+    await Promise.resolve();
+    assert.notEqual(soundMap.get(), before);
+    assert.deepEqual(Object.keys(soundMap.get()), [
+      "early",
+      "late_1",
+      "late_2",
+    ]);
+    const settled = soundMap.get();
+    await Promise.resolve();
+    assert.equal(soundMap.get(), settled, "one copy per burst");
+  });
+
   test("registering the same sound object again publishes nothing", async () => {
     installSoundMapBatching(soundMap);
     registerSound("same", trigger);
+    await Promise.resolve(); // the registration's own publish
     const sound = getSound("same");
     const seen = [];
     const unlisten = soundMap.listen((value) => seen.push(value));
@@ -173,7 +194,7 @@ describe("installSoundMapBatching", () => {
     const warn = console.warn;
     console.warn = (...args) => warnings.push(args.join(" "));
     try {
-      const odd = { setKey() {}, set() {} }; // no `value`, no `lc`
+      const odd = { setKey() {}, set() {} }; // no `value`
       const original = odd.setKey;
       assert.equal(installSoundMapBatching(odd), false);
       assert.equal(odd.setKey, original);

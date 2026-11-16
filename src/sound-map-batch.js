@@ -14,13 +14,16 @@
 // every single sound, each time with a fresh object; now a burst of
 // registrations ends in one fresh object and one notification, a microtask
 // later. Nothing in strasbeat or in the Strudel packages it bundles listens
-// to the map (they all read it at the moment of use), and upstream's own
-// `aliasBank` already edits the object in place before publishing a copy.
+// to the map, but the completion providers (src/editor/completions/providers)
+// keep their name lists for as long as `soundMap.get()` returns the same
+// object, so the fresh object is published whether or not anyone listens:
+// without it a sound registered after the first completion (`samples(...)`
+// in a pattern) would never be offered.
 //
-// It leans on three things nanostores does today — the map exposes `value`,
-// `set()` and the listener count `lc`. If an upgrade takes one away, nothing
-// is patched, the old behaviour stays, and a warning says so
-// (src/sound-map-batch.test.js checks the installed version).
+// It leans on two things nanostores does today — the map exposes `value`
+// and `set()`. If an upgrade takes one away, nothing is patched, the old
+// behaviour stays, and a warning says so (src/sound-map-batch.test.js checks
+// the installed version).
 
 /**
  * @param {object} soundMap  superdough's `soundMap`
@@ -38,7 +41,6 @@ export function installSoundMapBatching(
     soundMap != null &&
     typeof soundMap.setKey === "function" &&
     typeof soundMap.set === "function" &&
-    typeof soundMap.lc === "number" &&
     soundMap.value != null &&
     typeof soundMap.value === "object";
   if (!usable) {
@@ -51,8 +53,8 @@ export function installSoundMapBatching(
   let publishQueued = false;
   const publish = () => {
     publishQueued = false;
-    // A new object, so a listener comparing by identity sees the change:
-    // one copy for the whole burst instead of one per sound.
+    // A new object, so whoever compares by identity sees the change: one
+    // copy for the whole burst instead of one per sound.
     soundMap.set({ ...soundMap.value });
   };
 
@@ -65,7 +67,7 @@ export function installSoundMapBatching(
       if (sounds[key] === value) return;
       sounds[key] = value;
     }
-    if (soundMap.lc > 0 && !publishQueued) {
+    if (!publishQueued) {
       publishQueued = true;
       schedule(publish);
     }

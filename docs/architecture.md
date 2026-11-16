@@ -142,9 +142,11 @@ Settings are xen, midi, osc, csound and serial.
 with `soundMap.setKey`, and the nanostores map behind it copies the whole
 map for every key — quadratic over the ~1,850 sounds boot registers.
 `src/sound-map-batch.js` replaces `setKey` (installed by `createBoot`,
-before the first registration) with one that writes in place and gives
-listeners one fresh object per burst. `soundMap.get()` readers are
-unaffected. Its test runs against the installed store, so a superdough or
+before the first registration) with one that writes in place and
+publishes one fresh object per burst, a microtask later. `soundMap.get()`
+sees a new sound at once; the fresh object is for readers that cache on
+the map's identity (the sound, bank and mini-notation completion
+providers), so it is published even with no listener. Its test runs against the installed store, so a superdough or
 nanostores upgrade that changes the store's shape fails there.
 
 **Name precedence:** several maps define the same names — `bd sd hh cp cb
