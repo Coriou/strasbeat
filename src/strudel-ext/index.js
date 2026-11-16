@@ -7,12 +7,7 @@
 
 export { progression } from "./progression.js";
 export { arrange } from "./arrange.js";
-export {
-  initHydra,
-  clearHydra,
-  H,
-  setVisualsAvailabilityCallback,
-} from "./hydra.js";
+export { initHydra, clearHydra, H } from "./hydra.js";
 // shader() is the only shader export that belongs in pattern scope. The node
 // teardown (clearShader) and the in-app error sink (setShaderErrorSink) are
 // app-internal and stay direct imports in main.js (Task 5) — keeping them out

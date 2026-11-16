@@ -13,9 +13,8 @@
 //      crash the whole render loop). H() only uses @strudel/core, so it is
 //      importable and testable in Node with no browser globals. (CLAUDE.md
 //      surface-failures-loudly.)
-//   3. Host callback — on init/teardown it notifies the host so the
-//      bottom-panel "Visuals" mode can gate its availability (mirrors how
-//      setBeatsAvailable / setCustomDraw gate modes).
+//   3. Host lifecycle — existence, render gating and canvas placement are
+//      shared with the shader layer through visuals-host.js.
 //
 // Reaches pattern scope via the strudelExt namespace arg already passed to
 // evalScope() at boot.js:51 — see index.js. No new evalScope arg.
@@ -28,80 +27,22 @@
 //   We construct `new Hydra({...})` from this import — never from globalThis.
 
 import { getDrawContext } from "@strudel/draw";
-import { reify, getTime, controls } from "@strudel/core";
+import { reify, getTime } from "@strudel/core";
+import {
+  createVisualCanvas,
+  markVisualRequested,
+  registerVisualLayer,
+  visualsChanged,
+} from "./visuals-host.js";
 
 let hydra = null;
 let lastOptionsKey = null;
+let livePixelRatio = 1;
 
-// ─── Render-resolution cap (GPU-OOM safety) ──────────────────────────────
-// hydra-synth allocates numOutputs (4, each DOUBLE-buffered = 8 textures) +
-// numSources (4) = ~12 FULL-RESOLUTION RGBA float-ish FBOs the moment it first
-// renders (hydra-synth.js:103-104, getDrawContext sizes the canvas to the
-// VIEWPORT). On a large or HiDPI display innerWidth×innerHeight×~12 buffers is
-// hundreds of MB of VRAM allocated in ONE synchronous burst on the first tick
-// → GPU process OOM → the tab dies instantly. That first tick happens when the
-// user enters Visuals mode (the render gate keeps the loop paused until then),
-// which is exactly the reported "click Visuals → crash".
-//
-// We clamp the backing store: pixelRatio ≤ 1 AND the long edge ≤
-// MAX_HYDRA_LONG_EDGE. The canvas still STRETCHES to the viewport via CSS
-// (width/height:100%), so full-window looks the same minus fine sharpness, and
-// in the small Visuals panel the cap is invisible. This removes the OOM path
-// regardless of display size — the leading fix AND a permanent safety net.
-const MAX_HYDRA_LONG_EDGE = 1280;
-
-/**
- * Compute the Hydra canvas BACKING-STORE size (the GPU buffer dimensions),
- * clamped so the multiple full-res FBOs can't exhaust VRAM.
- *
- * Pure + exported so the clamp is unit-testable headlessly (no WebGL/DOM).
- *
- * @param {object} a
- * @param {number} a.innerWidth   viewport CSS width
- * @param {number} a.innerHeight  viewport CSS height
- * @param {number} [a.pixelRatio] requested device pixel ratio (capped to ≤ 1)
- * @param {number} [a.maxLongEdge] hard cap on the longest backing-store edge
- * @returns {{ width: number, height: number, pixelRatio: number, clamped: boolean }}
- * @noAutocomplete
- */
-export function computeHydraCanvasSize({
-  innerWidth,
-  innerHeight,
-  pixelRatio = 1,
-  maxLongEdge = MAX_HYDRA_LONG_EDGE,
-}) {
-  // Defensive: a 0/NaN viewport (e.g. a detached/hidden context) must not yield
-  // a 0×0 or NaN canvas. Fall back to a tiny but valid 1×1 backing store.
-  const vw = Number.isFinite(innerWidth) && innerWidth > 0 ? innerWidth : 1;
-  const vh = Number.isFinite(innerHeight) && innerHeight > 0 ? innerHeight : 1;
-  // Cap pixelRatio at 1 — a HiDPI ratio multiplies every FBO's pixel count.
-  const pr = Math.min(Number.isFinite(pixelRatio) ? pixelRatio : 1, 1);
-  let w = vw * pr;
-  let h = vh * pr;
-  // Scale uniformly so the longest edge fits the cap (preserves aspect).
-  const longest = Math.max(w, h);
-  let clamped = pr < (Number.isFinite(pixelRatio) ? pixelRatio : 1);
-  if (longest > maxLongEdge) {
-    const scale = maxLongEdge / longest;
-    w *= scale;
-    h *= scale;
-    clamped = true;
-  }
-  return {
-    width: Math.max(1, Math.round(w)),
-    height: Math.max(1, Math.round(h)),
-    pixelRatio: pr,
-    clamped,
-  };
-}
-
-// ─── Context-loss + resize handlers (registered per live canvas) ─────────
+// ─── Context-loss handlers (registered per live canvas) ──────────────────
 // Tracked at module scope so clearHydra() can remove them with the canvas.
 let ctxLostHandler = null;
 let ctxRestoredHandler = null;
-let resizeClampHandler = null;
-let resizeClampTimer = null;
-
 function installContextLossHandlers(canvas) {
   if (!canvas?.addEventListener) return;
   ctxLostHandler = (e) => {
@@ -135,41 +76,6 @@ function removeContextLossHandlers() {
   ctxRestoredHandler = null;
 }
 
-function installResizeClamp() {
-  if (typeof window === "undefined") return;
-  resizeClampHandler = () => {
-    if (resizeClampTimer) clearTimeout(resizeClampTimer);
-    // 250ms > getDrawContext's 200ms so ours runs AFTER its (un-clamped) resize
-    // and re-imposes the cap via hydra.setResolution (which sets canvas.width +
-    // resizes every FBO).
-    resizeClampTimer = setTimeout(() => {
-      if (!hydra || !canvasEl) return;
-      const sized = computeHydraCanvasSize({
-        innerWidth: window.innerWidth,
-        innerHeight: window.innerHeight,
-        pixelRatio: 1,
-      });
-      try {
-        hydra.setResolution?.(sized.width, sized.height);
-      } catch (err) {
-        console.warn("[strasbeat] hydra resize re-clamp failed:", err);
-      }
-    }, 250);
-  };
-  window.addEventListener("resize", resizeClampHandler);
-}
-
-function removeResizeClamp() {
-  if (resizeClampTimer) {
-    clearTimeout(resizeClampTimer);
-    resizeClampTimer = null;
-  }
-  if (typeof window !== "undefined" && resizeClampHandler) {
-    window.removeEventListener("resize", resizeClampHandler);
-  }
-  resizeClampHandler = null;
-}
-
 // ─── Render loop (owned, stoppable) ──────────────────────────────────────
 // hydra-synth's own autoLoop starts a raf-loop whose handle it DISCARDS
 // (node_modules/hydra-synth/src/hydra-synth.js:124) — so nothing can ever
@@ -178,15 +84,16 @@ function removeResizeClamp() {
 // crash-prone (every stop→play leaked one of each; browsers cap live WebGL
 // contexts at ~16). We instead construct Hydra with autoLoop:false and drive
 // hydra.tick() from THIS loop, whose id we keep, so clearHydra() can stop it
-// deterministically and setHydraRenderEnabled() can pause it when the canvas
-// is hidden (Visuals off) — zero idle GPU cost.
+// deterministically and the host can pause it when the canvas is hidden or the
+// scheduler is idle — zero idle GPU cost.
 let rafId = null;
+let loopOnce = false; // the queued frame is a single still frame, not a loop
 let lastTickTs = null;
-let renderEnabled = true; // gated by canvas visibility from main.js
+let firstTickDone = false; // per Hydra instance
 let canvasEl = null; // the live #hydra-canvas, kept so teardown removes THIS one
 
 // Injection seam (tests only). Production uses the real dynamic import +
-// getDrawContext + requestAnimationFrame. _setHydraTestHarness lets the
+// createVisualCanvas + requestAnimationFrame. _setHydraTestHarness lets the
 // teardown CONTRACT be verified headlessly (no real WebGL in Node).
 let harness = null;
 // Guarded so a stray call in a non-browser context (or a teardown race before
@@ -217,21 +124,29 @@ export function _resetHydraTestHarness() {
   canvasEl = null;
   lastOptionsKey = null;
   lastTickTs = null;
-  renderEnabled = true;
+  initPromise = null;
+  initKey = null;
+  clobberedGlobals = null;
+  lifeGen++;
 }
 
-function startLoop() {
-  if (rafId != null || !hydra || !renderEnabled) return;
+// once=true renders a single frame (the reduced-motion still) and stops.
+function startLoop(once = false) {
+  if (!hydra) return;
+  if (rafId != null) {
+    if (loopOnce === once) return; // already queued in this shape
+    stopLoop();
+  }
+  loopOnce = once;
   lastTickTs = null;
-  let firstTickDone = false;
   const frame = (ts) => {
     // Re-read each frame so a stop (rafId nulled) or pause halts cleanly even
     // if a frame was already queued.
     if (rafId == null || !hydra) return;
-    rafId = _raf(frame);
+    rafId = once ? null : _raf(frame);
     const dt = lastTickTs == null ? 16 : Math.max(0, ts - lastTickTs);
     lastTickTs = ts;
-    // OBSERVABILITY: log the FIRST tick after a (re)start with the live backing-
+    // OBSERVABILITY: log the FIRST tick of each instance with the live backing-
     // store dims + dpr. The first tick is when hydra-synth first allocates its
     // FBOs and does the first GPU draw — i.e. the moment a GPU-OOM tab-crash
     // would strike. If the tab dies, this is the last line the user sees, and it
@@ -278,21 +193,65 @@ function stopLoop() {
   lastTickTs = null;
 }
 
-/**
- * Pause or resume Hydra's render loop. main.js calls this from the same paths
- * that show/hide #hydra-canvas so Hydra renders ONLY when visible (Visuals
- * panel or full-window) — a hidden full-viewport GL render every frame is pure
- * waste and a big contributor to the "very very slow" report. No-op when no
- * Hydra is live.
- *
- * @param {boolean} enabled
- * @noAutocomplete
- */
-export function setHydraRenderEnabled(enabled) {
-  renderEnabled = !!enabled;
-  if (!hydra) return;
-  if (renderEnabled) startLoop();
+// mode: "live" | "still" | "off" — decided by visuals-host.js.
+function setRenderMode(mode) {
+  if (mode === "live") startLoop();
+  else if (mode === "still") startLoop(true);
   else stopLoop();
+}
+
+registerVisualLayer("hydra", {
+  isLive: () => hydra !== null,
+  clear: () => clearHydra(),
+  setRenderMode,
+  getCanvas: () => canvasEl,
+  pixelRatio: () => livePixelRatio,
+  // hydra.setResolution sets canvas.width/height and resizes every FBO.
+  resize: ({ width, height }) => hydra?.setResolution?.(width, height),
+});
+
+// ─── Globals hydra-synth overwrites ──────────────────────────────────────
+// With makeGlobal (the default, and what puts osc/out/solid/… in pattern
+// scope) hydra-synth writes every synth property and generator onto window
+// (eval-sandbox.js:17, hydra-synth.js:403), then rewrites window.time on every
+// tick. Several of those names are Strudel's own — `time`, `noise`, `src`,
+// `hush`, `speed`, `shape` — so without a restore, a pattern evaluated after a
+// visual ran would silently call Hydra's versions against a destroyed context.
+// We snapshot the writable globals before construction, diff after, and put
+// every overwritten value back (and delete every added name) on teardown.
+let clobberedGlobals = null; // Map<name, { had: boolean, value: any }>
+
+function snapshotGlobals() {
+  const snap = new Map();
+  for (const name of Object.getOwnPropertyNames(globalThis)) {
+    const d = Object.getOwnPropertyDescriptor(globalThis, name);
+    if (d && "value" in d) snap.set(name, d.value);
+  }
+  return snap;
+}
+
+function recordClobberedGlobals(before) {
+  clobberedGlobals = new Map();
+  for (const name of Object.getOwnPropertyNames(globalThis)) {
+    const d = Object.getOwnPropertyDescriptor(globalThis, name);
+    if (!d || !("value" in d)) continue;
+    if (!before.has(name)) clobberedGlobals.set(name, { had: false });
+    else if (before.get(name) !== d.value)
+      clobberedGlobals.set(name, { had: true, value: before.get(name) });
+  }
+}
+
+function restoreClobberedGlobals() {
+  if (!clobberedGlobals) return;
+  for (const [name, prev] of clobberedGlobals) {
+    try {
+      if (prev.had) globalThis[name] = prev.value;
+      else delete globalThis[name];
+    } catch {
+      /* a non-configurable global can't be removed — leave it */
+    }
+  }
+  clobberedGlobals = null;
 }
 
 /**
@@ -321,22 +280,14 @@ export function installNodeGlobalShim() {
   if (typeof globalThis.global === "undefined") globalThis.global = globalThis;
 }
 
-// Host callback registered from main.js (Task 2). Default no-op so the
-// module works headless (tests) and before main.js wires it.
-let onVisualsAvailable = () => {};
-
-/**
- * Register a callback to be notified when Hydra visuals become available or
- * unavailable. Called with `true` on successful `initHydra()`, `false` on
- * `clearHydra()`. Used by the bottom-panel Visuals mode (Task 2) to gate
- * the mode's availability.
- *
- * @param {function(boolean): void} fn
- * @noAutocomplete
- */
-export function setVisualsAvailabilityCallback(fn) {
-  if (typeof fn === "function") onVisualsAvailable = fn;
-}
+// initHydra() is async (it awaits the hydra-synth chunk), so two evaluates can
+// overlap on a slow first load and a teardown can land mid-import. Concurrent
+// callers share the in-flight promise; clearHydra() bumps lifeGen so a build
+// that was superseded while it awaited bails instead of constructing a second
+// instance or starting after a stop.
+let initPromise = null;
+let initKey = null;
+let lifeGen = 0;
 
 /**
  * Initialize Hydra visuals into the full-viewport `#hydra-canvas`.
@@ -369,8 +320,17 @@ export async function initHydra(options = {}) {
     feedStrudel,
   });
 
-  // Re-init with changed options: tear down the old canvas first.
-  if (hydra && optionsKey !== lastOptionsKey) clearHydra();
+  // Tell the host this evaluate still wants Hydra, so the post-evaluate sweep
+  // keeps it.
+  markVisualRequested("hydra");
+
+  // Re-init with changed options: tear down the old canvas first (this also
+  // abandons an in-flight build with the old options).
+  if (
+    (hydra && optionsKey !== lastOptionsKey) ||
+    (initPromise && optionsKey !== initKey)
+  )
+    clearHydra();
   // Already initialized with these options — reuse it. Patterns put
   // `await initHydra()` at the top and re-evaluate on every Ctrl+Enter
   // without stopping; constructing a second Hydra here would orphan the
@@ -379,8 +339,36 @@ export async function initHydra(options = {}) {
   // existing for the same reason — re-eval just re-defines the visual chain
   // on the existing instance. (strudel-source/packages/hydra/hydra.mjs:14)
   if (hydra) return hydra;
-  lastOptionsKey = optionsKey;
+  if (initPromise) return initPromise;
 
+  const building = buildHydra({
+    feedStrudel,
+    contextType,
+    pixelRatio,
+    pixelated,
+    rest,
+    optionsKey,
+    gen: lifeGen,
+  }).finally(() => {
+    if (initPromise === building) {
+      initPromise = null;
+      initKey = null;
+    }
+  });
+  initPromise = building;
+  initKey = optionsKey;
+  return building;
+}
+
+async function buildHydra({
+  feedStrudel,
+  contextType,
+  pixelRatio,
+  pixelated,
+  rest,
+  optionsKey,
+  gen,
+}) {
   // hydra-synth's offline npm bundle references Node's `global` (via
   // right-now/browser.js) at module-eval time; without this it throws
   // `global is not defined` in the browser the moment it's imported. Must run
@@ -390,12 +378,17 @@ export async function initHydra(options = {}) {
   if (harness) {
     // Test path: skip the real hydra-synth import + DOM/WebGL entirely. The
     // harness returns a fake { hydra, canvas } so the lifecycle (loop start,
-    // teardown) can be exercised headlessly.
+    // teardown) can be exercised headlessly. makeHydra may be async to stand
+    // in for the chunk load.
+    await harness.beforeMake?.();
+    if (gen !== lifeGen) return null;
+    const before = snapshotGlobals();
     const made = harness.makeHydra();
+    recordClobberedGlobals(before);
     hydra = made.hydra;
     canvasEl = made.canvas ?? null;
-    startLoop();
-    onVisualsAvailable(true);
+    lastOptionsKey = optionsKey;
+    visualsChanged();
     return hydra;
   }
 
@@ -412,9 +405,6 @@ export async function initHydra(options = {}) {
         "('strasbeat:visuals-disabled'). initHydra() is a no-op. Remove that " +
         "key and re-play to re-enable.",
     );
-    hydra = null;
-    lastOptionsKey = null;
-    onVisualsAvailable(false);
     return null;
   }
 
@@ -424,34 +414,26 @@ export async function initHydra(options = {}) {
   // statically (it resolves the string literal 'hydra-synth' at build time),
   // so the bundle is still fully offline — no network request.
   const { default: Hydra } = await import("hydra-synth");
+  // Torn down (stop, or a re-init with other options) while the chunk loaded.
+  if (gen !== lifeGen) return null;
 
-  const { canvas } = getDrawContext("hydra-canvas", {
-    contextType,
-    pixelRatio,
-    pixelated,
-  });
-
-  // RESOLUTION CAP (GPU-OOM safety + the leading crash fix). getDrawContext
-  // just sized `canvas` to innerWidth×innerHeight (pixelRatio 1). Override the
-  // backing store to the clamped size BEFORE constructing Hydra so hydra-synth's
-  // _initCanvas reads the clamped dims (hydra-synth.js:236) and allocates its
-  // ~12 FBOs at that smaller size. The canvas still CSS-stretches to the
-  // viewport (width/height:100%), so visuals fill the panel/window unchanged.
-  const sized = computeHydraCanvasSize({
-    innerWidth: typeof window !== "undefined" ? window.innerWidth : 1280,
-    innerHeight: typeof window !== "undefined" ? window.innerHeight : 720,
-    pixelRatio,
-  });
-  canvas.width = sized.width;
-  canvas.height = sized.height;
+  // Our own canvas rather than @strudel/draw's getDrawContext: that helper
+  // adds an anonymous window resize listener per canvas it creates and never
+  // removes it, leaking one listener + one retained canvas per stop→play.
+  // createVisualCanvas applies the resolution cap (see visuals-host.js) BEFORE
+  // Hydra is constructed, so hydra-synth's _initCanvas reads the clamped dims
+  // (hydra-synth.js:236) and allocates its ~12 FBOs at that size. The canvas
+  // still CSS-stretches to the viewport, so visuals fill the panel/window.
+  const canvas = createVisualCanvas("hydra-canvas", { pixelRatio, pixelated });
+  // Create the context up front with the requested type (what getDrawContext
+  // did); regl then picks up this same context.
+  canvas.getContext(contextType);
   // OBSERVABILITY: log the EXACT runtime numbers the user must read back if the
-  // cap doesn't fix it — viewport, dpr, the clamped backing store, whether the
-  // clamp engaged. Confirms pixelRatio is really capped and the canvas isn't huge.
+  // cap doesn't fix it — viewport, dpr and the clamped backing store.
   console.info(
-    `[strasbeat] initHydra — viewport=${typeof window !== "undefined" ? window.innerWidth : "?"}x${typeof window !== "undefined" ? window.innerHeight : "?"} ` +
-      `dpr=${typeof window !== "undefined" ? window.devicePixelRatio : "?"} → ` +
-      `canvas backing-store=${canvas.width}x${canvas.height} ` +
-      `(pixelRatio capped to ${sized.pixelRatio}, clamped=${sized.clamped}, maxLongEdge=${MAX_HYDRA_LONG_EDGE})`,
+    `[strasbeat] initHydra — viewport=${window.innerWidth}x${window.innerHeight} ` +
+      `dpr=${window.devicePixelRatio} → ` +
+      `canvas backing-store=${canvas.width}x${canvas.height}`,
   );
 
   // autoLoop:false — we drive hydra.tick() from our OWN stoppable rAF loop so
@@ -472,6 +454,7 @@ export async function initHydra(options = {}) {
   // failure, etc.), tear down and surface a clear, actionable error rather than
   // leaving a half-built instance + an orphaned canvas. Visuals stay
   // unavailable; the editor keeps working.
+  const before = snapshotGlobals();
   try {
     hydra = new Hydra(hydraConfig);
   } catch (err) {
@@ -481,33 +464,26 @@ export async function initHydra(options = {}) {
         "machine, set localStorage['strasbeat:visuals-disabled']='true'.",
       err,
     );
+    recordClobberedGlobals(before);
+    restoreClobberedGlobals();
     try {
       canvas.remove();
     } catch {
       /* canvas may already be gone */
     }
     hydra = null;
-    canvasEl = null;
-    lastOptionsKey = null;
-    onVisualsAvailable(false);
     return null;
   }
+  recordClobberedGlobals(before);
   canvasEl = canvas;
+  lastOptionsKey = optionsKey;
+  livePixelRatio = pixelRatio;
 
   // WebGL context-loss handlers (surface-failures-loudly). On loss we
   // preventDefault (so the browser will fire `restored`) and log loudly; on
   // restore we log. A GPU OOM typically fires `lost` right before the tab dies
   // — capturing it gives the user one more diagnostic breadcrumb.
   installContextLossHandlers(canvas);
-
-  // Re-clamp on resize. getDrawContext registered its OWN resize listener that
-  // resets canvas.width to innerWidth×pixelRatio (bypassing our cap) — so we
-  // register ours too and call hydra.setResolution() to resize the FBOs to the
-  // clamped size. Debounced to match getDrawContext's 200ms cadence and run
-  // just after it (ours wins because setResolution overrides canvas.width).
-  installResizeClamp();
-
-  startLoop();
 
   if (feedStrudel) {
     // Deferred to the full-window increment (Phase 1.5): only coherent when
@@ -523,13 +499,17 @@ export async function initHydra(options = {}) {
     hydra.synth?.s0?.init?.({ src: testCanvas });
   }
 
-  onVisualsAvailable(true);
+  // The host places the canvas and decides whether the loop runs (scheduler
+  // playing + canvas on screen) — initHydra() itself never starts rendering.
+  visualsChanged();
   return hydra;
 }
 
 /**
- * Stop Hydra, free its WebGL context, remove its canvas, and flip the Visuals
- * mode unavailable. Called from patterns AND from the stop path / HMR dispose.
+ * Stop Hydra, free its WebGL context, remove its canvas, and tell the host.
+ * Callable from patterns; the app itself tears down through visuals-host.js
+ * (every stop path, every evaluate that no longer asks for Hydra) and on HMR
+ * dispose.
  *
  * This is where the leak is closed. In order:
  *   1. stop OUR render loop  → no orphaned tick survives.
@@ -542,13 +522,20 @@ export async function initHydra(options = {}) {
  *                              this is what avoids the ~16-context ceiling that
  *                              force-kills contexts (and the tab) under
  *                              repeated stop→play.
- *   5. remove the canvas + restore the clobbered Strudel globals.
+ *   5. remove the canvas + restore the globals hydra-synth overwrote.
  */
 export function clearHydra() {
   const wasInitialized = hydra !== null;
+  // Abandon any build still awaiting its import.
+  lifeGen++;
+  initPromise = null;
+  initKey = null;
 
   // 1. Stop the loop FIRST so no tick runs against a half-destroyed context.
   stopLoop();
+  // Our context-loss listeners go before the forced loss below, so a normal
+  // teardown is not reported as a lost context.
+  removeContextLossHandlers();
 
   // 2-4. Free GPU resources. All optional-chained so a partially-constructed
   // or fake instance tears down without throwing.
@@ -567,11 +554,6 @@ export function clearHydra() {
     /* defensive: a destroy/loseContext hiccup must not strand the rest */
   }
 
-  globalThis.s0?.clear?.();
-  // Remove OUR listeners before dropping the canvas/window refs (these read
-  // canvasEl, so they must run while it's still set).
-  removeContextLossHandlers();
-  removeResizeClamp();
   // Remove the canvas we actually created (works headless too); fall back to a
   // DOM lookup in case canvasEl was lost. document is guarded so a teardown in
   // a non-browser context is a no-op, not a ReferenceError.
@@ -585,21 +567,13 @@ export function clearHydra() {
   hydra = null;
   lastOptionsKey = null;
   lastTickTs = null;
+  firstTickDone = false;
 
-  // 5. Restore globals only if Hydra was actually constructed — that is the
-  // case where hydra-synth (makeGlobal: true) clobbered globalThis.speed /
-  // globalThis.shape. `speed` is a synth property written to window via
-  // EvalSandbox.add (eval-sandbox.js:17); `shape` is a generator transform
-  // written the same way (hydra-synth.js:403). Both names are ALSO Strudel
-  // controls, so without this restore a pattern using speed(...)/shape(...)
-  // as standalone functions would silently get Hydra's versions after a
-  // visual ran. Mirror upstream's exact restore lines
-  // (strudel-source/packages/hydra/hydra.mjs:47-48).
-  if (wasInitialized) {
-    globalThis.speed = controls.speed;
-    globalThis.shape = controls.shape;
-  }
-  onVisualsAvailable(false);
+  // 5. Put back every global hydra-synth overwrote (see the snapshot block
+  // above) so Strudel's own time/noise/src/hush/speed/shape are themselves
+  // again for the next evaluate.
+  restoreClobberedGlobals();
+  if (wasInitialized) visualsChanged();
 }
 
 /**

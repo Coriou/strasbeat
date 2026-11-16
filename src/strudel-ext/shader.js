@@ -15,6 +15,12 @@
 
 import { getTime, Pattern } from "@strudel/core"; // uTime built-in; Pattern for .uniform()
 import { getDeriver, _resetDeriver } from "./uniforms.js"; // shared onset→decay→uniform deriver
+import {
+  createVisualCanvas,
+  markVisualRequested,
+  registerVisualLayer,
+  visualsChanged,
+} from "./visuals-host.js";
 
 const CANVAS_ID = "strasbeat-shader-canvas";
 
@@ -46,20 +52,6 @@ function shaderTime() {
   }
 }
 
-function getOrCreateCanvas() {
-  let cv = document.getElementById(CANVAS_ID);
-  if (!cv) {
-    cv = document.createElement("canvas");
-    cv.id = CANVAS_ID;
-    // Full-viewport, fixed, pointer-events:none — same posture as #hydra-canvas
-    // so the same Visuals-mode clip approach can host it later.
-    cv.style.cssText =
-      "pointer-events:none;width:100%;height:100%;position:fixed;top:0;left:0;display:block;";
-    document.body.prepend(cv);
-  }
-  return cv;
-}
-
 // Loud error reporting — console AND (when reachable) the in-app console panel.
 let shaderErrorSink = null;
 export function setShaderErrorSink(fn) {
@@ -81,17 +73,22 @@ function noopNode() {
   return {
     setFragment: () => false,
     setUniformMap: () => {},
-    start: () => {},
-    stop: () => {},
+    setRenderMode: () => {},
+    resize: () => {},
+    destroy: () => {},
     hasProgram: () => false,
     canvasEl: null,
   };
 }
 
 function createNode() {
-  const canvas = getOrCreateCanvas();
+  // Full-viewport, fixed, hidden until the host places it, backing store
+  // capped — the same canvas posture as #hydra-canvas (see visuals-host.js),
+  // so the Visuals panel clip and full-window mode host both identically.
+  const canvas = createVisualCanvas(CANVAS_ID);
   const gl = canvas.getContext("webgl");
   if (!gl) {
+    canvas.remove();
     reportShaderError(
       "WebGL unavailable — shader node disabled (getContext('webgl') returned null)",
     );
@@ -101,9 +98,12 @@ function createNode() {
   let program = null;
   let lastGoodSrc = null;
   let uniformLocs = {};
+  let aPos = -1;
   let rafId = null;
+  let loopOnce = false; // the queued frame is a single still frame
   let uniformMap = {}; // fed each frame by Task 6
   let lost = false;
+  let destroyed = false;
 
   function compile(fragSrc) {
     const vs = gl.createShader(gl.VERTEX_SHADER);
@@ -152,6 +152,7 @@ function createNode() {
     program = prog;
     lastGoodSrc = fragSrc;
     uniformLocs = {};
+    aPos = gl.getAttribLocation(prog, "aPos");
     return true;
   }
 
@@ -171,35 +172,50 @@ function createNode() {
     return uniformLocs[name];
   }
 
-  function draw() {
-    rafId = requestAnimationFrame(draw);
+  function drawFrame() {
     if (!program || lost) return;
-    const dpr = window.devicePixelRatio || 1;
-    const w = Math.round(window.innerWidth * dpr);
-    const h = Math.round(window.innerHeight * dpr);
-    if (canvas.width !== w) canvas.width = w;
-    if (canvas.height !== h) canvas.height = h;
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.useProgram(program);
-    const aPos = gl.getAttribLocation(program, "aPos");
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
     if (uloc("uTime")) gl.uniform1f(uloc("uTime"), shaderTime());
     if (uloc("uResolution"))
       gl.uniform2f(uloc("uResolution"), canvas.width, canvas.height);
-    for (const [name, value] of Object.entries(uniformMap)) {
+    for (const name in uniformMap) {
       const loc = uloc(name);
-      if (loc) gl.uniform1f(loc, value);
+      if (loc) gl.uniform1f(loc, uniformMap[name]);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  canvas.addEventListener("webglcontextlost", (e) => {
+  function stop() {
+    if (rafId != null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  }
+
+  // once=true renders a single frame (the reduced-motion still) and stops.
+  function start(once = false) {
+    if (destroyed) return;
+    if (rafId != null) {
+      if (loopOnce === once) return;
+      stop();
+    }
+    loopOnce = once;
+    const frame = () => {
+      rafId = once ? null : requestAnimationFrame(frame);
+      drawFrame();
+    };
+    rafId = requestAnimationFrame(frame);
+  }
+
+  const onContextLost = (e) => {
     e.preventDefault(); // allow restore
     lost = true;
-    console.error("[strasbeat] shader WebGL context lost");
-  });
-  canvas.addEventListener("webglcontextrestored", () => {
+    reportShaderError("shader WebGL context lost");
+  };
+  const onContextRestored = () => {
     console.error("[strasbeat] shader WebGL context restored — recompiling");
     lost = false;
     // After a restore, every GL object created against the old context is
@@ -209,23 +225,31 @@ function createNode() {
     program = null;
     setupGeometry();
     if (lastGoodSrc) setProgram(lastGoodSrc);
-  });
+  };
+  canvas.addEventListener("webglcontextlost", onContextLost);
+  canvas.addEventListener("webglcontextrestored", onContextRestored);
 
   setupGeometry();
 
   return {
-    setFragment: (src) => setProgram(src),
+    // Re-evaluating an unchanged shader keeps the linked program — no
+    // recompile, no relink. A source that last FAILED is always retried so its
+    // error is reported again, and so is one whose program was lost (context
+    // restored but the recompile failed).
+    setFragment: (src) =>
+      src === lastGoodSrc && program ? true : setProgram(src),
     setUniformMap: (m) => {
       uniformMap = m || {};
     },
-    start: () => {
-      if (rafId == null) draw();
+    // mode: "live" | "still" | "off" — decided by visuals-host.js.
+    setRenderMode: (mode) => {
+      if (mode === "live") start();
+      else if (mode === "still") start(true);
+      else stop();
     },
-    stop: () => {
-      if (rafId != null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
+    resize: ({ width, height }) => {
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
     },
     // Deterministic GPU teardown (mirrors clearHydra): free the program, then
     // ask the browser to reclaim the WebGL context immediately rather than
@@ -233,6 +257,12 @@ function createNode() {
     // GC runs, compounding the ~16-context ceiling that hydra's canvas also
     // pushes on. Loud-failure-safe: wrapped so a teardown hiccup can't throw.
     destroy: () => {
+      destroyed = true;
+      stop();
+      // Our own loss handlers go first: the forced loss below is a normal
+      // teardown, not a failure to report.
+      canvas.removeEventListener("webglcontextlost", onContextLost);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored);
       try {
         if (program) {
           gl.deleteProgram(program);
@@ -242,33 +272,46 @@ function createNode() {
       } catch {
         /* never let teardown throw */
       }
+      canvas.remove();
     },
     hasProgram: () => program != null,
     canvasEl: canvas,
   };
 }
 
-// Teardown — removes the canvas, stops the loop, frees the GL context. Called
-// on stop / re-init / HMR dispose (mirrors clearHydra).
+// Teardown — stops the loop, frees the GL context, removes the canvas. Called
+// by visuals-host.js (every stop path, every evaluate that no longer calls
+// shader()) and on HMR dispose (mirrors clearHydra).
 export function clearShader() {
-  node?.stop?.();
+  const wasLive = node !== null;
   node?.destroy?.();
-  document.getElementById(CANVAS_ID)?.remove();
   node = null;
   // Reset the shared deriver too so teardown is symmetric: otherwise a
-  // stop→restart leaves overrides growing unbounded and a stale prevIds that
-  // swallows the first re-pulse for any hap whose name@begin matches a
-  // pre-stop one.
+  // stop→restart leaves overrides growing unbounded and stale envelope state
+  // that would bleed into the first frames of the next play.
   _resetDeriver();
+  if (wasLive) visualsChanged();
 }
 
 export function _getShaderNode() {
   return node;
 }
+// A node that could not get a WebGL context is not kept: the next shader()
+// call retries (and reports again) instead of silently no-opping forever.
 export function _ensureNode() {
-  if (!node) node = createNode();
-  return node;
+  if (node) return node;
+  const created = createNode();
+  if (created.canvasEl) node = created;
+  return created;
 }
+
+registerVisualLayer("shader", {
+  isLive: () => node !== null,
+  clear: () => clearShader(),
+  setRenderMode: (mode) => node?.setRenderMode(mode),
+  getCanvas: () => node?.canvasEl ?? null,
+  resize: (size) => node?.resize(size),
+});
 
 // Vite HMR dispose: strasbeat reloads the page on pattern-file change. Without
 // this a stale shader canvas / WebGL context survives the reload and they pile
@@ -348,9 +391,15 @@ export async function shader(src) {
   // Ensure the shared deriver exists so the .uniform() override below and the
   // onDraw feed both talk to the same instance.
   getDeriver();
+  // Tell the host this evaluate still wants the shader, so the post-evaluate
+  // sweep keeps it.
+  markVisualRequested("shader");
+  const isNew = node === null;
   const n = _ensureNode();
   n.setFragment(src); // compile failure keeps last-good program (logged loudly)
-  n.start();
+  // The host places the canvas and decides whether the loop runs (scheduler
+  // playing + canvas on screen) — shader() itself never starts rendering.
+  if (isNew && node) visualsChanged();
 
   const api = {
     /**

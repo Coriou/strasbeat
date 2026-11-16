@@ -12,15 +12,19 @@ import * as strudelTonal from "@strudel/tonal";
 import * as strudelWebaudio from "@strudel/webaudio";
 import * as strudelExt from "./strudel-ext/index.js";
 import {
-  clearShader,
   setShaderErrorSink,
   _getShaderNode,
   _getDeriver,
 } from "./strudel-ext/shader.js";
-// App-internal Hydra plumbing (kept out of the pattern-global barrel, same as
-// clearShader above): pause/resume Hydra's render loop based on canvas
-// visibility so a hidden full-viewport GL render never burns frames.
-import { setHydraRenderEnabled } from "./strudel-ext/hydra.js";
+// App-internal visuals plumbing (kept out of the pattern-global barrel, same
+// as the shader internals above): the lifecycle shared by the Hydra and shader
+// layers.
+import {
+  getVisualCanvases,
+  setVisualsChangeCallback,
+  setVisualsVisible,
+  syncVisualsToRepl,
+} from "./strudel-ext/visuals-host.js";
 import { StateEffect } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { toggleComment } from "@codemirror/commands";
@@ -92,19 +96,6 @@ const { getAudioContext, webaudioOutput, initAudio, setLogger, soundMap, getSoun
 // Injected at build/dev time by vite.config.js — always match package.json.
 const APP_VERSION = __APP_VERSION__;
 const STRUDEL_VERSION = __STRUDEL_VERSION__;
-
-// ─── Build / version marker (visuals hardening) ──────────────────────────
-// Bump this string whenever the visuals (hydra/shader) wrapper or its wiring
-// changes. It is logged LOUDLY at boot so a person can confirm in DevTools
-// whether the running tab is on the new code at all — the single fastest way
-// to rule out "stale cached bundle / HMR didn't apply" when a fix appears to
-// have "no effect". If you do NOT see this exact line on a fresh load, you are
-// running OLD code: hard-reload (Cmd+Shift+R) / disable cache / restart `vite`.
-const VISUALS_REV = "panel-zfix-1";
-console.info(
-  `[strasbeat] boot — app ${APP_VERSION} · strudel ${STRUDEL_VERSION} · ` +
-    `visuals rev: ${VISUALS_REV} · dpr=${typeof window !== "undefined" ? window.devicePixelRatio : "?"}`,
-);
 
 // ─── Auto-discover patterns ──────────────────────────────────────────────
 // Every .js file in /patterns must `export default` a string of Strudel code.
@@ -203,72 +194,71 @@ mountScopeControls({
   modes: bottomModes,
 });
 
-// ─── Visuals (Hydra) clip sync ────────────────────────────────────────────
-// The #hydra-canvas is full-viewport and fixed (created by getDrawContext in
-// the hydra-synth bundle). In Visuals mode we clip it to the .roll-pane
-// rect so it only paints through the bottom panel, not over the editor.
-// The clip is kept in sync via: availability callback (initHydra/clearHydra),
-// mode-change subscription, geometry-change callback from mountPianoRollResize,
-// and a debounced window-resize listener.
+// ─── Visuals (Hydra / shader) placement ──────────────────────────────────
+// Each visual layer owns a full-viewport, fixed canvas (.visuals-canvas, see
+// strudel-ext/visuals-host.js). This block decides where those canvases show:
+//   - Visuals bottom-panel mode → clipped to the .roll-pane rect, so they only
+//     paint through the bottom panel, not over the editor;
+//   - full-window mode → un-clipped, behind the transparent editor;
+//   - otherwise hidden.
+// It also reports "is anything on screen" back to the host, which is what
+// gates the render loops: a hidden canvas never renders a frame.
+//
+// Re-synced on: a layer appearing/disappearing, a bottom-panel mode change,
+// the full-window toggle, window resize, and — via a ResizeObserver on the
+// roll pane — every size change of the pane, including each frame of its
+// collapse/expand transition and a divider drag. Reading the rect right after
+// flipping the collapse class would only see the transition's starting
+// geometry.
 const rollPaneEl = document.getElementById("roll-pane");
+const FULLWINDOW_KEY = "strasbeat:visuals-fullwindow";
+let visualsFullWindow = localStorage.getItem(FULLWINDOW_KEY) === "true";
 
-// Efficiency gate: Hydra renders a full-viewport GL frame EVERY rAF, which is
-// pure waste while #hydra-canvas is hidden (Visuals mode off and not
-// full-window). Recompute visibility on every state change and pause/resume
-// the render loop accordingly so idle GPU cost is zero. Visible iff:
-//   - full-window mode is on, OR
-//   - Visuals bottom-panel mode is active AND the roll pane has real size.
-function isHydraCanvasVisible() {
-  if (visualsFullWindow) return true;
-  if (bottomModes.getMode() !== "visuals") return false;
-  const rect = rollPaneEl?.getBoundingClientRect();
-  return !!rect && rect.height > 1 && rect.width > 1;
-}
-function updateHydraRenderGate() {
-  setHydraRenderEnabled(isHydraCanvasVisible());
-}
-
-function syncVisualsClip() {
-  const cv = document.getElementById("hydra-canvas");
-  // The render gate must update even when the canvas does not yet exist (e.g.
-  // mode toggled before initHydra) — setHydraRenderEnabled is a no-op until a
-  // Hydra is live, so this is safe and keeps the gate authoritative.
-  updateHydraRenderGate();
-  if (!cv) return;
-  const active = bottomModes.getMode() === "visuals";
-  if (!active) {
-    cv.classList.remove("is-visuals-clipped");
-    return;
+function syncVisualsLayout() {
+  const rect = rollPaneEl.getBoundingClientRect();
+  const inPanel =
+    bottomModes.getMode() === "visuals" && rect.height > 1 && rect.width > 1;
+  // Full-window wins over the panel clip.
+  const placement = visualsFullWindow
+    ? "fullwindow"
+    : inPanel
+      ? "clipped"
+      : null;
+  for (const cv of getVisualCanvases()) {
+    cv.classList.toggle("is-visuals-fullwindow", placement === "fullwindow");
+    cv.classList.toggle("is-visuals-clipped", placement === "clipped");
+    if (placement !== "clipped") continue;
+    cv.style.setProperty("--visuals-clip-top", `${rect.top}px`);
+    cv.style.setProperty(
+      "--visuals-clip-right",
+      `${window.innerWidth - rect.right}px`,
+    );
+    cv.style.setProperty(
+      "--visuals-clip-bottom",
+      `${window.innerHeight - rect.bottom}px`,
+    );
+    cv.style.setProperty("--visuals-clip-left", `${rect.left}px`);
   }
-  const rect = rollPaneEl?.getBoundingClientRect();
-  if (!rect || rect.height <= 1 || rect.width <= 1) {
-    cv.classList.remove("is-visuals-clipped"); // collapsed → hide
-    return;
-  }
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  cv.style.setProperty("--hydra-clip-top", `${rect.top}px`);
-  cv.style.setProperty("--hydra-clip-right", `${vw - rect.right}px`);
-  cv.style.setProperty("--hydra-clip-bottom", `${vh - rect.bottom}px`);
-  cv.style.setProperty("--hydra-clip-left", `${rect.left}px`);
-  cv.classList.add("is-visuals-clipped");
+  setVisualsVisible(placement !== null);
 }
 
-// Hydra → bottom-panel Visuals mode gating. The wrapper calls this on
-// init (true) / clearHydra (false).
-strudelExt.setVisualsAvailabilityCallback((available) => {
+// Visual layers → bottom-panel Visuals mode gating + placement of a freshly
+// created canvas. Called on every layer init (true) / teardown (false).
+setVisualsChangeCallback((available) => {
   bottomModes.setVisualsAvailable(available);
-  syncVisualsClip();
+  syncVisualsLayout();
 });
 
-// Re-sync clip when the user switches bottom-panel modes.
-bottomModes.setOnChange(() => syncVisualsClip());
+// Re-sync when the user switches bottom-panel modes.
+bottomModes.setOnChange(() => syncVisualsLayout());
+
+new ResizeObserver(() => syncVisualsLayout()).observe(rollPaneEl);
 
 // Debounced window-resize re-sync (matches existing canvas-resize cadence).
 let visualsResizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(visualsResizeTimer);
-  visualsResizeTimer = setTimeout(syncVisualsClip, 200);
+  visualsResizeTimer = setTimeout(syncVisualsLayout, 200);
 });
 
 // ─── Editor ──────────────────────────────────────────────────────────────
@@ -348,6 +338,10 @@ const editor = new StrudelMirror({
   autodraw: true,
   // Eval failures routed into eval-feedback.js via forward-ref.
   onEvalError: (err) => evalFeedback?.handleEvalError(err),
+  // Visuals exist iff the evaluated code asked for them and the scheduler is
+  // running. The repl reports every start/stop and both ends of every
+  // evaluate here, so this one hook covers all play/stop/evaluate paths.
+  onUpdateState: syncVisualsToRepl,
   onDraw: (haps, time) => {
     const mode = bottomModes.getMode();
     // Phase 2: drive the shader node's uniforms from the active haps. dt comes
@@ -384,52 +378,32 @@ const editor = new StrudelMirror({
 });
 
 // ─── Phase 1.5 — full-window visuals behind the editor ───────────────────
-// A toggle (NOT in the share codec — spec §"Phase 1.5") that un-clips
-// #hydra-canvas to full-viewport and makes the editor transparent so visuals
-// show through. The per-line .cm-line>* plates (Task 3) keep code legible.
-// Persisted to localStorage only.
+// A toggle (NOT in the share codec — spec §"Phase 1.5") that un-clips the
+// visuals canvases to full-viewport and makes the editor transparent so
+// visuals show through. The per-line .cm-line>* plates (Task 3) keep code
+// legible. Persisted to localStorage only (read in the placement block above).
 //
-// Transparency mechanism (CSS + inline-style override):
-//   StrudelMirror constructor sets editorRoot.style.backgroundColor =
-//   'var(--background)' (bgFill:true). We override that same inline style
-//   directly to 'transparent' when full-window is ON, and restore it to
-//   'var(--background)' when OFF. No !important, no updateSettings (bgFill is
-//   constructor-only and not in the extensions map). The .cm-editor background
-//   is already 'transparent' (StrudelMirror always does that). The .cm-gutters
-//   background (editor.css: background:var(--surface-0)) is overridden by a
-//   scoped CSS rule in visuals.css targeting #editor.is-visuals-fullwindow
-//   .cm-gutters — class toggled on editorRoot here. Removing the class
-//   cleanly restores the opaque gutter.
-//
-// If no hydra canvas exists yet (e.g. full-window persisted ON before any
-// initHydra() call this session), the editor-transparency + shell class still
-// apply; the canvas class is applied lazily by syncVisualsClip once init
-// creates the canvas. That is acceptable per the task spec.
-const FULLWINDOW_KEY = "strasbeat:visuals-fullwindow";
-let visualsFullWindow = localStorage.getItem(FULLWINDOW_KEY) === "true";
-
+// Layering (visuals.css): the full-window canvas sits BELOW the whole shell
+// (z-index:-1), so the opaque chrome — top bar, rails, transport, bottom
+// panel — covers it and only the editor region lets it through. That takes
+// three surfaces out of the way:
+//   - .editor-pane's background, via .shell--visuals-fullwindow (CSS);
+//   - #editor's inline background: StrudelMirror's constructor sets
+//     editorRoot.style.backgroundColor = 'var(--background)' (bgFill:true), so
+//     we override that same inline style here and restore the exact value when
+//     OFF. No !important, no updateSettings (bgFill is constructor-only);
+//   - .cm-gutters, via the #editor.is-visuals-fullwindow class (CSS).
+// The .cm-editor background is already 'transparent' (StrudelMirror always
+// does that).
 function applyVisualsFullWindow() {
-  const cv = document.getElementById("hydra-canvas");
-  // Editor transparency: override the inline style StrudelMirror set in its
-  // constructor. OFF restores the exact same value StrudelMirror used.
-  // Override StrudelMirror's constructor-set inline style directly (bgFill is
-  // constructor-only; a CSS class can't win here without !important).
   editorRoot.style.backgroundColor = visualsFullWindow
     ? "transparent"
     : "var(--background)";
   editorRoot.classList.toggle("is-visuals-fullwindow", visualsFullWindow);
-  if (cv) {
-    cv.classList.toggle("is-visuals-fullwindow", visualsFullWindow);
-    if (visualsFullWindow) cv.classList.remove("is-visuals-clipped"); // full-window wins
-  }
-  // Reserved /polish hook — no CSS targets it yet; will cover transport/rail dimming in full-window.
   shellEl.classList.toggle("shell--visuals-fullwindow", visualsFullWindow);
-  if (!visualsFullWindow) syncVisualsClip(); // back to panel-clipped
-  // Keep the render gate authoritative across the full-window toggle (the OFF
-  // branch already routes through syncVisualsClip → updateHydraRenderGate, but
-  // the ON branch does not — call it directly so turning full-window ON resumes
-  // rendering and turning it OFF re-evaluates panel visibility).
-  updateHydraRenderGate();
+  // Canvas classes + render gate. Canvases created later (the next play) are
+  // placed by the same call from the layer-change callback.
+  syncVisualsLayout();
 }
 
 function toggleVisualsFullWindow() {
@@ -438,8 +412,7 @@ function toggleVisualsFullWindow() {
   applyVisualsFullWindow();
 }
 
-// Apply persisted state once now that editorRoot, shellEl, and the
-// hydra-canvas (if already present) all exist.
+// Apply persisted state once now that editorRoot and shellEl exist.
 applyVisualsFullWindow();
 
 function focusEditorLocation({ line, column } = {}) {

@@ -1,43 +1,76 @@
-/* Visuals mode — Hydra's #hydra-canvas is full-viewport, fixed, and
- * pointer-events:none (created by getDrawContext, see
- * strudel-source/packages/draw/draw.mjs). It cannot render into the
- * height-constrained #roll canvas, so in Visuals mode we clip the
- * full-viewport canvas down to the .roll-pane rect (Option A). main.js sets
- * the inset via the --hydra-clip custom properties on the canvas element. */
+/* Live visuals — the Hydra and raw-shader layers each own one
+ * .visuals-canvas (created by strudel-ext/visuals-host.js, prepended to
+ * <body>). It is full-viewport, fixed and pointer-events:none, and hidden
+ * until main.js places it with one of the two classes below. */
 
-#hydra-canvas {
-  /* Hidden by default: only painted-through when Visuals mode is active or
-   * full-window mode (Phase 1.5) is on. Prevents painting over the editor. */
+.visuals-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  /* Hidden by default: only shown in Visuals mode or full-window mode.
+   * (A hidden canvas is also never rendered to — see the host's gate.) */
   display: none;
 }
 
-#hydra-canvas.is-visuals-clipped {
+/* Visuals bottom-panel mode. A full-viewport canvas cannot render into the
+ * height-constrained #roll canvas, so we clip it down to the .roll-pane rect
+ * instead (Option A). main.js sets the inset via the --visuals-clip-* custom
+ * properties on the canvas element and keeps them in sync with the pane. */
+.visuals-canvas.is-visuals-clipped {
   display: block;
   clip-path: inset(
-    var(--hydra-clip-top, 0px)
-    var(--hydra-clip-right, 0px)
-    var(--hydra-clip-bottom, 0px)
-    var(--hydra-clip-left, 0px)
+    var(--visuals-clip-top, 0px)
+    var(--visuals-clip-right, 0px)
+    var(--visuals-clip-bottom, 0px)
+    var(--visuals-clip-left, 0px)
   );
-  /* Stacking fix (the real "frozen panel" bug): #hydra-canvas is
-   * position:fixed and prepended to <body>, so at z-index:auto it paints
-   * BEHIND any positioned sibling content. .roll-pane is position:relative
-   * (roll.css), i.e. a z-index:auto positioned element that paints AFTER —
-   * and therefore OVER — the canvas. So the live Hydra render was occluded by
-   * the roll-pane's own opaque surface + last-rendered roll/beat-grid frame;
-   * what looked like a "frozen visual" was actually the panel's static
-   * content sitting in front. Lifting the clipped canvas to z-index:1 puts it
-   * above the roll-pane content while staying below the mode-switcher pill
-   * (.bottom-panel__bar, z-index:2). pointer-events stays none, so it blocks
-   * nothing. Full-window mode keeps z-index:auto (the canvas must stay BEHIND
-   * the editor text there), which is why that path already worked. */
+  /* Stacking: at z-index:auto a fixed canvas prepended to <body> paints
+   * BEHIND every positioned box that follows it. .roll-pane is
+   * position:relative (roll.css), so its opaque surface + last-rendered
+   * roll/beat-grid frame would sit in front of the live render. z-index:1
+   * lifts the clipped canvas above the roll-pane content while staying below
+   * the mode-switcher pill (.bottom-panel__bar, z-index:2). pointer-events
+   * stays none, so it blocks nothing. */
   z-index: 1;
 }
 
-/* Full-window mode (Phase 1.5): un-clipped, full-viewport behind the editor. */
-#hydra-canvas.is-visuals-fullwindow {
+/* Full-window mode (Phase 1.5): un-clipped, behind the whole app. z-index:-1
+ * puts the canvas under every in-flow box of the page, positioned or not — so
+ * its place no longer depends on which panels happen to be positioned. The
+ * opaque chrome (top bar, rails, transport, bottom panel) covers it; the
+ * editor region is opened up by the transparency rules below. */
+.visuals-canvas.is-visuals-fullwindow {
   display: block;
   clip-path: none;
+  z-index: -1;
+}
+
+/* <body> paints its own --surface-0 background ABOVE negative z-index layers.
+ * <html> carries the same colour (base.css) and paints below them, so dropping
+ * body's is invisible — except that the canvas now shows. */
+body:has(> .visuals-canvas.is-visuals-fullwindow) {
+  background: transparent;
+}
+
+/* The editor pane is the window onto the canvas. Its tab strip stays opaque
+ * (it is chrome); the pane's own surface, #editor and the gutters go clear. */
+.shell--visuals-fullwindow .editor-pane {
+  background: transparent;
+}
+
+/* With the bottom panel on Visuals too, the panel becomes a second window
+ * onto the same canvas (the clip is off in full-window mode, so otherwise the
+ * panel would be left showing a stale roll frame). */
+.shell--visuals-fullwindow
+  .roll-pane:has(.bottom-panel__mode-btn[data-mode="visuals"].is-active) {
+  background: transparent;
+}
+.shell--visuals-fullwindow
+  .roll-pane:has(.bottom-panel__mode-btn[data-mode="visuals"].is-active)
+  > canvas {
+  visibility: hidden;
 }
 
 /* Editor transparency in full-window mode. StrudelMirror sets
@@ -45,7 +78,7 @@
  * constructor (bgFill:true default). main.js overrides that inline style
  * directly when toggling full-window on/off — no !important needed. The
  * .cm-editor background is already 'transparent' (StrudelMirror always does
- * that). The only CSS-side surface that still needs overriding is .cm-gutters
+ * that). The remaining CSS-side surface inside the editor is .cm-gutters
  * (editor.css sets background:var(--surface-0) there). We target it via a
  * class on #editor (the root element) so the rule is scoped, reverts cleanly
  * when the class is removed, and needs no !important. */
@@ -55,7 +88,7 @@
 
 /* Legibility mechanism — per-line translucent plates so editor text sits on
  * its own translucent strip over the visuals. NOT a global scrim. The
- * canvas is already pointer-events:none (from getDrawContext), so it never
+ * canvas is already pointer-events:none (.visuals-canvas above), so it never
  * steals clicks or selection. Final alpha/color/token tuning is deferred to
  * a /polish pass (SYSTEM.md §5). In the Phase 1 default the visuals are
  * confined to the bottom panel, so the plates barely matter yet; they become

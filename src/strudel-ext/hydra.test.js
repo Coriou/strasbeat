@@ -12,11 +12,17 @@ import {
   installNodeGlobalShim,
   initHydra,
   clearHydra,
-  setHydraRenderEnabled,
-  computeHydraCanvasSize,
   _setHydraTestHarness,
   _resetHydraTestHarness,
 } from "./hydra.js";
+import {
+  computeVisualCanvasSize,
+  holdVisualsForStart,
+  setVisualsVisible,
+  setVisualsChangeCallback,
+  syncVisualsToRepl,
+  _resetVisualsHost,
+} from "./visuals-host.js";
 
 // ─── Teardown / lifecycle harness ────────────────────────────────────────
 // initHydra/clearHydra cannot run against the real hydra-synth in Node (it
@@ -33,7 +39,24 @@ import {
 // render loop. clearHydra() must now: stop OUR loop, regl.destroy(), and
 // loseContext() the GL.
 
-function makeFakeHarness({ throwOnTick = false } = {}) {
+// The render loop only runs while the scheduler plays AND the host reports the
+// canvas on screen. Most lifecycle tests want exactly that state.
+function hostPlayingAndVisible() {
+  syncVisualsToRepl({ started: true, pending: false });
+  setVisualsVisible(true);
+}
+function resetAll() {
+  _resetHydraTestHarness();
+  _resetVisualsHost();
+}
+
+function makeFakeHarness({
+  throwOnTick = false,
+  beforeMake,
+  globals = {},
+  playing = true,
+} = {}) {
+  if (playing) hostPlayingAndVisible();
   const calls = {
     constructed: 0,
     hush: 0,
@@ -78,8 +101,11 @@ function makeFakeHarness({ throwOnTick = false } = {}) {
 
   _setHydraTestHarness({
     // Replaces the dynamic import('hydra-synth') + getDrawContext + new Hydra.
+    beforeMake,
     makeHydra() {
       calls.constructed++;
+      // hydra-synth's makeGlobal writes its synth onto window at construction.
+      Object.assign(globalThis, globals);
       return { hydra: fakeHydra, canvas };
     },
     // Deterministic rAF: callbacks fire only when we call flushRaf().
@@ -138,14 +164,14 @@ describe("guarded H()", () => {
   });
 });
 
-describe("computeHydraCanvasSize() — GPU-OOM resolution cap", () => {
+describe("computeVisualCanvasSize() — GPU-OOM resolution cap", () => {
   // The crash hypothesis: hydra-synth allocates ~12 full-res FBOs on first
   // render; an innerWidth×innerHeight×dpr canvas on a 4K/retina display is
   // hundreds of MB of VRAM in one burst → OOM → tab crash on the first tick
   // (which fires when Visuals mode is entered). The clamp removes that path.
 
   test("small viewport at dpr 1 is returned unscaled (no clamp needed)", () => {
-    const r = computeHydraCanvasSize({ innerWidth: 800, innerHeight: 600 });
+    const r = computeVisualCanvasSize({ innerWidth: 800, innerHeight: 600 });
     assert.equal(r.width, 800);
     assert.equal(r.height, 600);
     assert.equal(r.pixelRatio, 1);
@@ -153,7 +179,7 @@ describe("computeHydraCanvasSize() — GPU-OOM resolution cap", () => {
   });
 
   test("caps pixelRatio at 1 (a retina dpr=2 must not double the buffer)", () => {
-    const r = computeHydraCanvasSize({
+    const r = computeVisualCanvasSize({
       innerWidth: 1000,
       innerHeight: 700,
       pixelRatio: 2,
@@ -167,7 +193,7 @@ describe("computeHydraCanvasSize() — GPU-OOM resolution cap", () => {
 
   test("clamps the long edge to the max while preserving aspect ratio", () => {
     // A 4K-ish landscape viewport: long edge must come down to 1280.
-    const r = computeHydraCanvasSize({
+    const r = computeVisualCanvasSize({
       innerWidth: 3840,
       innerHeight: 2160,
       pixelRatio: 2,
@@ -183,14 +209,14 @@ describe("computeHydraCanvasSize() — GPU-OOM resolution cap", () => {
   });
 
   test("clamps a portrait viewport on its (vertical) long edge", () => {
-    const r = computeHydraCanvasSize({ innerWidth: 1080, innerHeight: 2400 });
+    const r = computeVisualCanvasSize({ innerWidth: 1080, innerHeight: 2400 });
     assert.equal(r.height, 1280, "vertical long edge clamped");
     assert.ok(r.width < r.height);
     assert.equal(r.clamped, true);
   });
 
   test("respects a custom maxLongEdge", () => {
-    const r = computeHydraCanvasSize({
+    const r = computeVisualCanvasSize({
       innerWidth: 2000,
       innerHeight: 1000,
       maxLongEdge: 800,
@@ -200,10 +226,10 @@ describe("computeHydraCanvasSize() — GPU-OOM resolution cap", () => {
   });
 
   test("degenerate 0/NaN viewport yields a valid 1x1, never 0x0 or NaN", () => {
-    const z = computeHydraCanvasSize({ innerWidth: 0, innerHeight: 0 });
+    const z = computeVisualCanvasSize({ innerWidth: 0, innerHeight: 0 });
     assert.equal(z.width, 1);
     assert.equal(z.height, 1);
-    const n = computeHydraCanvasSize({ innerWidth: NaN, innerHeight: NaN });
+    const n = computeVisualCanvasSize({ innerWidth: NaN, innerHeight: NaN });
     assert.ok(Number.isFinite(n.width) && n.width >= 1);
     assert.ok(Number.isFinite(n.height) && n.height >= 1);
   });
@@ -304,7 +330,7 @@ describe("clearHydra() teardown contract (the leak that crashed the tab)", () =>
         "no tick may fire after clearHydra — the render loop must be stopped",
       );
     } finally {
-      _resetHydraTestHarness();
+      resetAll();
     }
   });
 
@@ -328,7 +354,7 @@ describe("clearHydra() teardown contract (the leak that crashed the tab)", () =>
         "each lifecycle destroys its own context",
       );
     } finally {
-      _resetHydraTestHarness();
+      resetAll();
     }
   });
 
@@ -346,11 +372,11 @@ describe("clearHydra() teardown contract (the leak that crashed the tab)", () =>
         "initHydra must be idempotent across re-eval — one instance only",
       );
     } finally {
-      _resetHydraTestHarness();
+      resetAll();
     }
   });
 
-  test("setHydraRenderEnabled(false) pauses the loop; (true) resumes it", async () => {
+  test("a hidden canvas pauses the loop; showing it again resumes", async () => {
     // Efficiency: Hydra must not render a full-viewport frame every rAF when
     // its canvas is hidden (Visuals mode off). Pausing the loop drops the
     // idle cost to zero.
@@ -360,7 +386,7 @@ describe("clearHydra() teardown contract (the leak that crashed the tab)", () =>
       h.flushRaf(2);
       const before = h.calls.ticks;
 
-      setHydraRenderEnabled(false);
+      setVisualsVisible(false);
       h.flushRaf(5);
       assert.equal(
         h.calls.ticks,
@@ -368,14 +394,12 @@ describe("clearHydra() teardown contract (the leak that crashed the tab)", () =>
         "a paused Hydra must not tick while hidden",
       );
 
-      setHydraRenderEnabled(true);
+      setVisualsVisible(true);
       assert.ok(h.pendingRafCount() > 0, "resuming must reschedule the loop");
       h.flushRaf(2);
       assert.ok(h.calls.ticks > before, "resuming must drive ticks again");
     } finally {
-      // Leave render enabled for any later test, then reset the harness.
-      setHydraRenderEnabled(true);
-      _resetHydraTestHarness();
+      resetAll();
     }
   });
 
@@ -404,7 +428,278 @@ describe("clearHydra() teardown contract (the leak that crashed the tab)", () =>
         "no further ticks after a throw — the loop stays stopped",
       );
     } finally {
-      _resetHydraTestHarness();
+      resetAll();
+    }
+  });
+});
+
+describe("visuals follow the repl (exist iff the evaluated code asked AND it plays)", () => {
+  // The state objects below are what @strudel/core's repl hands onUpdateState.
+  const evalStart = (started) => syncVisualsToRepl({ pending: true, started });
+  const evalDone = (started, evalError) =>
+    syncVisualsToRepl({ pending: false, started, evalError });
+
+  test("a silent evaluate (boot first frame, WAV export) never renders and leaves nothing behind", async () => {
+    const h = makeFakeHarness({ playing: false });
+    try {
+      setVisualsVisible(true);
+      evalStart(false);
+      await initHydra();
+      assert.equal(h.pendingRafCount(), 0, "no render loop while idle");
+      evalDone(false);
+      assert.equal(h.calls.reglDestroy, 1, "the idle instance is torn down");
+      assert.equal(h.calls.ticks, 0);
+    } finally {
+      resetAll();
+    }
+  });
+
+  // The app evaluates with autostart off and starts the scheduler itself
+  // afterwards, so a play from idle passes through "settled, not started".
+  test("play: the layer survives the evaluate and renders once the scheduler runs", async () => {
+    const h = makeFakeHarness({ playing: false });
+    try {
+      setVisualsVisible(true);
+      const release = holdVisualsForStart();
+      evalStart(false);
+      await initHydra();
+      evalDone(false); // evaluate(autostart = false) settled
+      assert.equal(h.calls.reglDestroy, 0, "held: not torn down");
+      assert.equal(h.pendingRafCount(), 0, "scheduler not started yet");
+      syncVisualsToRepl({ pending: false, started: true }); // scheduler.start()
+      release();
+      assert.ok(h.pendingRafCount() > 0, "now rendering");
+      assert.equal(h.calls.reglDestroy, 0);
+      assert.equal(h.calls.constructed, 1);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("play cancelled before the scheduler starts: releasing the hold tears down", async () => {
+    const h = makeFakeHarness({ playing: false });
+    try {
+      setVisualsVisible(true);
+      const release = holdVisualsForStart();
+      evalStart(false);
+      await initHydra();
+      evalDone(false);
+      assert.equal(h.calls.reglDestroy, 0);
+      release(); // the start never happened
+      assert.equal(h.calls.reglDestroy, 1);
+      assert.equal(h.calls.canvasRemoved, 1);
+      release(); // idempotent
+      assert.equal(h.calls.reglDestroy, 1);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("a hold released while another evaluate is in flight leaves the decision to it", async () => {
+    const h = makeFakeHarness({ playing: false });
+    try {
+      const release = holdVisualsForStart();
+      evalStart(false);
+      await initHydra();
+      release();
+      assert.equal(h.calls.reglDestroy, 0, "evaluate still pending");
+      evalDone(false);
+      assert.equal(h.calls.reglDestroy, 1);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("every stop tears down — the scheduler going idle is the only signal needed", async () => {
+    const h = makeFakeHarness();
+    try {
+      await initHydra();
+      h.flushRaf(1);
+      syncVisualsToRepl({ pending: false, started: false });
+      assert.equal(h.calls.reglDestroy, 1);
+      assert.equal(h.calls.canvasRemoved, 1);
+      assert.equal(h.pendingRafCount(), 0);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("re-evaluating the same visual code while playing keeps the one instance", async () => {
+    const h = makeFakeHarness();
+    try {
+      evalStart(true);
+      await initHydra();
+      evalDone(true);
+      evalStart(true);
+      await initHydra();
+      evalDone(true);
+      assert.equal(h.calls.constructed, 1);
+      assert.equal(h.calls.reglDestroy, 0);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("evaluating code that no longer calls initHydra() tears the old visuals down", async () => {
+    const h = makeFakeHarness();
+    try {
+      evalStart(true);
+      await initHydra();
+      evalDone(true);
+      evalStart(true); // new code: no initHydra()
+      evalDone(true);
+      assert.equal(h.calls.reglDestroy, 1);
+      assert.equal(h.pendingRafCount(), 0);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("a failed evaluate keeps the visuals of the pattern still playing", async () => {
+    const h = makeFakeHarness();
+    try {
+      evalStart(true);
+      await initHydra();
+      evalDone(true);
+      evalStart(true); // throws before reaching initHydra()
+      evalDone(true, new Error("syntax"));
+      assert.equal(h.calls.reglDestroy, 0);
+      assert.ok(h.pendingRafCount() > 0);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("the host is told when visuals appear and disappear", async () => {
+    makeFakeHarness();
+    const seen = [];
+    try {
+      setVisualsChangeCallback((available) => seen.push(available));
+      await initHydra();
+      clearHydra();
+      assert.deepEqual(seen, [true, false]);
+    } finally {
+      resetAll();
+    }
+  });
+});
+
+describe("initHydra() is safe across its async chunk load", () => {
+  function deferred() {
+    let resolve;
+    const promise = new Promise((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  test("two overlapping calls build ONE instance", async () => {
+    const gate = deferred();
+    const h = makeFakeHarness({ beforeMake: () => gate.promise });
+    try {
+      const a = initHydra();
+      const b = initHydra();
+      gate.resolve();
+      const [ha, hb] = await Promise.all([a, b]);
+      assert.equal(h.calls.constructed, 1);
+      assert.equal(ha, hb);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("a silent evaluate settling during the load abandons the build", async () => {
+    // initHydra() without `await`: the evaluate settles while the chunk is
+    // still loading, so there is no live layer yet for the host to clear.
+    const gate = deferred();
+    const h = makeFakeHarness({ playing: false, beforeMake: () => gate.promise });
+    try {
+      syncVisualsToRepl({ pending: true, started: false });
+      const pending = initHydra();
+      syncVisualsToRepl({ pending: false, started: false });
+      gate.resolve();
+      assert.equal(await pending, null);
+      assert.equal(h.calls.constructed, 0, "nothing is built while stopped");
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("an evaluate that no longer asks for Hydra abandons a build still loading", async () => {
+    const gate = deferred();
+    const h = makeFakeHarness({ beforeMake: () => gate.promise });
+    try {
+      syncVisualsToRepl({ pending: true, started: true });
+      const pending = initHydra(); // not awaited by the pattern
+      syncVisualsToRepl({ pending: false, started: true });
+      syncVisualsToRepl({ pending: true, started: true }); // new code, no visuals
+      syncVisualsToRepl({ pending: false, started: true });
+      gate.resolve();
+      assert.equal(await pending, null);
+      assert.equal(h.calls.constructed, 0);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("a build still loading survives the evaluate that asked for it", async () => {
+    const gate = deferred();
+    const h = makeFakeHarness({ beforeMake: () => gate.promise });
+    try {
+      syncVisualsToRepl({ pending: true, started: true });
+      const pending = initHydra();
+      syncVisualsToRepl({ pending: false, started: true });
+      gate.resolve();
+      assert.notEqual(await pending, null);
+      assert.equal(h.calls.constructed, 1);
+    } finally {
+      resetAll();
+    }
+  });
+
+  test("a teardown during the load abandons the build (no start-after-stop)", async () => {
+    const gate = deferred();
+    const h = makeFakeHarness({ beforeMake: () => gate.promise });
+    try {
+      const pending = initHydra();
+      clearHydra();
+      gate.resolve();
+      assert.equal(await pending, null);
+      assert.equal(h.calls.constructed, 0);
+      assert.equal(h.pendingRafCount(), 0);
+    } finally {
+      resetAll();
+    }
+  });
+});
+
+describe("clearHydra() restores every global hydra-synth overwrote", () => {
+  test("Strudel's time/noise/src/hush/speed/shape come back; Hydra-only names are removed", async () => {
+    const names = ["time", "noise", "src", "hush", "speed", "shape"];
+    const saved = Object.fromEntries(
+      names.map((n) => [n, Object.getOwnPropertyDescriptor(globalThis, n)]),
+    );
+    const strudel = Object.fromEntries(names.map((n) => [n, () => n]));
+    Object.assign(globalThis, strudel);
+    const hydraGlobals = Object.fromEntries(names.map((n) => [n, () => "h"]));
+    hydraGlobals.time = 0;
+    hydraGlobals.osc = () => "osc";
+    makeFakeHarness({ globals: hydraGlobals });
+    try {
+      await initHydra();
+      assert.equal(globalThis.noise, hydraGlobals.noise, "Hydra owns it live");
+      globalThis.time = 12.5; // hydra-synth rewrites window.time every tick
+
+      clearHydra();
+      for (const n of names) {
+        assert.equal(globalThis[n], strudel[n], `${n} must be Strudel's again`);
+      }
+      assert.equal("osc" in globalThis, false, "Hydra-only global removed");
+    } finally {
+      resetAll();
+      delete globalThis.osc;
+      for (const n of names) {
+        if (saved[n]) Object.defineProperty(globalThis, n, saved[n]);
+        else delete globalThis[n];
+      }
     }
   });
 });
