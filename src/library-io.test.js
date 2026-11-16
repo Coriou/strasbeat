@@ -251,3 +251,85 @@ describe("applyImport: conflict strategies", () => {
     assert.match(r.error, /storage/i);
   });
 });
+
+describe("applyImport: organisation and partial failures", () => {
+  const rec = (extra = {}) => ({ code: "C", modified: "t", isUserPattern: true, ...extra });
+
+  test("files a pattern under the local spelling of a folder that differs only by case", () => {
+    const store = makeStore({ index: { lastOpen: null, userPatterns: [], folders: ["Jazz"] } });
+    const parsed = parseImportJson(JSON.stringify({
+      version: 1, exportedAt: "t", folders: ["jazz", " Live "],
+      patterns: { a: rec({ folder: "jazz" }), b: rec({ folder: "LIVE" }) },
+    }));
+    assert.equal(parsed.ok, true);
+    const r = applyImport(parsed.data, store, { conflictStrategy: "skip", shippedDemos: new Set() });
+    assert.equal(r.ok, true);
+    assert.deepEqual(store.getIndex().folders, ["Jazz", "Live"]);
+    assert.equal(store.get("a").folder, "Jazz");
+    assert.equal(store.get("b").folder, "Live");
+  });
+
+  test("a quota failure part-way still lists what was written, and says how far it got", () => {
+    const store = makeStore();
+    const realSet = store.set;
+    let calls = 0;
+    store.set = (n, r) => {
+      if (++calls > 2) { const e = new Error("quota"); e.name = "QuotaExceededError"; throw e; }
+      return realSet(n, r);
+    };
+    const json = { version: 1, exportedAt: "t", folders: [], patterns: { p1: rec(), p2: rec(), p3: rec(), p4: rec() } };
+    const r = applyImport(json, store, { conflictStrategy: "skip", shippedDemos: new Set() });
+    assert.equal(r.ok, false);
+    assert.equal(r.imported, 2);
+    assert.match(r.error, /storage full.*2 of 4/i);
+    assert.deepEqual(store.getIndex().userPatterns, ["p1", "p2"], "written records are not stranded");
+    assert.deepEqual(r.written, ["p1", "p2"]);
+  });
+
+  test("when even the index can't be written, the records this import created are removed", () => {
+    const store = makeStore({
+      index: { lastOpen: null, userPatterns: ["old"], folders: [] },
+      records: { old: rec({ code: "OLD" }) },
+    });
+    store.setIndex = () => { const e = new Error("quota"); e.name = "QuotaExceededError"; throw e; };
+    const json = { version: 1, exportedAt: "t", folders: [], patterns: { p1: rec(), p2: rec() } };
+    const r = applyImport(json, store, { conflictStrategy: "skip", shippedDemos: new Set() });
+    assert.equal(r.ok, false);
+    assert.equal(r.imported, 0);
+    assert.equal(store.get("p1"), null);
+    assert.equal(store.get("p2"), null);
+    assert.equal(store.get("old").code, "OLD");
+  });
+
+  test("a user pattern named like a shipped Demo is a conflict, never written under that name", () => {
+    const shippedDemos = new Set(["01-demo"]);
+    const json = { version: 1, exportedAt: "t", folders: [], patterns: { "01-demo": rec({ code: "MINE" }) } };
+    const pv = previewImport(json, makeStore(), shippedDemos);
+    assert.deepEqual(pv.conflicts, ["01-demo"]);
+    assert.deepEqual(pv.newUserPatterns, []);
+
+    const skip = makeStore();
+    assert.equal(applyImport(json, skip, { conflictStrategy: "skip", shippedDemos }).skipped, 1);
+    assert.equal(skip.get("01-demo"), null);
+
+    for (const strategy of ["overwrite", "rename"]) {
+      const store = makeStore();
+      const r = applyImport(json, store, { conflictStrategy: strategy, shippedDemos });
+      assert.equal(store.get("01-demo"), null, `${strategy}: demo name untouched`);
+      assert.equal(store.get("01-demo-imported").code, "MINE");
+      assert.deepEqual(r.renamed, [{ from: "01-demo", to: "01-demo-imported" }]);
+      assert.deepEqual(store.getIndex().userPatterns, ["01-demo-imported"]);
+    }
+  });
+
+  test("reports every name it wrote", () => {
+    const store = makeStore({ index: { lastOpen: null, userPatterns: ["a"], folders: [] }, records: { a: rec({ code: "OLD" }) } });
+    const json = {
+      version: 1, exportedAt: "t", folders: [],
+      patterns: { a: rec({ code: "NEW" }), b: rec(), demo: { code: "D", modified: "t", isUserPattern: false } },
+    };
+    const r = applyImport(json, store, { conflictStrategy: "overwrite", shippedDemos: new Set(["demo"]) });
+    assert.deepEqual(r.written.sort(), ["a", "b", "demo"]);
+    assert.equal(store.get("a").code, "NEW");
+  });
+});

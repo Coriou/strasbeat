@@ -2,7 +2,10 @@
 // Every .js file in /patterns must `export default` a string of Strudel code.
 // Adding/removing files triggers Vite HMR (see hot.accept below).
 export function discoverPatterns(patternModules) {
-  const patterns = {};
+  // Null-prototype: `name in patterns` is how the whole app asks "is this a
+  // shipped pattern?", and on a plain object that is also true for
+  // "constructor", "toString", … — all legal pattern names.
+  const patterns = Object.create(null);
   for (const [filePath, mod] of Object.entries(patternModules)) {
     const name = filePath.split("/").pop().replace(/\.js$/, "");
     patterns[name] = mod.default;
@@ -28,10 +31,14 @@ export function groupUserPatternsByFolder(store) {
   const declaredSet = new Set(declaredFolders);
   const folders = Object.fromEntries(declaredFolders.map((f) => [f, []]));
   const unfiled = [];
+  // Read each record once: the sort below would otherwise re-parse two full
+  // records (code included) per comparison.
+  const modifiedOf = new Map();
 
   for (const name of idx.userPatterns) {
     const rec = store.get(name);
     if (!rec || rec.isUserPattern !== true) continue;
+    modifiedOf.set(name, typeof rec.modified === "string" ? rec.modified : "");
     const f = rec.folder;
     if (typeof f === "string" && declaredSet.has(f)) {
       folders[f].push(name);
@@ -43,9 +50,7 @@ export function groupUserPatternsByFolder(store) {
 
   // Sort each bucket by modified desc.
   const byModifiedDesc = (a, b) => {
-    const ma = store.get(a)?.modified ?? "";
-    const mb = store.get(b)?.modified ?? "";
-    return mb.localeCompare(ma);
+    return modifiedOf.get(b).localeCompare(modifiedOf.get(a));
   };
   for (const f of Object.keys(folders)) folders[f].sort(byModifiedDesc);
   unfiled.sort(byModifiedDesc);
@@ -54,7 +59,15 @@ export function groupUserPatternsByFolder(store) {
 }
 
 const FOLDER_NAME_MAX = 64;
-const RESERVED_FOLDERS = new Set(["demos", "unfiled"]);
+// "demos"/"unfiled" are the rail's fixed sections; the dunder names are the
+// sentinel keys the rail and the move / new-pattern dialogs use for them.
+const RESERVED_FOLDERS = new Set([
+  "demos",
+  "unfiled",
+  "__demos__",
+  "__unfiled__",
+  "__new__",
+]);
 
 /** Returns an error string, or null if the name is valid. */
 export function validateFolderName(rawName, existingFolders) {
@@ -146,9 +159,76 @@ export function getUserPatternNames(store) {
   return idx.userPatterns.filter((n) => store.get(n) !== null);
 }
 
+/**
+ * Boot-time repair of the store against what actually exists.
+ *
+ *   - A record nothing lists (not shipped, not in index.userPatterns) is
+ *     unreachable from the UI. If it holds code it is promoted to a user
+ *     pattern so the work shows up in the library again; if it is empty it is
+ *     removed.
+ *   - A working copy of a shipped pattern that is byte-identical to the
+ *     original is dropped: it carries no edit and would only keep shadowing
+ *     the pattern after an update changes it.
+ *
+ * @returns {{ promoted: string[], dropped: string[] }}
+ */
+export function reconcileStoredPatterns({ store, patterns }) {
+  const promoted = [];
+  const dropped = [];
+  let idx;
+  try {
+    idx = store.getIndex();
+    const listed = new Set(idx.userPatterns ?? []);
+    for (const name of store.keys()) {
+      const rec = store.get(name);
+      if (!rec || typeof rec !== "object") continue;
+      if (name in patterns) {
+        if (rec.code === patterns[name]) {
+          store.delete(name);
+          dropped.push(name);
+        }
+        continue;
+      }
+      if (listed.has(name) && rec.isUserPattern === true) continue;
+      if (typeof rec.code !== "string" || !PATTERN_NAME_RE.test(name)) continue;
+      if (!rec.code.trim()) {
+        if (!listed.has(name)) {
+          store.delete(name);
+          dropped.push(name);
+        }
+        continue;
+      }
+      if (rec.isUserPattern !== true) store.set(name, { ...rec, isUserPattern: true });
+      listed.add(name);
+      promoted.push(name);
+    }
+    if (promoted.length > 0) {
+      store.setIndex({ ...idx, userPatterns: Array.from(listed) });
+      console.warn(
+        `[strasbeat] recovered ${promoted.length} stored pattern(s) that the library had lost track of: ${promoted.join(", ")}`,
+      );
+    }
+  } catch (err) {
+    // Never let a repair pass stop the app from booting.
+    console.warn("[strasbeat] store reconciliation failed:", err);
+  }
+  return { promoted, dropped };
+}
+
 // ─── Autosave ────────────────────────────────────────────────────────────
 // Every document change is debounced 1000ms then flushed to the store.
 // Switching patterns or closing the tab triggers an immediate flush.
+//
+// A flush only ever writes when the buffer was actually edited since the last
+// one. Flushes are requested from many places that involve no edit at all
+// (every tab switch, page hide, the new/duplicate/move/rename dialogs), and an
+// unconditional write there pins a merely-viewed Demo under a working copy,
+// reshuffles the library by `modified`, and lets an idle window overwrite what
+// another window just saved.
+//
+// A write that fails (storage full) is not forgotten when the user moves on to
+// another tab: the code is held here per pattern and every later flush tries
+// it again, so freeing space is enough for the edits to reach the store.
 export function createAutosave({
   editor,
   store,
@@ -160,52 +240,243 @@ export function createAutosave({
   onDirtyChange,
 }) {
   let timer = null;
-  /** Tracks per-pattern dirty state to avoid redundant renderList() calls. */
-  const lastDirtyState = new Map();
+  /** The pattern whose buffer has edits not yet flushed, or null. */
+  let pendingName = null;
+  /**
+   * Writes that failed and are still owed to the store: name → the code that
+   * could not be written, and the code the record held at the time (`base`).
+   * @type {Map<string, { code: string, base: string|undefined }>}
+   */
+  const unsaved = new Map();
 
-  /** Write the current editor buffer to the store as a working copy. */
-  function flushToStore() {
+  function clearTimer() {
     if (timer != null) {
       clearTimeout(timer);
       timer = null;
     }
-    const currentName = getCurrentName();
-    if (!currentName) return;
-    const code = editor.code;
-    if (code == null) return;
-    const isUserPattern = !(currentName in patterns);
-    try {
-      store.set(currentName, {
-        code,
-        modified: new Date().toISOString(),
-        isUserPattern,
-      });
-    } catch (err) {
-      if (err?.name === "QuotaExceededError") {
-        transport.setStatus(
-          "\u26a0 couldn\u2019t save \u2014 browser storage full",
+  }
+
+  /**
+   * Write the current editor buffer to the store as a working copy — if it
+   * has unflushed edits. Returns true when the buffer is now safely stored
+   * (or needed no write), false when there was nothing pending or the write
+   * failed (the edits stay pending and the next flush retries).
+   */
+  function flushToStore() {
+    clearTimer();
+    const stored = flushPending();
+    retryUnsaved();
+    return stored;
+  }
+
+  // Try the failed writes of patterns that are no longer the live buffer.
+  function retryUnsaved() {
+    for (const [name, { code, base }] of unsaved) {
+      // Newer edits to it are pending; their own flush supersedes this one.
+      if (name === pendingName) continue;
+      const isUserPattern = !(name in patterns);
+      const rec = store.get(name);
+      const prev =
+        rec && typeof rec === "object" && !Array.isArray(rec) ? rec : null;
+      // Only write over the record the edits were made against. If it was
+      // deleted, reverted, renamed or rewritten since (here or in another
+      // window), that newer state stands.
+      if (prev?.code !== base || (isUserPattern && !prev)) {
+        unsaved.delete(name);
+        store.forgetWriteFailure?.(name);
+        console.warn(
+          `[strasbeat] unsaved edits to "${name}" were dropped — the pattern changed before they could be stored.`,
         );
+        continue;
       }
-      return;
-    }
-    // Update dirty dot for shipped patterns — only if dirty state changed.
-    if (!isUserPattern) {
-      const isDirtyNow = code !== patterns[currentName];
-      const wasDirty = lastDirtyState.get(currentName) ?? false;
-      if (isDirtyNow !== wasDirty) {
-        lastDirtyState.set(currentName, isDirtyNow);
+      try {
+        const ok = store.set(
+          name,
+          { ...(prev ?? {}), code, modified: new Date().toISOString(), isUserPattern },
+          { retry: true },
+        );
+        if (ok === false) continue;
+      } catch {
+        continue; // still no room; the store keeps the save notice up
+      }
+      unsaved.delete(name);
+      if (!isUserPattern) {
         leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
         onDirtyChange?.();
       }
     }
   }
 
+  function flushPending() {
+    const name = pendingName;
+    if (name == null) return false;
+    // The edits belong to a pattern that is no longer the live buffer (it was
+    // deleted or closed without saving): there is nothing of it left to write,
+    // and the buffer now holds some other pattern's code. (A write of it that
+    // FAILED is a different matter — that one is kept in `unsaved`.)
+    if (name !== getCurrentName()) {
+      pendingName = null;
+      return false;
+    }
+    const code = editor.code;
+    if (code == null) return false;
+    const isUserPattern = !(name in patterns);
+    const stored = store.get(name);
+    const prev =
+      stored && typeof stored === "object" && !Array.isArray(stored)
+        ? stored
+        : null;
+    try {
+      if (!isUserPattern && code === patterns[name]) {
+        // Edited back to the shipped original. Keeping an identical working
+        // copy would shadow the pattern forever, so drop it instead.
+        if (prev) store.delete(name);
+      } else if (!prev || prev.code !== code) {
+        // Merge, never rebuild: the record also carries `folder` (and whatever
+        // else is added later), which a from-scratch write would strip.
+        const ok = store.set(
+          name,
+          {
+            ...(prev ?? {}),
+            code,
+            modified: new Date().toISOString(),
+            isUserPattern,
+          },
+          { retry: true },
+        );
+        if (ok === false) {
+          unsaved.set(name, { code, base: prev?.code });
+          return false;
+        }
+        if (isUserPattern && prev?.isUserPattern !== true) {
+          // The record had vanished (storage cleared underneath us) or was
+          // never listed. Re-list it so the work stays reachable.
+          const idx = store.getIndex();
+          if (!(idx.userPatterns ?? []).includes(name)) {
+            store.setIndex({
+              ...idx,
+              userPatterns: [...(idx.userPatterns ?? []), name],
+            });
+            leftRail.addUserPattern?.(name, prev?.folder);
+          }
+        }
+      }
+    } catch (err) {
+      unsaved.set(name, { code, base: prev?.code });
+      if (err?.name === "QuotaExceededError") {
+        transport.setStatus(
+          "⚠ couldn’t save — browser storage full",
+        );
+      } else {
+        console.warn(`[strasbeat] autosave of "${name}" failed:`, err);
+        transport.setStatus(`⚠ couldn’t save "${name}"`);
+      }
+      return false;
+    }
+    pendingName = null;
+    unsaved.delete(name);
+    // Update dirty dot for shipped patterns — only if dirty state changed.
+    if (!isUserPattern) {
+      const isDirtyNow = code !== patterns[name];
+      const wasDirty = prev != null && prev.code !== patterns[name];
+      if (isDirtyNow !== wasDirty) {
+        leftRail.updateDirtySet(computeDirtySet(patternNames, patterns, store));
+        onDirtyChange?.();
+      }
+    }
+    return true;
+  }
+
   function scheduleAutosave() {
-    if (timer != null) clearTimeout(timer);
+    clearTimer();
+    pendingName = getCurrentName() || null;
+    // No pattern is open (the empty state): the buffer belongs to nothing.
+    if (pendingName == null) return;
     timer = setTimeout(flushToStore, 1000);
   }
 
-  return { flushToStore, scheduleAutosave, lastDirtyState };
+  /** True when `name` has edits that are not in the store yet. */
+  function hasPending(name) {
+    return (pendingName != null && pendingName === name) || unsaved.has(name);
+  }
+
+  /** A pattern was renamed: what is owed to the old name is owed to the new. */
+  function renamePending(oldName, newName) {
+    if (pendingName === oldName) pendingName = newName;
+    if (unsaved.has(oldName)) {
+      unsaved.set(newName, unsaved.get(oldName));
+      unsaved.delete(oldName);
+    }
+  }
+
+  return { flushToStore, scheduleAutosave, hasPending, renamePending };
+}
+
+/**
+ * React to a store write made by ANOTHER window (see describeStorageEvent in
+ * store.js). The store is shared, the editor buffers are not, so a window
+ * whose copy of a pattern is untouched follows the newer stored version
+ * instead of holding a stale buffer it might later write back.
+ *
+ * Following replaces the buffer, so it only ever happens when this window has
+ * nothing of its own to lose — the buffer still holds exactly what the store
+ * held before the other window's write (`change.oldCode`). In every other case
+ * the buffer is kept and queued to be stored again, and the user is told:
+ *
+ *   - edits still inside the autosave debounce, or a write that failed;
+ *   - a buffer that matches neither the old nor the new stored code;
+ *   - a shipped pattern's working copy removed while it does not transpile.
+ *     That is what the other window's auto-heal does to a copy saved
+ *     mid-expression (see resolveWorkingCopy) — the buffer here is then the
+ *     only copy of what is being typed.
+ *
+ * For the same reason nothing on this path may heal: reacting to another
+ * window's write must never itself delete a record.
+ */
+export function handleExternalStoreChange(change, deps) {
+  const {
+    tabs,
+    patterns,
+    hasPending,
+    getActiveCode,
+    store,
+    refreshRail,
+    setStatus,
+    keepLocalEdits = () => {},
+    canTranspile = () => true,
+  } = deps;
+  if (!change) return;
+  if (change.kind === "pattern" && tabs.getOpenItems().includes(change.name)) {
+    const { name, removed } = change;
+    const shipped = name in patterns;
+    const keeping = `"${name}" was also changed in another window — keeping this window’s edits`;
+    if (hasPending(name)) {
+      setStatus(keeping);
+    } else if (tabs.getActiveItem() !== name) {
+      // A background tab was flushed when it lost focus, so its cached state
+      // holds nothing the store didn't. Drop it; it is rebuilt on next focus.
+      if (removed && !shipped) tabs.close(name, { flush: false });
+      else tabs.refresh(name, { heal: false });
+    } else {
+      const local = getActiveCode();
+      const known = change.oldCode ?? patterns[name];
+      const healedAway = removed && shipped && !canTranspile(local);
+      if (local === (store.get(name)?.code ?? patterns[name])) {
+        // Same code (e.g. only its folder changed) keeps the live tab — and
+        // its undo history — exactly as it is.
+      } else if (local !== known || healedAway) {
+        keepLocalEdits(name);
+        setStatus(keeping);
+      } else if (removed && !shipped) {
+        // Deleted over there; flushing would write the pattern straight back.
+        tabs.close(name, { flush: false });
+      } else {
+        tabs.refresh(name, { heal: false });
+      }
+    }
+  }
+  // index / pattern / cleared all change what the library shows.
+  refreshRail();
 }
 
 // ─── Pattern-name validation (shared by new-pattern, MIDI import, etc.) ──
@@ -220,6 +491,15 @@ export function validatePatternName(name) {
 /** Returns true if `name` already exists (shipped or user-created). */
 export function patternNameExists(name, patterns, store) {
   return name in patterns || !!store.get(name)?.isUserPattern;
+}
+
+/**
+ * True when `name` is taken by ANYTHING — a shipped pattern or any stored
+ * record, listed or not. Stricter than patternNameExists; used wherever a new
+ * record is about to be written and must not land on top of existing data.
+ */
+export function patternNameTaken(name, patterns, store) {
+  return name in patterns || store.get(name) != null;
 }
 
 /**

@@ -159,6 +159,25 @@ function beginInlineEdit({ displayEl, initial, validate, onCommit, onCancel }) {
   });
 }
 
+/**
+ * Ask before deleting a user pattern; call `onDelete(name)` only on an
+ * explicit yes. Deleting removes the record from storage with no undo, so no
+ * gesture gets to bypass this.
+ * @returns {Promise<boolean>} whether the pattern was deleted
+ */
+export async function deleteWithConfirmation({ name, confirm, onDelete }) {
+  const ok = await confirm({
+    title: `Delete "${name}"?`,
+    message: "This can’t be undone.",
+    confirmLabel: "Delete",
+    cancelLabel: "Cancel",
+    destructive: true,
+  });
+  if (ok !== true) return false;
+  onDelete(name);
+  return true;
+}
+
 export function mount({
   container,
   patterns,
@@ -222,6 +241,12 @@ export function mount({
         selectedNames.has(row.dataset.name),
       );
     }
+  }
+
+  // Every single-pattern delete gesture (context menu, keyboard chord) goes
+  // through here: a delete is permanent, so none of them may skip the prompt.
+  function confirmAndDelete(name) {
+    return deleteWithConfirmation({ name, confirm, onDelete });
   }
 
   // Distinguish user patterns from Demos for keyboard-driven bulk delete.
@@ -505,7 +530,9 @@ export function mount({
       if (names.length === 0) return;
       const userNames = names.filter((n) => isUserName(n));
       if (userNames.length === 0) return;
-      if (userNames.length === 1) onDelete(userNames[0]);
+      // Same confirmation as the context-menu Delete: this chord is also
+      // "delete to line start" in the editor, and a clicked row keeps focus.
+      if (userNames.length === 1) confirmAndDelete(userNames[0]);
       else onBulkDelete(userNames);
       return;
     }
@@ -1409,16 +1436,7 @@ export function mount({
     addItem(
       menu,
       "Delete",
-      async () => {
-        const ok = await confirm({
-          title: `Delete "${name}"?`,
-          message: "This can’t be undone.",
-          confirmLabel: "Delete",
-          cancelLabel: "Cancel",
-          destructive: true,
-        });
-        if (ok) onDelete(name);
-      },
+      () => confirmAndDelete(name),
       { danger: true, kbd: `${MOD}⌫` },
     );
   }
@@ -1455,16 +1473,8 @@ export function mount({
     addItem(
       menu,
       `Delete ${n} patterns…`,
-      async () => {
-        const ok = await confirm({
-          title: `Delete ${n} patterns?`,
-          message: "This can’t be undone.",
-          confirmLabel: "Delete",
-          cancelLabel: "Cancel",
-          destructive: true,
-        });
-        if (ok) onBulkDelete(names);
-      },
+      // The host's bulk delete asks for confirmation itself.
+      () => onBulkDelete(names),
       { danger: true, disabled: !allUser, kbd: `${MOD}⌫` },
     );
   }

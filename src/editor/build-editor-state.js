@@ -11,6 +11,12 @@
 //     NOT revert into another tab's content (acceptance #2) — while still
 //     inheriting the live keymap profile / theme / settings (acceptance #3).
 //
+//   - Restoring a cached tab → syncTabState(): the snapshot froze the runtime
+//     compartments as they were when the tab was last on screen, so a settings
+//     change made since (theme, keymap profile, line wrapping, …) is missing
+//     from it. Reconfigure it to the live values before installing, or every
+//     tab drifts back to its own stale settings.
+//
 // Why not derive from the outgoing live state: a CM6 transaction APPENDS to the
 // history field, it never resets it, so the new tab would carry the previous
 // tab's undo stack + a poison step → cross-tab undo bleed. Deriving from a
@@ -50,6 +56,29 @@ export function freshTabState(cleanBase, doc, compartmentValues = []) {
     changes: { from: 0, to: cleanBase.doc.length, insert: doc },
     selection: { anchor: 0 },
     effects: compartmentValues.map(([comp, val]) => comp.reconfigure(val)),
+    annotations: [Transaction.addToHistory.of(false)],
+  }).state;
+}
+
+// Bring a CACHED tab state up to date with the live runtime compartments,
+// keeping everything that makes it that tab's state: document, selection and
+// undo history. Compartments already holding the live value are skipped, and
+// when nothing differs the very same state object is returned (the common case
+// — no settings change between two tab switches — costs nothing).
+//
+// @param {EditorState} cachedState
+// @param {Array<[Compartment, Extension]>} compartmentValues  live values
+// @returns {EditorState}
+export function syncTabState(cachedState, compartmentValues = []) {
+  const effects = [];
+  for (const [comp, val] of compartmentValues) {
+    if (val !== undefined && comp.get(cachedState) !== val) {
+      effects.push(comp.reconfigure(val));
+    }
+  }
+  if (effects.length === 0) return cachedState;
+  return cachedState.update({
+    effects,
     annotations: [Transaction.addToHistory.of(false)],
   }).state;
 }

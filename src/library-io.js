@@ -55,7 +55,7 @@ export function parseImportJson(text) {
   if (typeof data.patterns !== "object" || Array.isArray(data.patterns) || data.patterns == null) {
     return { ok: false, error: "patterns must be an object" };
   }
-  const declaredFolders = new Set(data.folders.map((f) => f.toLowerCase()));
+  const declaredFolders = new Set(data.folders.map((f) => f.trim().toLowerCase()));
   for (const [name, rec] of Object.entries(data.patterns)) {
     if (!NAME_RE.test(name)) return { ok: false, error: `invalid pattern name: "${name}"` };
     if (typeof rec !== "object" || rec == null) return { ok: false, error: `pattern "${name}" is not an object` };
@@ -64,7 +64,7 @@ export function parseImportJson(text) {
     if (typeof rec.isUserPattern !== "boolean") return { ok: false, error: `pattern "${name}" is missing isUserPattern flag` };
     if (rec.folder !== undefined) {
       if (typeof rec.folder !== "string") return { ok: false, error: `pattern "${name}" has non-string folder` };
-      if (!declaredFolders.has(rec.folder.toLowerCase())) {
+      if (!declaredFolders.has(rec.folder.trim().toLowerCase())) {
         // Orphan folder references in the import (folder not declared in
         // the top-level folders[]) get silently demoted to Unfiled by
         // applyImport via groupUserPatternsByFolder's same rule. Strip the
@@ -87,7 +87,9 @@ export function previewImport(payload, store, shippedDemos) {
   const untransferable = [];
   for (const [name, rec] of Object.entries(payload.patterns)) {
     if (rec.isUserPattern) {
-      const exists = store.get(name) != null;
+      // A shipped pattern of the same name is a conflict too: the app tells
+      // user patterns from Demos by name alone, so the two can't coexist.
+      const exists = store.get(name) != null || shippedDemos.has(name);
       if (exists) conflicts.push(name);
       else newUserPatterns.push(name);
     } else {
@@ -107,68 +109,113 @@ export function applyImport(payload, store, { conflictStrategy, shippedDemos }) 
   let imported = 0;
   let skipped = 0;
   const renamed = [];
-  try {
-    // 1) Merge folders.
-    const idx = store.getIndex();
-    const folderSet = new Set((idx.folders ?? []).map((f) => f.toLowerCase()));
-    const folders = (idx.folders ?? []).slice();
-    for (const f of payload.folders) {
-      if (!folderSet.has(f.toLowerCase())) {
-        folders.push(f);
-        folderSet.add(f.toLowerCase());
-      }
-    }
+  // Every name written, so the caller can refresh tabs showing those patterns.
+  const written = [];
+  // Records that did not exist before this import — what to undo if the index
+  // can't be committed.
+  const created = [];
+  const idx = store.getIndex();
+  const total = Object.keys(payload.patterns).length;
 
+  // 1) Merge folders. Matching is case-insensitive, so every incoming folder
+  //    resolves to ONE canonical spelling (the local one when it already
+  //    exists) and records are filed under that spelling — the rail groups by
+  //    exact string, and a record saying "jazz" next to a folder "Jazz" would
+  //    silently fall to Unfiled.
+  const folders = (idx.folders ?? []).slice();
+  const canonicalFolder = new Map(folders.map((f) => [f.toLowerCase(), f]));
+  for (const raw of payload.folders) {
+    const f = raw.trim();
+    if (!canonicalFolder.has(f.toLowerCase())) {
+      folders.push(f);
+      canonicalFolder.set(f.toLowerCase(), f);
+    }
+  }
+  const userPatterns = (idx.userPatterns ?? []).slice();
+
+  const writeUser = (name, rec) => {
+    const isNew = store.get(name) == null;
+    const out = { code: rec.code, modified: rec.modified, isUserPattern: true };
+    if (typeof rec.folder === "string") {
+      const folder = canonicalFolder.get(rec.folder.trim().toLowerCase());
+      if (folder) out.folder = folder;
+    }
+    if (store.set(name, out) === false) throw new Error("browser storage refused the write");
+    if (isNew) created.push(name);
+    if (!userPatterns.includes(name)) userPatterns.push(name);
+    written.push(name);
+    imported++;
+  };
+
+  let error = null;
+  try {
     // 2) Write patterns.
-    const userPatterns = (idx.userPatterns ?? []).slice();
     for (const [name, rec] of Object.entries(payload.patterns)) {
       if (rec.isUserPattern) {
-        const exists = store.get(name) != null;
-        if (exists) {
+        const shipped = shippedDemos.has(name);
+        if (shipped || store.get(name) != null) {
           if (conflictStrategy === "skip") { skipped++; continue; }
-          if (conflictStrategy === "rename") {
-            const newName = makeRenamedName(name, store);
-            store.set(newName, sanitizeUserRecord(rec));
-            if (!userPatterns.includes(newName)) userPatterns.push(newName);
+          // A Demo can't be overwritten by a user pattern, so "overwrite"
+          // falls back to renaming for that one case.
+          if (conflictStrategy === "rename" || shipped) {
+            const newName = makeRenamedName(name, store, shippedDemos);
+            writeUser(newName, rec);
             renamed.push({ from: name, to: newName });
-            imported++;
             continue;
           }
           // overwrite
         }
-        store.set(name, sanitizeUserRecord(rec));
-        if (!userPatterns.includes(name)) userPatterns.push(name);
-        imported++;
+        writeUser(name, rec);
       } else {
         // Demo working copy.
         if (!shippedDemos.has(name)) { skipped++; continue; }
         const out = { code: rec.code, modified: rec.modified, isUserPattern: false };
-        store.set(name, out);
+        if (store.set(name, out) === false) throw new Error("browser storage refused the write");
+        written.push(name);
         imported++;
       }
     }
-
-    // 3) Commit index.
-    store.setIndex({ ...idx, folders, userPatterns });
-    return { ok: true, imported, skipped, renamed };
   } catch (err) {
-    if (err?.name === "QuotaExceededError") {
-      return { ok: false, imported, skipped, renamed, error: "Storage full — import aborted" };
-    }
-    return { ok: false, imported, skipped, renamed, error: String(err) };
+    error = err;
   }
+
+  // 3) Commit the index — also after a failure part-way through, so whatever
+  //    did get written is listed in the library rather than stranded as
+  //    invisible records eating the quota that just ran out.
+  try {
+    store.setIndex({ ...store.getIndex(), folders, userPatterns });
+  } catch (err) {
+    // Not even the index fits. Undo the records this import created; existing
+    // ones that were overwritten stay as written (they are already listed).
+    for (const name of created) store.delete(name);
+    imported -= created.length;
+    const gone = new Set(created);
+    return {
+      ok: false,
+      imported,
+      skipped,
+      renamed: renamed.filter((r) => !gone.has(r.to)),
+      written: written.filter((n) => !gone.has(n)),
+      error: describeImportError(error ?? err, imported, total),
+    };
+  }
+
+  if (error) {
+    return { ok: false, imported, skipped, renamed, written, error: describeImportError(error, imported, total) };
+  }
+  return { ok: true, imported, skipped, renamed, written };
 }
 
-function sanitizeUserRecord(rec) {
-  const out = { code: rec.code, modified: rec.modified, isUserPattern: true };
-  if (typeof rec.folder === "string") out.folder = rec.folder;
-  return out;
+function describeImportError(err, imported, total) {
+  const why = err?.name === "QuotaExceededError" ? "Storage full" : String(err?.message ?? err);
+  return `${why} — imported ${imported} of ${total} patterns`;
 }
 
-function makeRenamedName(base, store) {
-  let candidate = `${base}-imported`;
-  if (store.get(candidate) == null) return candidate;
+function makeRenamedName(base, store, shippedDemos) {
+  const taken = (n) => store.get(n) != null || shippedDemos.has(n);
+  const candidate = `${base}-imported`;
+  if (!taken(candidate)) return candidate;
   let n = 2;
-  while (store.get(`${base}-imported-${n}`) != null) n++;
+  while (taken(`${base}-imported-${n}`)) n++;
   return `${base}-imported-${n}`;
 }

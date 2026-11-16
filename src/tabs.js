@@ -113,22 +113,39 @@ export function createTabController(deps) {
   /** @type {Map<string, any>} name → cached EditorState */
   const stateCache = new Map();
 
+  // A name is openable only while something backs it: a shipped original or a
+  // stored record.
+  function exists(name) {
+    return name in patterns || store.get(name) != null;
+  }
+
   function hydrate() {
     const { openTabs, activeTab } = migrateOpenSet(store);
-    openItems = [...openTabs];
-    activeItem = activeTab;
+    // Drop tabs whose pattern is gone (a Demo renamed or removed by an update,
+    // a pattern deleted from another window). A ghost tab would open as an
+    // empty buffer and autosave that emptiness under the dead name.
+    openItems = openTabs.filter((n, i) => openTabs.indexOf(n) === i && exists(n));
+    activeItem = openItems.includes(activeTab) ? activeTab : (openItems[0] ?? null);
     persist();
   }
 
+  // Persisting the open set is bookkeeping: it must never abort the switch
+  // that triggered it (a full disk would otherwise leave the strip and the
+  // empty-state overlay half-updated, or stop the app during boot). The store
+  // reports the failed write through its own write-status channel.
   function persist() {
-    writeOpenSet(store, { openTabs: openItems, activeTab: activeItem });
+    try {
+      writeOpenSet(store, { openTabs: openItems, activeTab: activeItem });
+    } catch (err) {
+      console.warn("[strasbeat/tabs] couldn't persist the open tabs:", err);
+    }
   }
 
-  function codeFor(name) {
+  function codeFor(name, { heal = true } = {}) {
     // Host may inject an auto-healing resolver (drops a broken cached Demo copy
     // and returns the disk original). Default preserves the original behavior:
     // working copy shadows the shipped original.
-    if (resolveCode) {
+    if (resolveCode && heal) {
       const code = resolveCode(name);
       if (code != null) return code;
     }
@@ -170,10 +187,16 @@ export function createTabController(deps) {
     focus(name);
   }
 
-  function close(name) {
+  function close(name, { flush = true } = {}) {
     const idx = openItems.indexOf(name);
     if (idx < 0) return;
     const wasActive = activeItem === name;
+    // The live buffer is about to be discarded with the tab, so anything still
+    // inside the autosave debounce has to be written now. Only a caller that
+    // is deleting the pattern opts out (`flush: false`) — there, flushing
+    // would write it straight back. A record that is merely missing is not a
+    // delete: the buffer may be the only copy left.
+    if (wasActive && flush) flushToStore();
     openItems.splice(idx, 1);
     stateCache.delete(name);
     // Orphan playback if the closed tab owned the sound (audio continues).
@@ -232,10 +255,14 @@ export function createTabController(deps) {
   // was reset to the shipped original), so a fresh state with empty undo is the
   // honest result. For a non-active open tab, just evict — it rebuilds fresh on
   // its next focus.
-  function refresh(name) {
+  //
+  // `heal: false` reads the store as it is, without the auto-healing resolver:
+  // for callers reacting to another window's write, which must never delete a
+  // record themselves.
+  function refresh(name, { heal = true } = {}) {
     evictState(name);
     if (activeItem === name) {
-      const state = buildState({ name, code: codeFor(name), fresh: true });
+      const state = buildState({ name, code: codeFor(name, { heal }), fresh: true });
       stateCache.set(name, state);
       installState(state);
       onAfterSwitch(name);

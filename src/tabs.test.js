@@ -319,3 +319,163 @@ describe("createTabController: refresh (revert)", () => {
     assert.equal(events.installed.length, before, "no install for a non-active refresh");
   });
 });
+
+describe("createTabController: refresh without healing", () => {
+  function harness() {
+    const installed = [];
+    const resolved = [];
+    const ctl = createTabController({
+      store: {
+        getIndex: () => ({ lastOpen: "demo", userPatterns: [], uiState: { openTabs: ["demo"], activeTab: "demo" } }),
+        setIndex: () => {},
+        get: () => ({ code: "stored copy", isUserPattern: false }),
+      },
+      patterns: { demo: "ORIGINAL" },
+      resolveCode: (name) => { resolved.push(name); return "ORIGINAL"; },
+      buildState: ({ code }) => ({ code }),
+      installState: (state) => { installed.push(state.code); },
+      captureState: () => ({}),
+      flushToStore: () => {},
+      setCurrentName: () => {},
+    });
+    ctl.hydrate();
+    return { ctl, installed, resolved };
+  }
+
+  test("refresh goes through the host's resolver by default", () => {
+    const { ctl, installed, resolved } = harness();
+    ctl.refresh("demo");
+    assert.deepEqual(resolved, ["demo"]);
+    assert.deepEqual(installed, ["ORIGINAL"]);
+  });
+
+  test("heal: false installs the stored copy as it is and never calls the resolver", () => {
+    const { ctl, installed, resolved } = harness();
+    ctl.refresh("demo", { heal: false });
+    assert.deepEqual(resolved, []);
+    assert.deepEqual(installed, ["stored copy"]);
+  });
+});
+
+// A harness whose store only knows the records it is given, so "does this
+// pattern still exist?" has a real answer.
+function makeBackedHarness({ openTabs = [], activeTab = null, records = {}, patterns = {}, failIndexWrites = false } = {}) {
+  let idx = { lastOpen: activeTab, userPatterns: [], uiState: { openTabs, activeTab } };
+  const recs = new Map(Object.entries(records));
+  const events = { flushedFor: [], currentName: activeTab, afterSwitch: [], installed: [] };
+  const store = {
+    getIndex: () => structuredClone(idx),
+    setIndex: (n) => {
+      if (failIndexWrites) { const e = new Error("quota"); e.name = "QuotaExceededError"; throw e; }
+      idx = structuredClone(n);
+    },
+    get: (name) => (recs.has(name) ? recs.get(name) : null),
+    delete: (name) => recs.delete(name),
+  };
+  const ctl = createTabController({
+    store,
+    patterns,
+    buildState: ({ name, code }) => ({ token: `state-of-${name}`, code }),
+    installState: (token) => { events.installed.push(token); },
+    captureState: () => ({ token: "captured" }),
+    flushToStore: () => { events.flushedFor.push(events.currentName); },
+    setCurrentName: (name) => { events.currentName = name; },
+    onAfterSwitch: (name) => { events.afterSwitch.push(name); },
+  });
+  return { ctl, events, store, _idx: () => idx };
+}
+
+describe("createTabController: closing flushes pending edits", () => {
+  const rec = (code) => ({ code, isUserPattern: true });
+
+  test("closing the ACTIVE tab flushes its buffer before the tab is dropped", () => {
+    const { ctl, events } = makeBackedHarness({
+      openTabs: ["a", "b"], activeTab: "a", records: { a: rec("A"), b: rec("B") },
+    });
+    ctl.hydrate();
+    ctl.close("a");
+    assert.equal(events.flushedFor[0], "a", "flushed while `a` was still the current name");
+    assert.equal(ctl.getActiveItem(), "b");
+  });
+
+  test("closing the last tab flushes too", () => {
+    const { ctl, events } = makeBackedHarness({ openTabs: ["a"], activeTab: "a", records: { a: rec("A") } });
+    ctl.hydrate();
+    ctl.close("a");
+    assert.deepEqual(events.flushedFor, ["a"]);
+    assert.equal(ctl.getActiveItem(), null);
+  });
+
+  test("closing an unedited shipped pattern's tab still asks for a flush", () => {
+    const { ctl, events } = makeBackedHarness({ openTabs: ["demo"], activeTab: "demo", patterns: { demo: "DEMO" } });
+    ctl.hydrate();
+    ctl.close("demo");
+    assert.deepEqual(events.flushedFor, ["demo"]);
+  });
+
+  test("a delete closes with flush: false, so the pattern is not written back", () => {
+    const { ctl, events, store } = makeBackedHarness({
+      openTabs: ["a", "b"], activeTab: "a", records: { a: rec("A"), b: rec("B") },
+    });
+    ctl.hydrate();
+    store.delete("a"); // the delete paths remove the record, then close the tab
+    ctl.close("a", { flush: false });
+    assert.deepEqual(events.flushedFor, []);
+    assert.equal(ctl.getActiveItem(), "b");
+  });
+
+  test("a plain close flushes even when the record is missing — the buffer may be the only copy", () => {
+    const { ctl, events, store } = makeBackedHarness({
+      openTabs: ["a", "b"], activeTab: "a", records: { a: rec("A"), b: rec("B") },
+    });
+    ctl.hydrate();
+    store.delete("a"); // gone for some other reason: storage cleared, corrupt record
+    ctl.close("a");
+    assert.deepEqual(events.flushedFor, ["a"]);
+  });
+
+  test("closing an inactive tab does not flush the active buffer under its name", () => {
+    const { ctl, events } = makeBackedHarness({
+      openTabs: ["a", "b"], activeTab: "a", records: { a: rec("A"), b: rec("B") },
+    });
+    ctl.hydrate();
+    ctl.close("b");
+    assert.deepEqual(events.flushedFor, []);
+  });
+});
+
+describe("createTabController: open set is reconciled with what exists", () => {
+  test("hydrate drops tabs whose pattern no longer exists", () => {
+    const { ctl, _idx } = makeBackedHarness({
+      openTabs: ["gone", "a", "demo", "a"], activeTab: "gone",
+      records: { a: { code: "A", isUserPattern: true } }, patterns: { demo: "DEMO" },
+    });
+    ctl.hydrate();
+    assert.deepEqual(ctl.getOpenItems(), ["a", "demo"]);
+    assert.equal(ctl.getActiveItem(), "a", "focus moves off the dead tab");
+    assert.deepEqual(_idx().uiState.openTabs, ["a", "demo"]);
+  });
+
+  test("hydrate with nothing left yields the empty state", () => {
+    const { ctl } = makeBackedHarness({ openTabs: ["gone"], activeTab: "gone" });
+    ctl.hydrate();
+    assert.deepEqual(ctl.getOpenItems(), []);
+    assert.equal(ctl.getActiveItem(), null);
+  });
+});
+
+describe("createTabController: a failing index write never aborts a switch", () => {
+  test("hydrate, focus and close all complete when the store can't persist", () => {
+    const { ctl, events } = makeBackedHarness({
+      openTabs: ["a", "b"], activeTab: "a", failIndexWrites: true,
+      records: { a: { code: "A", isUserPattern: true }, b: { code: "B", isUserPattern: true } },
+    });
+    assert.doesNotThrow(() => ctl.hydrate());
+    assert.doesNotThrow(() => ctl.openOrFocus("b"));
+    assert.equal(ctl.getActiveItem(), "b");
+    assert.equal(events.currentName, "b");
+    assert.equal(events.afterSwitch.at(-1), "b", "UI hook still ran");
+    assert.doesNotThrow(() => ctl.close("b"));
+    assert.doesNotThrow(() => ctl.adoptInitial("a"));
+  });
+});

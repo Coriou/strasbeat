@@ -1,3 +1,6 @@
+// MUST stay the first import: it makes localStorage safe to touch before any
+// other module (ours or Strudel's) evaluates. See src/storage-guard.js.
+import { storageIsEphemeral } from "./storage-guard.js";
 import { StrudelMirror } from "@strudel/codemirror";
 import { transpiler } from "./transpiler-patch.js";
 // Strudel packages — imported as namespaces to avoid the static+dynamic
@@ -44,8 +47,9 @@ import { mountTrackBar } from "./ui/track-bar.js";
 import { mountArrangeBar } from "./ui/arrange-bar.js";
 import { prompt, confirm, formModal, choiceModal } from "./ui/modal.js";
 import { applyStoredAccent } from "./ui/settings-drawer.js";
-import { createLocalStore } from "./store.js";
-import { readSharedFromHash, shareCurrent } from "./share.js";
+import { createLocalStore, describeStorageEvent } from "./store.js";
+import { mountStorageNotice } from "./ui/storage-notice.js";
+import { readSharedFromHash, shareCurrent, adoptSharedPattern } from "./share.js";
 import { prewarmSounds, isExportRunning } from "./export.js";
 import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
@@ -59,6 +63,8 @@ import {
   handleDuplicateClick,
   handleBulkDuplicateClick,
   resolveWorkingCopy,
+  reconcileStoredPatterns,
+  handleExternalStoreChange,
 } from "./patterns.js";
 import { showMidiImportDialog, getMidiFile } from "./ui/midi-import-dialog.js";
 import {
@@ -68,7 +74,7 @@ import {
   strasbeatOverlayCompartment,
 } from "./editor-setup.js";
 import { createTabController } from "./tabs.js";
-import { freshTabState, liveCompartmentValues } from "./editor/build-editor-state.js";
+import { freshTabState, liveCompartmentValues, syncTabState } from "./editor/build-editor-state.js";
 import { createDocSync } from "./editor/doc-sync.js";
 import { readSelectedCompletion } from "./editor/keymap-universal.js";
 import { previewSoundName, insertSoundName } from "./editor-actions.js";
@@ -268,13 +274,23 @@ window.addEventListener("resize", () => {
 // ─── Editor ──────────────────────────────────────────────────────────────
 // Boot sequence: share link > store lastOpen > first shipped pattern.
 const shared = await readSharedFromHash();
+// Re-list stored patterns the library lost track of, before anything reads
+// the index.
+reconcileStoredPatterns({ store, patterns });
+// A share link lands as a real, indexed user pattern under a name of its own
+// (never on top of an existing record), and the hash is then dropped from the
+// URL — so a reload resumes the recipient's working copy from the store
+// instead of re-applying the original snapshot over their edits.
+const sharedArrival = shared
+  ? adoptSharedPattern({ shared, store, patterns })
+  : null;
 const storeIndex = store.getIndex();
 const fallbackName = patternNames[0] ?? "empty";
 
 let initialName, initialCode;
-if (shared) {
-  initialName = `shared-${shared.name}`.replace(/[^a-z0-9_-]/gi, "-").slice(0, 40); // prettier-ignore
-  initialCode = shared.code;
+if (sharedArrival) {
+  initialName = sharedArrival.name;
+  initialCode = sharedArrival.code;
 } else if (storeIndex.lastOpen) {
   initialName = storeIndex.lastOpen;
   // resolveWorkingCopy heals the stale-broken-cache class: if lastOpen is a
@@ -713,7 +729,7 @@ async function deleteFolderHandler(folderName) {
     );
     store.setIndex(idx);
     for (const name of inFolder) {
-      if (tabs.getOpenItems().includes(name)) tabs.close(name);
+      if (tabs.getOpenItems().includes(name)) tabs.close(name, { flush: false });
     }
   }
   removeFolderEntry(folderName);
@@ -830,7 +846,7 @@ async function deleteMany(names) {
     return;
   }
   for (const n of userNames) {
-    if (tabs.getOpenItems().includes(n)) tabs.close(n);
+    if (tabs.getOpenItems().includes(n)) tabs.close(n, { flush: false });
   }
   refreshRail();
   transport.setStatus(
@@ -861,6 +877,7 @@ function renamePatternHandler(oldName, newName) {
     return;
   }
   tabs.reKey(oldName, newName);
+  renamePending(oldName, newName);
   if (currentName === oldName) setCurrentName(newName);
   refreshRail();
   transport.setStatus(`renamed "${oldName}" → "${newName}"`);
@@ -945,7 +962,6 @@ const leftRail = mountLeftRail({
   },
   onRevert(name) {
     store.delete(name); // working copy gone → codeFor(name) now returns the original
-    lastDirtyState.delete(name);
     if (tabs.getOpenItems().includes(name)) {
       if (tabs.getActiveItem() === name) {
         clearError(editor.editor);
@@ -970,7 +986,7 @@ const leftRail = mountLeftRail({
     // Reconcile the open set: closing focuses a neighbor (or the empty state)
     // and persists activeTab/lastOpen. If it was the playing tab, audio
     // continues (orphaned) per spec — Stop clears it.
-    if (tabs.getOpenItems().includes(name)) tabs.close(name);
+    if (tabs.getOpenItems().includes(name)) tabs.close(name, { flush: false });
     refreshRail();
     transport.setStatus(`deleted "${name}"`);
   },
@@ -1054,12 +1070,18 @@ function setCurrentName(name) {
 setCurrentName(currentName);
 
 // Show a one-time boot message if we restored a working copy.
-if (!shared && storeIndex.lastOpen && store.get(storeIndex.lastOpen)) {
+if (sharedArrival) {
+  transport.setStatus(
+    sharedArrival.saved
+      ? `opened shared pattern as "${sharedArrival.name}"`
+      : "\u26a0 couldn\u2019t save the shared pattern \u2014 keep the link",
+  );
+} else if (storeIndex.lastOpen && store.get(storeIndex.lastOpen)) {
   transport.setStatus(`restored your edits to "${storeIndex.lastOpen}"`);
 }
 
 // ─── Autosave ────────────────────────────────────────────────────────────
-const { flushToStore, scheduleAutosave, lastDirtyState } = createAutosave({
+const { flushToStore, scheduleAutosave, hasPending, renamePending } = createAutosave({
   editor,
   store,
   patterns,
@@ -1190,7 +1212,16 @@ function captureTabState() {
   };
 }
 function installTabState(snap) {
-  editor.editor.setState(snap.state);
+  // A cached state froze the runtime compartments (theme, keymap profile, line
+  // wrapping, …) as they were when its tab was last on screen. Bring it up to
+  // the live values first, or a settings change made in one tab silently
+  // reverts in every other. Doc, selection and undo history are untouched.
+  editor.editor.setState(
+    syncTabState(
+      snap.state,
+      liveCompartmentValues(editor.editor.state, strasbeatOverlayCompartment),
+    ),
+  );
   // CRITICAL: setState does NOT fire updateListeners, so StrudelMirror's
   // onChange (which sets editor.code + repl.setCode) won't run. Sync explicitly
   // or evaluate() would play the previous tab's buffer.
@@ -1258,6 +1289,94 @@ updateEmptyState(); // initial state: overlay shows only if the open set is empt
 window.addEventListener("beforeunload", () => {
   flushToStore();
 });
+// Mobile browsers discard backgrounded tabs without ever firing beforeunload;
+// pagehide / hidden are the last reliable moments to write pending edits.
+window.addEventListener("pagehide", () => {
+  flushToStore();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushToStore();
+});
+
+// Another window on this origin wrote to the store: follow it rather than
+// keep a stale buffer that a later flush could write back over newer work.
+//
+// Handling is deferred a beat: the other window's operations are bursts of
+// several writes (record, then index), each delivered as its own event, and
+// this window's view of storage only catches up as they arrive. Reacting to
+// the first one could read — and, when a tab closes, write back — an index
+// that is one step behind.
+let externalChanges = [];
+let externalChangeTimer = null;
+window.addEventListener("storage", (e) => {
+  if (e.storageArea !== localStorage) return;
+  const change = describeStorageEvent(e);
+  if (!change) return;
+  externalChanges.push(change);
+  clearTimeout(externalChangeTimer);
+  externalChangeTimer = setTimeout(() => {
+    const batch = externalChanges;
+    externalChanges = [];
+    for (const c of batch) {
+      handleExternalStoreChange(c, {
+        tabs,
+        patterns,
+        store,
+        hasPending,
+        getActiveCode: () => editor.code,
+        // The active tab is the live buffer, so scheduling an autosave is
+        // what queues it to be stored again.
+        keepLocalEdits: scheduleAutosave,
+        canTranspile: canTranspilePattern,
+        refreshRail,
+        setStatus: (s) => transport.setStatus(s),
+      });
+    }
+  }, 60);
+});
+
+// A share link pasted into an already-open strasbeat changes only the
+// fragment, so there is no page load to pick it up.
+window.addEventListener("hashchange", async () => {
+  const again = await readSharedFromHash();
+  if (!again) return;
+  const arrival = adoptSharedPattern({ shared: again, store, patterns });
+  if (!arrival.saved) {
+    transport.setStatus(
+      "\u26a0 couldn\u2019t save the shared pattern \u2014 browser storage full",
+    );
+    return;
+  }
+  refreshRail();
+  tabs.openOrFocus(arrival.name);
+  transport.setStatus(`opened shared pattern as "${arrival.name}"`);
+});
+
+// Save problems stay on screen for as long as they last.
+const storageNotice = mountStorageNotice(
+  document.querySelector(".top-bar__actions"),
+);
+if (storageIsEphemeral()) {
+  storageNotice.show(
+    "Not saving \u2014 browser storage is blocked",
+    "This browser is blocking site storage, so patterns and settings only last until the page is closed. Allow site data for this page, or use Share to keep a copy.",
+  );
+} else {
+  store.onWriteStatus(({ failing, quota }) => {
+    if (!failing) storageNotice.clear();
+    else if (quota) {
+      storageNotice.show(
+        "Not saving \u2014 browser storage is full",
+        "Recent edits are NOT saved. Delete patterns you no longer need, or export your library from Settings, to free space.",
+      );
+    } else {
+      storageNotice.show(
+        "Not saving \u2014 browser storage error",
+        "Recent edits could not be written to browser storage. See the console for details.",
+      );
+    }
+  });
+}
 
 // ─── MIDI import dialog helper ───────────────────────────────────────────
 function openMidiImportDialog(file) {
