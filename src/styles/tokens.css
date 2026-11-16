@@ -12,11 +12,18 @@
   --surface-3: oklch(0.28 0 0); /* hover states */
   --border: oklch(0.3 0 0); /* visible hairlines, ~1px */
   --border-soft: oklch(0.24 0 0); /* subtle dividers */
+  /* A boundary that has to be seen to find the control: 3:1 or better on
+     surface-0…2. Hairlines between panes stay on --border. */
+  --border-strong: oklch(0.53 0 0);
+  --scrim: oklch(0 0 0 / 0.4); /* behind anything that floats over the canvas */
 
   /* ─── Text ─── */
   --text: oklch(0.96 0 0);
-  --text-mut: oklch(0.65 0 0);
-  --text-dim: oklch(0.45 0 0);
+  /* Three levels, each readable as text. On surface-1 they sit at 16:1,
+     7.9:1 and 5.0:1; --text-dim still clears 4.5:1 on surface-2. Lightness
+     only — raise or lower all three together to keep the steps apart. */
+  --text-mut: oklch(0.74 0 0);
+  --text-dim: oklch(0.62 0 0);
   --foreground: var(
     --text
   ); /* Strudel highlight.mjs uses var(--foreground) for active-note outlines */
@@ -66,6 +73,16 @@
   --lh-base: 20px;
   --lh-md: 22px;
 
+  /* ─── Focus ─── one ring for every focusable control. The accent is 3.8:1
+     or better against surface-0…3. */
+  --focus-ring: 2px solid var(--accent);
+  --focus-ring-offset: 1px;
+
+  /* ─── Pointer targets ─── minimum box for chrome under a coarse pointer;
+     the smaller step is for icon buttons packed into a cluster. */
+  --target-min: 40px;
+  --target-min-sm: 32px;
+
   /* ─── Elevation ─── */
   --shadow-low: 0 1px 2px oklch(0 0 0 / 0.4);
   --shadow-pop: 0 2px 4px oklch(0 0 0 / 0.4), 0 8px 24px oklch(0 0 0 / 0.5);
@@ -82,9 +99,14 @@
   --t-pop-out: 80ms ease-in;
 
   /* ─── Shell-specific (consumed by .shell grid) ─── */
-  --top-bar-h: 40px;
-  --transport-h: 32px;
+  --top-bar-base-h: 40px; /* before safe-area insets */
+  --transport-base-h: 32px;
+  --top-bar-h: var(--top-bar-base-h);
+  --transport-h: var(--transport-base-h);
+  --tab-strip-h: 34px;
   --left-rail-w: 240px;
+  --rail-strip-w: 36px; /* a collapsed rail */
+  --editor-min-w: 360px; /* the canvas never gets narrower while rails are docked */
   --roll-h: 180px; /* current value when expanded; JS toggles between 0 and this */
   --roll-min-h: 80px;
   --roll-max-h: 360px;
@@ -95,4 +117,24 @@
   --right-rail-tabs-w: 36px;
   --right-rail-min: 240px;
   --right-rail-max: 480px;
+}
+
+/* More contrast on request: lift the two quieter text levels and make every
+   hairline a visible line. */
+@media (prefers-contrast: more) {
+  :root {
+    --text-mut: oklch(0.84 0 0);
+    --text-dim: oklch(0.74 0 0);
+    --border: var(--border-strong);
+    --border-soft: oklch(0.4 0 0);
+  }
+}
+
+/* Coarse pointers get taller bars so their controls can reach --target-min. */
+@media (pointer: coarse) {
+  :root {
+    --top-bar-base-h: 48px;
+    --transport-base-h: 48px;
+    --tab-strip-h: 44px;
+  }
 }

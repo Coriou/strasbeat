@@ -123,6 +123,27 @@ becomes the track list, the right rail becomes track properties, and the
 bottom panel becomes the arrangement view. Nothing has to move. See
 `work/06-future.md` for more.
 
+### 3.1 Narrow viewports
+
+The canvas is king at every width, so the rails only share its row while
+there is room for all three. The breakpoints live in `src/styles/shell.css`
+and are mirrored in `src/ui/responsive.js`:
+
+| Width      | Rails                                                                                   |
+| ---------- | --------------------------------------------------------------------------------------- |
+| ≥ 900px    | Docked, as drawn above. The right rail's track is capped so the editor keeps 360px.      |
+| 600–899px  | Both collapse to their 36px strips. An opened rail floats over the editor row, with a scrim; tapping the scrim, Escape, or picking a pattern closes it, and focus returns to whatever opened it. Escape goes first to anything above the rail (a modal, a menu, a completion popup, a search field with text in it). |
+| < 600px    | As above, and the collapsed left strip is hidden — the top bar's pattern button opens the library. Top-bar actions drop to icons; the transport may wrap to a second line. |
+
+A rail left open on a wide screen never opens on a narrow one, and opening
+or closing a floating rail never changes the stored wide-screen preference.
+Below 640px of height the bottom panel is capped at 30% of the viewport.
+
+Under a coarse pointer the top bar and transport grow to 48px and their
+controls to `--target-min` (40px; `--target-min-sm` 32px for icon buttons
+packed in a cluster). Controls that are revealed on hover are always shown
+when there is no hover.
+
 ## 4. Type system
 
 **Geist Sans** for UI labels. **Geist Mono** for code.
@@ -171,11 +192,14 @@ accent hue is stable across lightness levels.
   --surface-3:   oklch(0.28 0 0);   /* hover states */
   --border:      oklch(0.30 0 0);   /* visible hairlines, ~1px */
   --border-soft: oklch(0.24 0 0);   /* subtle dividers */
+  --border-strong: oklch(0.53 0 0); /* a boundary that must be seen: 3:1 on surface-0…2 */
+  --scrim:       oklch(0 0 0 / 0.4); /* behind anything floating over the canvas */
 
-  /* Text */
+  /* Text — every level is readable as text: 16:1, 7.9:1 and 5.0:1 on
+     surface-1, and --text-dim still clears 4.5:1 on surface-2. */
   --text:        oklch(0.96 0 0);
-  --text-mut:    oklch(0.65 0 0);
-  --text-dim:    oklch(0.45 0 0);
+  --text-mut:    oklch(0.74 0 0);
+  --text-dim:    oklch(0.62 0 0);
 
   /* Accent — rose pink. Configurable; see § 5.1 */
   --accent:      oklch(0.63 0.19 358);          /* ≈ #CF418D */
@@ -188,6 +212,12 @@ accent hue is stable across lightness levels.
   --ok:          oklch(0.78 0.16 150);  /* MIDI connected, success */
 }
 ```
+
+Focus is one ring everywhere: `--focus-ring` (`2px solid var(--accent)`,
+3.8:1 or better on every surface), drawn as an `outline` on
+`:focus-visible` so it survives forced-colours mode. `prefers-contrast:
+more` lifts `--text-mut` / `--text-dim` and maps `--border` to
+`--border-strong`.
 
 ### 5.1 Configurability of the accent
 

@@ -152,7 +152,13 @@
 }
 
 .settings-pop__slider:focus-visible {
-  outline: none;
+  outline: none; /* the ring is drawn on the thumb, below */
+}
+@media (forced-colors: active) {
+  .settings-pop__slider:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
 }
 .settings-pop__slider:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 2px var(--accent);

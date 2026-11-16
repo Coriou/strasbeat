@@ -36,7 +36,7 @@ body {
 
 /* ─── Text selection — accent-tinted instead of Chrome's default blue ─── */
 ::selection {
-  background: oklch(0.63 0.19 358 / 0.35);
+  background: color-mix(in oklch, var(--accent) 35%, transparent);
   color: var(--text);
 }
 
@@ -62,4 +62,103 @@ button,
 }
 .dev-mode .dev-only.btn {
   display: inline-flex !important;
+}
+
+/* ─── Focus ───────────────────────────────────────────────────────────────
+   The baseline ring for anything focusable that doesn't style its own —
+   :where() keeps it at zero specificity so component rules still win. */
+:where(:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* ─── Screen-reader-only content ──────────────────────────────────────── */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Skip link — first focusable element on the page; off-screen until it
+   takes keyboard focus, then it sits over the brand in the top bar. */
+.skip-link {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-2);
+  z-index: 200;
+  padding: var(--space-1) var(--space-3);
+  background: var(--surface-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transform: translateY(calc(-100% - var(--space-2)));
+}
+.skip-link:focus {
+  transform: none;
+}
+
+/* ─── Reduced motion ──────────────────────────────────────────────────────
+   Motion here only ever explains a change (SYSTEM.md §9), so without it the
+   change simply lands. Durations collapse rather than the properties being
+   removed, so transitionend / animationend listeners still fire. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─── Forced colours (Windows High Contrast) ──────────────────────────────
+   System colours replace ours and backgrounds flatten, so state that was a
+   fill needs a line, and marks that were a painted box need a system colour.
+   Outlines survive on their own; these rules cover the shell chrome. */
+@media (forced-colors: active) {
+  .btn,
+  .pattern-menu,
+  .transport__pill,
+  .transport__readout,
+  .left-rail__search-input {
+    border-color: ButtonBorder;
+  }
+  .left-rail__item.is-active,
+  .left-rail__item.is-selected,
+  .tab-strip__tab.is-active {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .left-rail__item.is-selected:not(.is-active) {
+    outline-style: dashed;
+  }
+  .left-rail__dirty-dot,
+  .tab-strip__dirty-dot,
+  .tab-strip__playing-mark,
+  .left-rail__item.is-active .left-rail__item-accent,
+  .transport__now-playing-chip::before {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+  .left-rail__folder-section.is-drop-target,
+  .left-rail__folder-section.is-drop-rejected {
+    outline: 2px dashed Highlight;
+    outline-offset: -2px;
+  }
+  .left-rail,
+  .right-rail {
+    border-color: CanvasText;
+  }
 }
