@@ -58,6 +58,23 @@ export function isNonCodePosition(state, pos) {
   return false;
 }
 
+// True when `pos` sits inside a comment. No provider has anything to offer
+// there — the ones that match on the text before the cursor would otherwise
+// take `// try s("b` for a sound argument.
+export function isCommentPosition(state, pos) {
+  for (
+    let node = syntaxTree(state).resolveInner(pos, -1);
+    node;
+    node = node.parent
+  ) {
+    if (node.name === "LineComment") return true;
+    if (node.name === "BlockComment") {
+      return pos < node.to || isUnterminated(state, node);
+    }
+  }
+  return false;
+}
+
 function isUnterminated(state, node) {
   const text = state.sliceDoc(node.from, node.to);
   if (node.name === "BlockComment") return !text.endsWith("*/");

@@ -11,7 +11,11 @@ import { chord } from "@strudel/core";
 import "@strudel/tonal";
 import { mini } from "@strudel/mini";
 
-import { functionsProvider, buildFunctionList } from "./functions.js";
+import {
+  functionsProvider,
+  buildFunctionList,
+  isCommentPosition,
+} from "./functions.js";
 import { chordProvider } from "./chord.js";
 import { miniNotationProvider } from "./mini-notation.js";
 import { setDocs } from "../../docs-store.js";
@@ -167,5 +171,26 @@ describe("miniNotationProvider", () => {
   test("still completes note names", () => {
     const result = provider(contextAt('note("c|")').context);
     assert.ok(labels(result).includes("c"));
+  });
+});
+
+describe("isCommentPosition()", () => {
+  const at = (marked) => {
+    const { state, pos } = contextAt(marked);
+    return isCommentPosition(state, pos);
+  };
+
+  test("inside line and block comments, whatever they contain", () => {
+    assert.equal(at('// try s("b|'), true);
+    assert.equal(at('note("c") // chord("C|'), true);
+    assert.equal(at('/* s("b| */'), true);
+    assert.equal(at('/* never closed s("b|'), true);
+  });
+
+  test("not in code, in strings, or after a block comment has closed", () => {
+    assert.equal(at('s("b|")'), false);
+    assert.equal(at('samples("http://x.test/a|")'), false, "// inside a string");
+    assert.equal(at("/* note */ s|"), false);
+    assert.equal(at("// note\ns|"), false);
   });
 });

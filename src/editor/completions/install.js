@@ -28,7 +28,11 @@ import { soundsProvider } from "./providers/sounds.js";
 import { bankProvider } from "./providers/bank.js";
 import { chordProvider } from "./providers/chord.js";
 import { modeProvider } from "./providers/mode.js";
-import { functionsProvider, buildFunctionList } from "./providers/functions.js";
+import {
+  functionsProvider,
+  buildFunctionList,
+  isCommentPosition,
+} from "./providers/functions.js";
 import { areDocsLoaded, onDocsLoaded } from "../docs-store.js";
 
 let installedRecency = null;
@@ -66,6 +70,8 @@ export function installCompletions(view, liveExports, { audition } = {}) {
   ];
 
   const combined = (context) => {
+    // Nothing completes inside a comment, whatever its text looks like.
+    if (isCommentPosition(context.state, context.pos)) return null;
     for (const p of providers) {
       const result = p(context);
       // Truthy result halts the chain (even if options is empty —
