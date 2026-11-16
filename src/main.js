@@ -1524,6 +1524,14 @@ editorRoot.addEventListener("drop", (e) => {
 
 // ─── Top bar wiring ──────────────────────────────────────────────────────
 patternMenuBtn.addEventListener("click", () => leftRail.focusSearch());
+// The code editor is a multi-line textbox; give it a name, and let the skip
+// link land the caret in it (set on the DOM node, so it survives the per-tab
+// EditorState swaps).
+editor.editor.contentDOM.setAttribute("aria-label", "Pattern code editor");
+document.getElementById("skip-to-editor")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  editor.editor.focus();
+});
 settingsBtn.addEventListener("click", () => {
   if (rightRail.isExpanded() && rightRail.getActiveId() === "settings") {
     rightRail.collapse();
