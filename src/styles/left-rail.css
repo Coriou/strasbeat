@@ -22,6 +22,11 @@
 
 .left-rail__title {
   flex: 1;
+  min-width: 0;
+  margin: 0; /* it is an <h2> */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   font-weight: 600;
@@ -115,19 +120,17 @@
   border-radius: var(--radius-md);
   font: inherit;
   font-size: var(--text-sm);
-  outline: none;
   transition:
     border-color var(--t-hover),
-    background var(--t-hover),
-    box-shadow var(--t-hover);
+    background var(--t-hover);
 }
 .left-rail__search-input::placeholder {
   color: var(--text-mut);
 }
-.left-rail__search-input:focus {
-  border-color: color-mix(in oklch, var(--accent) 50%, var(--border));
+.left-rail__search-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -1px;
   background: var(--surface-2);
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 24%, transparent);
 }
 .left-rail__search-icon {
   position: absolute;
@@ -375,10 +378,14 @@
 .left-rail__list {
   transition: opacity var(--t-panel);
 }
+/* Gone at once when the rail collapses — nothing left to focus, and no
+   squeezed remnants in the strip — and faded in when it opens again. */
 .left-rail[data-collapsed="true"] .left-rail__search,
 .left-rail[data-collapsed="true"] .left-rail__list {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transition: none;
 }
 
 /* ─── Folder sections ─────────────────────────────────────────────────── */
@@ -529,22 +536,20 @@
   border: 1px solid color-mix(in oklch, var(--accent) 70%, var(--border));
   border-radius: var(--radius-sm);
   padding: 1px 6px;
-  outline: none;
   caret-color: var(--accent-hi);
   transition:
     border-color var(--t-hover),
-    box-shadow var(--t-hover),
     background var(--t-hover);
 }
-.left-rail__inline-edit:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 25%, transparent);
+.left-rail__inline-edit:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 0;
 }
 .left-rail__inline-edit--error {
   border-color: var(--rec);
 }
-.left-rail__inline-edit--error:focus {
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--rec) 25%, transparent);
+.left-rail__inline-edit--error:focus-visible {
+  outline-color: var(--rec);
 }
 
 .left-rail__inline-error {
@@ -597,6 +602,11 @@
 .left-rail__context-item:hover {
   background: var(--surface-3);
 }
+.left-rail__context-item:focus-visible {
+  background: var(--surface-3);
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
 .left-rail__context-item--danger {
   color: var(--rec);
 }
@@ -636,6 +646,7 @@
 /* Items that own a submenu — render the ▸ marker and host the flyout. */
 .left-rail__context-item--has-submenu {
   position: relative;
+  cursor: default;
 }
 .left-rail__context-item--has-submenu::after {
   content: "▸";
@@ -658,8 +669,12 @@
   box-shadow: var(--shadow-pop);
   z-index: 1001;
 }
+/* Open on hover, or when the keyboard / a tap expands it (aria-expanded is
+   set by left-rail.js). Not on focus alone: the first item takes focus as the
+   menu opens, and a flyout shouldn't spring out with it. */
 .left-rail__context-item--has-submenu:hover .left-rail__context-submenu,
-.left-rail__context-item--has-submenu:focus-within .left-rail__context-submenu {
+.left-rail__context-item--has-submenu[aria-expanded="true"]
+  .left-rail__context-submenu {
   display: block;
 }
 
@@ -768,6 +783,69 @@ body[data-rail-dragging="true"] {
 }
 .left-rail__item[draggable="true"]:active {
   cursor: grabbing;
+}
+
+/* ─── No hover, coarse pointer ────────────────────────────────────────────
+   The per-row and per-folder option buttons are revealed on hover; without
+   hover they are simply always there, beside the modified dot rather than
+   swapping with it. */
+@media (hover: none) {
+  .left-rail__item {
+    grid-template-columns: 1px minmax(0, 1fr) auto;
+  }
+  .left-rail__item-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .left-rail__more-btn,
+  .left-rail__folder-more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .left-rail__item:hover .left-rail__dirty-dot {
+    opacity: 1;
+  }
+}
+
+@media (pointer: coarse) {
+  .left-rail__header {
+    gap: var(--space-1);
+  }
+  .left-rail__header .btn--icon,
+  .left-rail__more-btn,
+  .left-rail__folder-more,
+  .left-rail__search-clear {
+    width: var(--target-min-sm);
+    height: var(--target-min-sm);
+  }
+  .left-rail__search-input {
+    height: var(--target-min);
+    padding-right: calc(var(--target-min-sm) + var(--space-2));
+  }
+  .left-rail__item,
+  .left-rail__folder-header,
+  .left-rail__context-item {
+    min-height: var(--target-min);
+  }
+}
+
+/* A phone has no room beside the menu for a flyout: the submenu opens in
+   place, under its parent item. */
+@media (max-width: 599.98px) {
+  .left-rail__context-item--has-submenu {
+    flex-wrap: wrap;
+  }
+  .left-rail__context-submenu {
+    position: static;
+    order: 1;
+    flex-basis: 100%;
+    min-width: 0;
+    margin-top: var(--space-1);
+    padding: 0 0 0 var(--space-3);
+    border: 0;
+    box-shadow: none;
+  }
 }
 
 /* ─── Reduced motion ──────────────────────────────────────────────────── */

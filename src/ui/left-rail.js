@@ -27,7 +27,7 @@
 //   });
 //   rail.setCurrent(name);
 //   rail.clearCurrent();
-//   rail.focusSearch();
+//   rail.focusSearch();      // opens the rail first if it is collapsed
 //   rail.getCurrent();
 //   rail.updateDirtySet(newSet);
 //   rail.addUserPattern(name, folder?);
@@ -37,11 +37,30 @@
 // Pure DOM, no framework. The whole component is rebuilt from scratch on
 // every filter change — fast enough for a few hundred patterns and saves us
 // a stale-DOM bug surface.
+//
+// Accessibility model: the list is a `tree` — folder headers are level-1
+// treeitems that own a `group` of level-2 pattern treeitems (search results
+// are a flat level-1 list). The tree is ONE tab stop with roving focus:
+// arrows / Home / End / type-to-find move, Right/Left expand, collapse or
+// jump to the parent, Enter opens, F2 renames, Shift+F10 or the Menu key
+// opens the row's menu. The per-row "…" buttons are a pointer affordance for
+// that same menu and are kept out of the tab order. Focus survives the
+// rebuilds: the focused node is found again by key after every render.
 
 import { makeIcon } from "./icons.js";
 import { confirm } from "./modal.js";
 import { score } from "./fuzzy.js";
 import { validatePatternName, validateFolderName } from "../patterns.js";
+import { moveIndex, treeNavigate, typeaheadIndex } from "./roving.js";
+import {
+  watchNarrow,
+  resolveRailExpanded,
+  railTakesEscape,
+  pickFocusReturn,
+  isRendered,
+  ESCAPE_LAYER_SELECTOR,
+} from "./responsive.js";
+import { formatShortcut } from "./shortcut-format.js";
 
 // Cap the number of rendered search results. Beyond this we render a
 // "+N more — refine your search…" hint so the rail stays scannable.
@@ -59,6 +78,9 @@ const UNFILED_KEY = "__unfiled__";
 
 // Hover-to-expand spring-load duration during drag. Mirrors macOS Finder.
 const SPRING_LOAD_MS = 500;
+
+// Type-to-find forgets what was typed after this long without a keystroke.
+const TYPEAHEAD_RESET_MS = 600;
 
 // Auto-scroll near the rail's vertical edges during a drag. Number of px
 // from the edge to start scrolling, and number of px to scroll per event.
@@ -82,7 +104,13 @@ function prettyName(raw) {
 /**
  * Start in-place rename on an element. Replaces `displayEl` with a text
  * input, commits on Enter (after validation), cancels on Escape, commits
- * on blur. `validate(value)` returns an error string or null.
+ * on blur. `validate(value)` returns an error string or null. A name that
+ * fails validation keeps the input open on Enter so it can be fixed, but
+ * reverts on blur — the field must never hold focus hostage.
+ *
+ * `onCommit(value, { viaKeyboard })` / `onCancel({ viaKeyboard })` tell the
+ * caller whether the edit ended from the keyboard (so it should put focus
+ * back on the row) or because focus already went somewhere else.
  *
  * The cleanup guard prevents double-commits: pressing Enter calls commit()
  * which calls cleanup() — but the input being removed from the DOM also
@@ -112,39 +140,42 @@ function beginInlineEdit({ displayEl, initial, validate, onCommit, onCancel }) {
     if (input.parentNode) parent.replaceChild(displayEl, input);
     if (errEl.parentNode) errEl.remove();
   }
-  function commit() {
+  function commit(viaKeyboard) {
     const value = input.value.trim();
     if (value === initial) {
-      cleanup();
-      onCancel?.();
+      cancel(viaKeyboard);
       return;
     }
     const err = validate(value);
     if (err) {
+      if (!viaKeyboard) {
+        cancel(false);
+        return;
+      }
       errEl.textContent = err;
       input.classList.add("left-rail__inline-edit--error");
+      input.setAttribute("aria-invalid", "true");
       // Don't cleanup — let the user fix it.
-      input.focus();
       input.select();
       return;
     }
     cleanup();
-    onCommit(value);
+    onCommit(value, { viaKeyboard });
   }
-  function cancel() {
+  function cancel(viaKeyboard) {
     cleanup();
-    onCancel?.();
+    onCancel?.({ viaKeyboard });
   }
 
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
-      commit();
+      commit(true);
     } else if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      cancel();
+      cancel(true);
     } else {
       // Stop bubbling so the row/header keydown handlers don't react
       // (e.g. Cmd-A while editing should select input text, not all rows).
@@ -155,8 +186,32 @@ function beginInlineEdit({ displayEl, initial, validate, onCommit, onCancel }) {
   // Commit-on-blur for consistency with VS Code. The cleanup guard prevents
   // double-commits when Enter triggers a blur.
   input.addEventListener("blur", () => {
-    if (!cleaned) commit();
+    if (!cleaned) commit(false);
   });
+  // The error is announced as it appears.
+  errEl.setAttribute("role", "alert");
+}
+
+/**
+ * Which visible node ArrowDown from the search field lands on. While a
+ * search is showing results it is the first one — the row Enter would open
+ * — otherwise the tree's tab stop (the last-focused node or open pattern).
+ */
+export function searchEntryIndex({ searching, rovingIndex }) {
+  if (searching) return 0;
+  return rovingIndex >= 0 ? rovingIndex : 0;
+}
+
+/**
+ * What a screen reader says for a pattern row: its display name, the folder
+ * it lives in when that isn't otherwise conveyed (search results), and
+ * whether it has unsaved-against-original edits.
+ */
+export function rowAccessibleName({ display, folderLabel = null, dirty = false }) {
+  let name = display;
+  if (folderLabel) name += `, in ${folderLabel}`;
+  if (dirty) name += ", modified";
+  return name;
 }
 
 /**
@@ -236,10 +291,9 @@ export function mount({
 
   function paintSelection() {
     for (const row of listEl.querySelectorAll(".left-rail__item")) {
-      row.classList.toggle(
-        "is-selected",
-        selectedNames.has(row.dataset.name),
-      );
+      const selected = selectedNames.has(row.dataset.name);
+      row.classList.toggle("is-selected", selected);
+      row.setAttribute("aria-selected", selected ? "true" : "false");
     }
   }
 
@@ -284,7 +338,21 @@ export function mount({
         if (allExistingNames().has(v)) return `"${v}" already exists`;
         return null;
       },
-      onCommit: (newName) => onRenamePattern(name, newName),
+      onCommit: (newName, { viaKeyboard }) => {
+        // The host re-renders the rail under the new name; fall back to the
+        // old one if it refused the rename.
+        if (viaKeyboard) pendingFocusKey = itemKey(newName);
+        onRenamePattern(name, newName);
+        if (viaKeyboard) {
+          pendingFocusKey = null;
+          if (!listEl.contains(document.activeElement)) {
+            focusNode(itemKey(newName)) || focusNode(itemKey(name));
+          }
+        }
+      },
+      onCancel: ({ viaKeyboard }) => {
+        if (viaKeyboard) focusNode(itemKey(name));
+      },
     });
   }
 
@@ -300,7 +368,20 @@ export function mount({
           v,
           folders_.filter((f) => f !== folderName),
         ),
-      onCommit: (newName) => onRenameFolder(folderName, newName),
+      onCommit: (newName, { viaKeyboard }) => {
+        if (viaKeyboard) pendingFocusKey = folderNodeKey(newName);
+        onRenameFolder(folderName, newName);
+        if (viaKeyboard) {
+          pendingFocusKey = null;
+          if (!listEl.contains(document.activeElement)) {
+            focusNode(folderNodeKey(newName)) ||
+              focusNode(folderNodeKey(folderName));
+          }
+        }
+      },
+      onCancel: ({ viaKeyboard }) => {
+        if (viaKeyboard) focusNode(folderNodeKey(folderName));
+      },
     });
   }
 
@@ -314,8 +395,33 @@ export function mount({
   const COLLAPSE_KEY = "strasbeat:left-rail-collapsed";
   const EXPANDED_W = 240;
   const COLLAPSED_W = 36;
-  let isPanelCollapsed = localStorage.getItem(COLLAPSE_KEY) === "true";
   const shellEl = container.closest(".shell") ?? document.documentElement;
+  // The stored flag is a wide-layout preference. On a narrow viewport the
+  // rail floats over the editor, so it always starts closed there and its
+  // open/close is never written back (see src/ui/responsive.js).
+  const storedCollapsed = () => localStorage.getItem(COLLAPSE_KEY) === "true";
+  const narrow = watchNarrow((isNarrow) => {
+    isPanelCollapsed = !resolveRailExpanded({
+      storedExpanded: !storedCollapsed(),
+      narrow: isNarrow,
+    });
+    applyCollapseState();
+  });
+  let isPanelCollapsed = !resolveRailExpanded({
+    storedExpanded: !storedCollapsed(),
+    narrow: narrow.isNarrow(),
+  });
+
+  // ─── Tree focus (one tab stop, roving) ────────────────────────────────
+  // Nodes are addressed by key so focus can be found again after a rebuild.
+  const itemKey = (name) => `p:${name}`;
+  const folderNodeKey = (folderKey) => `f:${folderKey}`;
+  let rovingKey = null; // the node that currently holds tabindex=0
+  let pendingFocusKey = null; // focus this node after the next render
+  let openerEl = null; // what had focus when the floating rail was opened
+  let groupSeq = 0;
+  let typeahead = "";
+  let typeaheadTimer = null;
 
   // ─── Active context menu ──────────────────────────────────────────────
   let activeMenu = null;
@@ -327,12 +433,43 @@ export function mount({
     document.removeEventListener("click", onDocClickDismiss, true);
     document.removeEventListener("keydown", onDocKeyDismiss, true);
   }
-  function onDocClickDismiss() {
+  // Closing from the keyboard, or by choosing an item, hands focus back to
+  // the node the menu was opened for. A click elsewhere has already moved
+  // focus where the user wanted it, so that path leaves it alone.
+  function closeMenuAndRestoreFocus() {
+    const key = menuReturnKey;
+    menuReturnKey = null;
+    dismissContextMenu();
+    if (key) focusNode(key);
+  }
+  function onDocClickDismiss(e) {
+    // A click on a submenu's parent item expands it instead.
+    const parentItem = e.target?.closest?.(
+      ".left-rail__context-item--has-submenu",
+    );
+    if (
+      parentItem &&
+      activeMenu?.contains(parentItem) &&
+      !e.target.closest(".left-rail__context-submenu")
+    ) {
+      return;
+    }
     dismissContextMenu();
   }
   function onDocKeyDismiss(e) {
-    if (e.key === "Escape") dismissContextMenu();
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const submenu = document.activeElement?.closest?.(
+      ".left-rail__context-submenu",
+    );
+    if (submenu && activeMenu?.contains(submenu)) {
+      closeSubmenu(submenu.parentElement);
+      return;
+    }
+    closeMenuAndRestoreFocus();
   }
+  let menuReturnKey = null;
 
   // ─── Per-folder collapse (sections) ───────────────────────────────────
   function isCollapsed(folderKey) {
@@ -348,9 +485,45 @@ export function mount({
 
   // ─── Panel collapse ───────────────────────────────────────────────────
   function togglePanelCollapse() {
-    isPanelCollapsed = !isPanelCollapsed;
-    localStorage.setItem(COLLAPSE_KEY, isPanelCollapsed);
+    setPanelCollapsed(!isPanelCollapsed);
+  }
+
+  function setPanelCollapsed(collapsed, { persist = !narrow.isNarrow() } = {}) {
+    if (collapsed === isPanelCollapsed) return;
+    const active = document.activeElement;
+    const floating = narrow.isNarrow();
+    if (!collapsed) {
+      // A floating rail gives focus back to whatever opened it.
+      openerEl =
+        floating && active && active !== document.body ? active : null;
+    }
+    // Don't leave keyboard focus on something that is about to disappear.
+    // Floating, that can be the whole rail: below 600px the collapsed strip
+    // is not drawn at all.
+    const hadFocus =
+      collapsed &&
+      (search.contains(active) ||
+        listEl.contains(active) ||
+        (floating && container.contains(active)));
+    isPanelCollapsed = collapsed;
+    if (persist) localStorage.setItem(COLLAPSE_KEY, isPanelCollapsed);
     applyCollapseState();
+    if (!collapsed) return;
+    const opener = openerEl;
+    openerEl = null;
+    if (!hadFocus || (active === collapseBtn && isRendered(collapseBtn))) return;
+    pickFocusReturn(
+      floating
+        ? [opener, collapseBtn, document.getElementById("pattern-menu")]
+        : [collapseBtn],
+      isRendered,
+    )?.focus();
+  }
+
+  // On a narrow viewport the open rail covers the editor: once a pattern has
+  // been picked, get out of its way.
+  function closeIfOverlay() {
+    if (narrow.isNarrow()) setPanelCollapsed(true);
   }
 
   function applyCollapseState() {
@@ -367,6 +540,10 @@ export function mount({
       : "Collapse patterns panel";
     collapseBtn.setAttribute("aria-label", label);
     collapseBtn.title = label;
+    // A collapsed rail shows only this button; everything else is out of
+    // the tab order and the accessibility tree, not just transparent.
+    search.inert = isPanelCollapsed;
+    listEl.inert = isPanelCollapsed;
   }
 
   // ─── Build the static structure once ──────────────────────────────────
@@ -387,7 +564,8 @@ export function mount({
   collapseBtn.addEventListener("click", togglePanelCollapse);
   header.appendChild(collapseBtn);
 
-  const title = el("span", "left-rail__title", "Patterns");
+  const title = el("h2", "left-rail__title", "Patterns");
+  title.id = "left-rail-title";
   header.appendChild(title);
 
   const plusBtn = el("button", "btn btn--icon left-rail__plus");
@@ -451,6 +629,10 @@ export function mount({
   });
   searchInput.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      // First Escape clears the field; an empty one leaves the key for the
+      // floating rail to close on.
+      if (searchInput.value === "") return;
+      e.preventDefault();
       searchInput.value = "";
       query = "";
       clearBtn.style.display = "none";
@@ -460,8 +642,13 @@ export function mount({
       if (first) first.click();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      const first = listEl.querySelector(".left-rail__item");
-      if (first) first.focus();
+      const nodes = treeNodes();
+      nodes[
+        searchEntryIndex({
+          searching: query !== "",
+          rovingIndex: nodes.indexOf(rovingNode()),
+        })
+      ]?.focus();
     }
   });
   search.appendChild(searchInput);
@@ -470,8 +657,47 @@ export function mount({
 
   // List
   listEl = el("div", "left-rail__list");
-  listEl.setAttribute("role", "listbox");
+  listEl.setAttribute("role", "tree");
+  listEl.setAttribute("aria-labelledby", title.id);
+  listEl.setAttribute("aria-multiselectable", "true");
+  listEl.addEventListener("keydown", onTreeKeydown);
+  // Whichever node takes focus (arrow keys, a click, a restore after a
+  // rebuild) becomes the tree's single tab stop.
+  listEl.addEventListener("focusin", (e) => {
+    const node = e.target.closest?.('[role="treeitem"]');
+    if (node && node === e.target) setRoving(node);
+  });
   container.appendChild(listEl);
+
+  // A tap on the scrim beside the floating rail (the editor pane's own box,
+  // not anything inside it — see shell.css) closes it.
+  const paneEl = shellEl.querySelector?.(".editor-pane");
+  paneEl?.addEventListener("pointerdown", (e) => {
+    if (e.target === paneEl && narrow.isNarrow()) setPanelCollapsed(true);
+  });
+
+  // Floating over the editor, Escape closes the rail from anywhere, unless
+  // something above it claimed the key. Listening on window (bubble) puts
+  // this after every other handler, the rail's own included.
+  window.addEventListener("keydown", (e) => {
+    const active = document.activeElement;
+    if (
+      !railTakesEscape({
+        key: e.key,
+        defaultPrevented: e.defaultPrevented,
+        narrow: narrow.isNarrow(),
+        open: !isPanelCollapsed,
+        layerOpen: document.querySelector(ESCAPE_LAYER_SELECTOR) != null,
+        focusInOtherRail: active?.closest?.(".right-rail") != null,
+      })
+    ) {
+      return;
+    }
+    e.preventDefault();
+    // Wherever focus was, the rail was in its way: closing returns it to
+    // the opener only if the rail itself held it.
+    setPanelCollapsed(true);
+  });
 
   renderList();
   applyCollapseState();
@@ -538,8 +764,170 @@ export function mount({
     }
   });
 
+  // ─── Tree focus helpers ───────────────────────────────────────────────
+  function treeNodes() {
+    return Array.from(listEl.querySelectorAll('[role="treeitem"]'));
+  }
+  function nodeByKey(key) {
+    if (key == null) return null;
+    return (
+      treeNodes().find((n) => n.dataset.treeKey === key) ?? null
+    );
+  }
+  function rovingNode() {
+    return nodeByKey(rovingKey);
+  }
+  function setRoving(node) {
+    rovingKey = node.dataset.treeKey;
+    for (const n of treeNodes()) {
+      n.setAttribute("tabindex", n === node ? "0" : "-1");
+    }
+  }
+  /** Give exactly one node the tab stop: the last focused one if it is
+   *  still there, else the open pattern, else the first node. */
+  function applyRoving() {
+    const nodes = treeNodes();
+    if (nodes.length === 0) return;
+    const target =
+      nodeByKey(rovingKey) ??
+      (activeName != null ? nodeByKey(itemKey(activeName)) : null) ??
+      nodes[0];
+    setRoving(target);
+  }
+  /** Focus the node with this key. Returns whether it was found. */
+  function focusNode(key, focusOptions) {
+    const node = nodeByKey(key);
+    if (!node) return false;
+    node.focus(focusOptions);
+    return true;
+  }
+
+  function onTreeKeydown(e) {
+    const node = e.target.closest?.('[role="treeitem"]');
+    // Keys typed into a rename field or on a row's button are theirs.
+    if (!node || node !== e.target) return;
+    const isRow = node.classList.contains("left-rail__item");
+    const name = node.dataset.name;
+    const folderKey = node.dataset.folderKey;
+
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      const rect = node.getBoundingClientRect();
+      const x = rect.left + 24;
+      if (isRow) {
+        showContextMenu(
+          x,
+          rect.bottom,
+          name,
+          node.hasAttribute("data-user"),
+          node.dataset.folder ?? null,
+        );
+      } else if (isUserFolderKey(folderKey)) {
+        showFolderHeaderMenu(x, rect.bottom, folderKey);
+      }
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // container shortcuts
+
+    if (e.key === "F2") {
+      e.preventDefault();
+      if (isRow) {
+        // Demos: silently no-op (read-only).
+        if (node.hasAttribute("data-user")) renamePatternRow(node, name);
+      } else if (isUserFolderKey(folderKey)) {
+        renameFolderRow(node, folderKey);
+      }
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (isRow) node.click();
+      else toggleCollapse(folderKey);
+      return;
+    }
+    if (e.key === "Escape") {
+      // Docked, Escape steps back to the search field. Floating, it is left
+      // for the rail to close on.
+      if (isRow && !narrow.isNarrow()) searchInput.focus();
+      return;
+    }
+
+    const nodes = treeNodes();
+    const index = nodes.indexOf(node);
+    const move = treeNavigate(
+      nodes.map((n) => ({
+        level: Number(n.getAttribute("aria-level")),
+        expanded: n.hasAttribute("aria-expanded")
+          ? n.getAttribute("aria-expanded") === "true"
+          : null,
+      })),
+      index,
+      e.key,
+    );
+    if (move) {
+      e.preventDefault();
+      if (move.focus != null) nodes[move.focus].focus();
+      else if (move.toggle != null) {
+        toggleCollapse(nodes[move.toggle].dataset.folderKey);
+      } else if (move.leave) searchInput.focus();
+      return;
+    }
+
+    // Type-to-find among the visible nodes.
+    if (e.key.length === 1) {
+      typeahead += e.key;
+      clearTimeout(typeaheadTimer);
+      typeaheadTimer = setTimeout(() => (typeahead = ""), TYPEAHEAD_RESET_MS);
+      const hit = typeaheadIndex(
+        nodes.map((n) => n.dataset.label ?? ""),
+        index,
+        typeahead,
+      );
+      if (hit >= 0) {
+        e.preventDefault();
+        nodes[hit].focus();
+      }
+    }
+  }
+
+  function isUserFolderKey(key) {
+    return key != null && key !== DEMOS_KEY && key !== UNFILED_KEY;
+  }
+
   // ─── render ───────────────────────────────────────────────────────────
+  // Rebuilds the list, then puts the tab stop — and keyboard focus, if a
+  // node had it — back on the same node, so a re-render (collapse, dirty
+  // dot, data refresh) never drops the keyboard user onto <body>.
   function renderList() {
+    const focused = document.activeElement;
+    const hadFocus =
+      listEl.contains(focused) && focused.matches?.('[role="treeitem"]');
+    const restoreKey =
+      pendingFocusKey ?? (hadFocus ? focused.dataset.treeKey : null);
+    // Putting focus back where it was must not move the list: a rebuild can
+    // happen mid-drag (a folder springing open), under the pointer. A node
+    // asked for by key (a row just renamed) is scrolled to as usual.
+    const focusOptions = { preventScroll: pendingFocusKey == null };
+    pendingFocusKey = null;
+
+    renderListBody();
+
+    // Folders are siblings at level 1: number them now that all are built.
+    const headers = listEl.querySelectorAll(".left-rail__folder-header");
+    headers.forEach((h, i) => {
+      h.setAttribute("aria-posinset", String(i + 1));
+      h.setAttribute("aria-setsize", String(headers.length));
+    });
+    // Selection set persists across re-renders within a session, but the
+    // rows are freshly created — re-apply the .is-selected class.
+    paintSelection();
+    applyRoving();
+    if (restoreKey != null && !focusNode(restoreKey, focusOptions) && hadFocus) {
+      rovingNode()?.focus(focusOptions);
+    }
+  }
+
+  function renderListBody() {
     listEl.replaceChildren();
 
     // Any active spring-load timer is bound to the previous DOM. Drop it
@@ -607,10 +995,6 @@ export function mount({
     if (!listEl.firstChild) {
       listEl.appendChild(el("div", "left-rail__empty", "No patterns yet"));
     }
-
-    // Selection set persists across re-renders within a session, but the
-    // rows are freshly created — re-apply the .is-selected class.
-    paintSelection();
   }
 
   /**
@@ -634,13 +1018,22 @@ export function mount({
 
     // Header row
     const headerRow = el("div", "left-rail__folder-header");
-    headerRow.setAttribute("role", "button");
-    headerRow.setAttribute("tabindex", "0");
+    headerRow.setAttribute("role", "treeitem");
+    headerRow.setAttribute("tabindex", "-1");
+    headerRow.setAttribute("aria-level", "1");
     headerRow.setAttribute(
       "aria-expanded",
       collapsed ? "false" : "true",
     );
+    const count = patternNames.length;
+    headerRow.setAttribute(
+      "aria-label",
+      `${title}, ${count} ${count === 1 ? "pattern" : "patterns"}`,
+    );
     headerRow.dataset.collapsed = collapsed ? "true" : "false";
+    headerRow.dataset.folderKey = key;
+    headerRow.dataset.treeKey = folderNodeKey(key);
+    headerRow.dataset.label = title;
 
     const chevron = el("span", "left-rail__folder-chevron");
     chevron.setAttribute("aria-hidden", "true");
@@ -659,9 +1052,14 @@ export function mount({
     headerRow.appendChild(countEl);
 
     if (showMore) {
+      // Pointer shortcut to the folder menu; the keyboard reaches the same
+      // menu with Shift+F10 on the header, so this stays out of the tab
+      // order and out of the treeitem's accessible content.
       const moreBtn = el("button", "left-rail__folder-more");
       moreBtn.type = "button";
-      moreBtn.setAttribute("aria-label", "Folder options");
+      moreBtn.tabIndex = -1;
+      moreBtn.setAttribute("aria-hidden", "true");
+      moreBtn.setAttribute("aria-label", `Options for ${title}`);
       moreBtn.appendChild(makeIcon("more-horizontal", { size: 12 }));
       // User folders open the header context menu; Demos/Unfiled stub
       // out (they aren't user folders even though Demos has showMore=false
@@ -676,20 +1074,6 @@ export function mount({
     }
 
     headerRow.addEventListener("click", () => toggleCollapse(key));
-    headerRow.addEventListener("keydown", (e) => {
-      if (
-        e.key === "F2" &&
-        key !== DEMOS_KEY &&
-        key !== UNFILED_KEY &&
-        isUser
-      ) {
-        e.preventDefault();
-        renameFolderRow(headerRow, key);
-      } else if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        toggleCollapse(key);
-      }
-    });
 
     // Double-click on the folder name starts inline rename (user folders only;
     // Demos and Unfiled are reserved). stopPropagation prevents the header
@@ -717,6 +1101,11 @@ export function mount({
     // Body
     if (!collapsed) {
       const body = el("div", "left-rail__folder-body");
+      // The group is the header's child in the accessibility tree even
+      // though it is its sibling in the DOM.
+      body.setAttribute("role", "group");
+      body.id = `left-rail-group-${++groupSeq}`;
+      headerRow.setAttribute("aria-owns", body.id);
       if (patternNames.length === 0 && showEmptyHint) {
         const hint = el(
           "div",
@@ -725,9 +1114,15 @@ export function mount({
         );
         body.appendChild(hint);
       } else {
-        for (const name of patternNames) {
-          body.appendChild(buildRow(name, isUser, folderForRows));
-        }
+        patternNames.forEach((name, i) => {
+          body.appendChild(
+            buildRow(name, isUser, folderForRows, null, {
+              level: 2,
+              posinset: i + 1,
+              setsize: patternNames.length,
+            }),
+          );
+        });
       }
       section.appendChild(body);
     }
@@ -817,14 +1212,20 @@ export function mount({
     }
 
     const visible = all.slice(0, SEARCH_RESULT_LIMIT);
-    for (const r of visible) {
+    visible.forEach((r, i) => {
       listEl.appendChild(
-        buildRow(r.name, r.isUser, r.folder, {
-          folderSuffix: r.folderLabel,
-          matchIndices: r.displayMatch?.matches ?? null,
-        }),
+        buildRow(
+          r.name,
+          r.isUser,
+          r.folder,
+          {
+            folderSuffix: r.folderLabel,
+            matchIndices: r.displayMatch?.matches ?? null,
+          },
+          { level: 1, posinset: i + 1, setsize: visible.length },
+        ),
       );
-    }
+    });
 
     if (all.length > SEARCH_RESULT_LIMIT) {
       const extra = all.length - SEARCH_RESULT_LIMIT;
@@ -845,17 +1246,27 @@ export function mount({
    *   - matchIndices: number[] | null → highlight these char positions
    *     in the display name (indices into prettyName(name); foldAccents()
    *     preserves string length so they map 1:1 onto the original).
+   *
+   * `pos` is the row's place in the tree: `{ level, posinset, setsize }`.
    */
-  function buildRow(name, isUser, folderForRow, searchOpts = null) {
+  function buildRow(name, isUser, folderForRow, searchOpts = null, pos = null) {
     const row = el("div", "left-rail__item");
-    row.setAttribute("role", "option");
+    row.setAttribute("role", "treeitem");
     row.setAttribute("tabindex", "-1");
     row.setAttribute("data-name", name);
+    row.dataset.treeKey = itemKey(name);
+    if (pos) {
+      row.setAttribute("aria-level", String(pos.level));
+      row.setAttribute("aria-posinset", String(pos.posinset));
+      row.setAttribute("aria-setsize", String(pos.setsize));
+    }
     if (isUser) row.setAttribute("data-user", "");
     if (folderForRow) row.setAttribute("data-folder", folderForRow);
+    // aria-selected is the multi-selection (paintSelection); the pattern
+    // open in the editor is aria-current.
     if (name === activeName) {
       row.classList.add("is-active");
-      row.setAttribute("aria-selected", "true");
+      row.setAttribute("aria-current", "true");
     }
 
     // Drag source — every row is draggable. Drop targets live on sections.
@@ -870,6 +1281,16 @@ export function mount({
     row.appendChild(accentEl);
 
     const display = prettyName(name);
+    const isDirty = !isUser && dirtySet.has(name);
+    row.dataset.label = display;
+    row.setAttribute(
+      "aria-label",
+      rowAccessibleName({
+        display,
+        folderLabel: searchOpts?.folderSuffix ?? null,
+        dirty: isDirty,
+      }),
+    );
     const nameEl = buildHighlightedNameSpan(
       display,
       searchOpts?.matchIndices ?? null,
@@ -893,8 +1314,9 @@ export function mount({
     const metaEl = el("span", "left-rail__item-meta");
     metaEl.setAttribute("aria-hidden", "true");
 
-    // Modified dot for shipped patterns with working copies.
-    if (!isUser && dirtySet.has(name)) {
+    // Modified dot for shipped patterns with working copies (spoken as
+    // ", modified" in the row's label above).
+    if (isDirty) {
       const dot = el("span", "left-rail__dirty-dot");
       dot.title = "Modified";
       metaEl.appendChild(dot);
@@ -904,9 +1326,13 @@ export function mount({
     // Every row gets one now (Task 11 menu has items for Demos clean / dirty,
     // user pattern, and bulk selections — there's no "no actions" case).
     {
+      // A pointer affordance only: it sits in the aria-hidden meta cell and
+      // out of the tab order. The keyboard opens the same menu from the row
+      // with Shift+F10 or the Menu key.
       const moreBtn = el("button", "left-rail__more-btn");
       moreBtn.type = "button";
-      moreBtn.setAttribute("aria-label", "Pattern options");
+      moreBtn.tabIndex = -1;
+      moreBtn.setAttribute("aria-label", `Options for ${display}`);
       moreBtn.appendChild(makeIcon("more-horizontal", { size: 12 }));
       moreBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -954,34 +1380,10 @@ export function mount({
       if (selectedNames.size > 0) clearSelection();
       lastClickedName = name;
       dismissContextMenu();
-      setCurrent(name);
-      onSelect(name);
+      openName(name);
     });
 
-    // Keyboard navigation within the list.
-    row.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        const next = nextItem(row);
-        if (next) next.focus();
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        const prev = prevItem(row);
-        if (prev) prev.focus();
-        else searchInput.focus();
-      } else if (e.key === "F2") {
-        e.preventDefault();
-        if (isUser) {
-          renamePatternRow(row, name);
-        }
-        // Demos: silently no-op (read-only).
-      } else if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        row.click();
-      } else if (e.key === "Escape") {
-        searchInput.focus();
-      }
-    });
+    // Keyboard navigation lives on the tree (onTreeKeydown).
 
     // Double-click on the name span starts inline rename for user patterns.
     // The first click of a dblclick fires the row click handler, which
@@ -1043,19 +1445,6 @@ export function mount({
       }
     }
     return nameEl;
-  }
-
-  /** Next .left-rail__item in document order, skipping non-item nodes. */
-  function nextItem(current) {
-    const items = Array.from(listEl.querySelectorAll(".left-rail__item"));
-    const idx = items.indexOf(current);
-    return idx >= 0 && idx < items.length - 1 ? items[idx + 1] : null;
-  }
-  /** Previous .left-rail__item in document order, skipping non-item nodes. */
-  function prevItem(current) {
-    const items = Array.from(listEl.querySelectorAll(".left-rail__item"));
-    const idx = items.indexOf(current);
-    return idx > 0 ? items[idx - 1] : null;
   }
 
   // ─── Drag-and-drop ────────────────────────────────────────────────────
@@ -1279,6 +1668,7 @@ export function mount({
   function showContextMenu(x, y, name, isUser, folderForRow) {
     dismissContextMenu();
     const menu = el("div", "left-rail__context-menu");
+    menu.setAttribute("aria-label", `Options for ${prettyName(name)}`);
 
     const isSelected = selectedNames.has(name);
     const isBulk = isSelected && selectedNames.size > 1;
@@ -1296,7 +1686,7 @@ export function mount({
     // entirely rather than render an empty box.
     if (!menu.firstChild) return;
 
-    positionAndShow(menu, x, y);
+    positionAndShow(menu, x, y, itemKey(name));
   }
 
   /**
@@ -1308,6 +1698,7 @@ export function mount({
   function showFolderHeaderMenu(x, y, folderName) {
     dismissContextMenu();
     const menu = el("div", "left-rail__context-menu");
+    menu.setAttribute("aria-label", `Options for ${folderName}`);
     addItem(
       menu,
       "Rename folder…",
@@ -1322,7 +1713,7 @@ export function mount({
     addItem(menu, "Delete folder…", () => onDeleteFolder(folderName), {
       danger: true,
     });
-    positionAndShow(menu, x, y);
+    positionAndShow(menu, x, y, folderNodeKey(folderName));
   }
 
   // ─── Context menu helpers ─────────────────────────────────────────────
@@ -1339,10 +1730,12 @@ export function mount({
         (danger ? " left-rail__context-item--danger" : ""),
     );
     item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.tabIndex = -1;
     const labelEl = el("span", "left-rail__context-label", label);
     item.appendChild(labelEl);
     if (kbd) {
-      const kbdEl = el("span", "left-rail__context-kbd", kbd);
+      const kbdEl = el("span", "left-rail__context-kbd", formatShortcut(kbd));
       kbdEl.setAttribute("aria-hidden", "true");
       item.appendChild(kbdEl);
     }
@@ -1352,7 +1745,9 @@ export function mount({
     } else {
       item.addEventListener("click", (e) => {
         e.stopPropagation();
-        dismissContextMenu();
+        // Focus goes back to the row first, so whatever the action opens
+        // next (a rename field, a confirm dialog) starts from there.
+        closeMenuAndRestoreFocus();
         onClick();
       });
     }
@@ -1361,24 +1756,38 @@ export function mount({
   }
 
   function addSeparator(menu) {
-    menu.appendChild(el("div", "left-rail__context-separator"));
+    const sep = el("div", "left-rail__context-separator");
+    sep.setAttribute("role", "separator");
+    menu.appendChild(sep);
   }
 
   /**
-   * Append a submenu-bearing menu item. Hover or keyboard-focus opens the
-   * flyout to the right of the parent item (CSS-driven). `items` is a
-   * mix of `{ label, onClick, danger? }` entries and the string
+   * Append a submenu-bearing menu item. Hover opens the flyout to the right
+   * of the parent item (CSS); ArrowRight / Enter / a tap expand it and move
+   * focus in (aria-expanded, see onMenuKeydown). The parent is a div, not a
+   * button, so the submenu's buttons don't nest inside another button.
+   * `items` is a mix of `{ label, onClick, danger? }` entries and the string
    * `"separator"`.
    */
   function addSubmenu(menu, label, items) {
     const item = el(
-      "button",
+      "div",
       "left-rail__context-item left-rail__context-item--has-submenu",
     );
-    item.type = "button";
-    item.textContent = label;
+    item.setAttribute("role", "menuitem");
+    item.setAttribute("aria-haspopup", "menu");
+    item.setAttribute("aria-expanded", "false");
+    item.tabIndex = -1;
+    item.appendChild(el("span", "left-rail__context-label", label));
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".left-rail__context-submenu")) return;
+      if (item.getAttribute("aria-expanded") === "true") closeSubmenu(item);
+      else openSubmenu(item);
+    });
 
     const submenu = el("div", "left-rail__context-submenu");
+    submenu.setAttribute("role", "menu");
+    submenu.setAttribute("aria-label", label);
     for (const entry of items) {
       if (entry === "separator") {
         addSeparator(submenu);
@@ -1393,19 +1802,24 @@ export function mount({
   }
 
   /**
-   * Mount the menu, position it within the viewport, and arm dismissal
-   * listeners. Listeners are armed in the next frame so the click that
-   * opened the menu doesn't immediately close it.
+   * Mount the menu, position it within the viewport, move focus to its
+   * first item, and arm dismissal listeners. Listeners are armed in the
+   * next frame so the click that opened the menu doesn't immediately close
+   * it. `returnKey` is the tree node focus goes back to on close.
    */
-  function positionAndShow(menu, x, y) {
+  function positionAndShow(menu, x, y, returnKey = null) {
+    menu.setAttribute("role", "menu");
+    menu.addEventListener("keydown", onMenuKeydown);
     document.body.appendChild(menu);
     activeMenu = menu;
+    menuReturnKey = returnKey;
 
     const rect = menu.getBoundingClientRect();
     const cx = Math.min(x, window.innerWidth - rect.width - 8);
     const cy = Math.min(y, window.innerHeight - rect.height - 8);
     menu.style.left = `${Math.max(0, cx)}px`;
     menu.style.top = `${Math.max(0, cy)}px`;
+    menuItems(menu)[0]?.focus();
 
     requestAnimationFrame(() => {
       document.addEventListener("click", onDocClickDismiss, true);
@@ -1413,23 +1827,72 @@ export function mount({
     });
   }
 
+  /** The enabled items of one menu level (a menu or a submenu element). */
+  function menuItems(level) {
+    return Array.from(level.children).filter((c) =>
+      c.matches('[role="menuitem"]:not([aria-disabled="true"])'),
+    );
+  }
+  function openSubmenu(parentItem) {
+    parentItem.setAttribute("aria-expanded", "true");
+    const submenu = parentItem.querySelector(".left-rail__context-submenu");
+    if (submenu) menuItems(submenu)[0]?.focus();
+  }
+  function closeSubmenu(parentItem) {
+    parentItem.setAttribute("aria-expanded", "false");
+    parentItem.focus();
+  }
+
+  // Menu keyboard model: Up/Down/Home/End move within a level (wrapping),
+  // Right or Enter opens a submenu, Left closes it, Tab closes the menu.
+  // Escape is handled by the document-level listener above.
+  function onMenuKeydown(e) {
+    const item = e.target.closest?.('[role="menuitem"]');
+    if (!item) return;
+    const level = item.parentElement;
+    const items = menuItems(level);
+    const next = moveIndex(items.indexOf(item), items.length, e.key, {
+      wrap: true,
+    });
+    if (next >= 0) {
+      e.preventDefault();
+      items[next].focus();
+      return;
+    }
+    const hasSubmenu = item.classList.contains(
+      "left-rail__context-item--has-submenu",
+    );
+    if (
+      hasSubmenu &&
+      (e.key === "ArrowRight" || e.key === "Enter" || e.key === " ")
+    ) {
+      e.preventDefault();
+      openSubmenu(item);
+    } else if (
+      e.key === "ArrowLeft" &&
+      level.classList.contains("left-rail__context-submenu")
+    ) {
+      e.preventDefault();
+      closeSubmenu(level.parentElement);
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+      closeMenuAndRestoreFocus();
+    }
+  }
+
   // ─── Menu shapes ──────────────────────────────────────────────────────
-  // Platform-aware mod-key glyph. Used purely for the visual kbd hints in
-  // the context menu — the actual key bindings work with metaKey || ctrlKey
-  // either way.
-  const IS_MAC = /Mac|iPhone|iPad/.test(
-    typeof navigator !== "undefined" ? navigator.platform : "",
-  );
-  const MOD = IS_MAC ? "⌘" : "Ctrl+";
+  // The kbd hints are written as chords ("Mod+D") and spelled for the
+  // platform by formatShortcut in addItem. They are hints only — the actual
+  // bindings accept metaKey || ctrlKey either way.
 
   function buildUserMenu(menu, name, folder) {
-    addItem(menu, "Open", () => openName(name), { kbd: "↵" });
+    addItem(menu, "Open", () => openName(name), { kbd: "Enter" });
     addItem(menu, "Rename…", () => {
       const row = rowOf(name);
       if (row) renamePatternRow(row, name);
     }, { kbd: "F2" });
     addItem(menu, "Duplicate…", () => onDuplicate(name, folder ?? null), {
-      kbd: `${MOD}D`,
+      kbd: "Mod+D",
     });
     addSubmenu(menu, "Move to", buildMoveItems([name]));
     addSeparator(menu);
@@ -1437,14 +1900,14 @@ export function mount({
       menu,
       "Delete",
       () => confirmAndDelete(name),
-      { danger: true, kbd: `${MOD}⌫` },
+      { danger: true, kbd: "Mod+Backspace" },
     );
   }
 
   function buildDemoMenu(menu, name) {
-    addItem(menu, "Open", () => openName(name), { kbd: "↵" });
+    addItem(menu, "Open", () => openName(name), { kbd: "Enter" });
     addItem(menu, "Duplicate…", () => onDuplicate(name, null), {
-      kbd: `${MOD}D`,
+      kbd: "Mod+D",
     });
     if (dirtySet.has(name)) {
       addSeparator(menu);
@@ -1467,7 +1930,7 @@ export function mount({
 
     addSubmenu(menu, `Move ${n} patterns to`, buildMoveItems(names));
     addItem(menu, `Duplicate ${n} patterns…`, () => onBulkDuplicate(names), {
-      kbd: `${MOD}D`,
+      kbd: "Mod+D",
     });
     addSeparator(menu);
     addItem(
@@ -1475,7 +1938,7 @@ export function mount({
       `Delete ${n} patterns…`,
       // The host's bulk delete asks for confirmation itself.
       () => onBulkDelete(names),
-      { danger: true, disabled: !allUser, kbd: `${MOD}⌫` },
+      { danger: true, disabled: !allUser, kbd: "Mod+Backspace" },
     );
   }
 
@@ -1513,6 +1976,7 @@ export function mount({
   function openName(name) {
     setCurrent(name);
     onSelect(name);
+    closeIfOverlay();
   }
 
   /**
@@ -1532,8 +1996,14 @@ export function mount({
     for (const row of listEl.querySelectorAll(".left-rail__item")) {
       const matches = row.dataset.name === name;
       row.classList.toggle("is-active", matches);
-      if (matches) row.setAttribute("aria-selected", "true");
-      else row.removeAttribute("aria-selected");
+      if (matches) row.setAttribute("aria-current", "true");
+      else row.removeAttribute("aria-current");
+    }
+    // While focus is elsewhere, the tab stop follows the open pattern so
+    // tabbing into the tree lands on it.
+    if (!listEl.contains(document.activeElement)) {
+      rovingKey = itemKey(name);
+      applyRoving();
     }
   }
 
@@ -1541,11 +2011,14 @@ export function mount({
     activeName = null;
     for (const row of listEl.querySelectorAll(".left-rail__item")) {
       row.classList.remove("is-active");
-      row.removeAttribute("aria-selected");
+      row.removeAttribute("aria-current");
     }
   }
 
   function focusSearch() {
+    // The field can't take focus while the rail is collapsed. Opening it
+    // for a search is a one-off, not a change of the stored preference.
+    setPanelCollapsed(false, { persist: false });
     searchInput.focus();
     searchInput.select();
   }
