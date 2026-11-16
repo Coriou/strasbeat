@@ -145,6 +145,61 @@ export function nextFocusTarget(lanes, from, key) {
   return null;
 }
 
+/**
+ * Everything a lane row renders apart from its individual steps, as one
+ * comparable string. Two parses that agree on it can share the row's DOM.
+ * Source offsets are left out on purpose — they shift with every edit above
+ * the lane without changing a pixel — except where the row prints source
+ * text itself (the read-only stripe's line number and snippet).
+ */
+export function laneFrameSignature(lane, index, code = "") {
+  const parts = [
+    index,
+    lane.editable ? 1 : 0,
+    lane.muted ? 1 : 0,
+    lane.soloed ? 1 : 0,
+    lane.primarySound ?? "",
+    lane.bank?.name ?? "",
+    lane.stepCount ?? 0,
+    lane.steps.length,
+  ];
+  if (!(lane.editable && lane.steps.length > 0)) {
+    parts.push(
+      lane.readOnlyReason ?? "",
+      lane.line,
+      code.slice(lane.stepStart, lane.stepEnd),
+    );
+  }
+  return parts.join("\u0001");
+}
+
+/** What one step cell renders. */
+export function stepSignature(step) {
+  if (!step || step.kind !== "hit") return "";
+  return `${step.sound}:${step.variant ?? ""}`;
+}
+
+/**
+ * Whether a key press inside the grid is aimed at a step cell. The grid's
+ * one keydown listener sees presses on every control inside it (mute/solo,
+ * bank chip, "+ Add drum" …); those must keep their own meaning rather than
+ * act on whichever cell was focused last.
+ */
+export function isCellTarget(target) {
+  return !!target?.classList?.contains("beat-grid__cell");
+}
+
+/**
+ * Should a grid edit re-evaluate so it is heard at once? Only while the
+ * buffer being edited is the one playing: evaluating a stopped buffer would
+ * start playback from a click on a cell, and evaluating another tab's
+ * buffer would take playback away from the tab that owns it.
+ */
+export function shouldAutoReplay({ isPlaying, scheduler }) {
+  if (typeof isPlaying === "function") return !!isPlaying();
+  return !!scheduler?.started;
+}
+
 // Common drum-machine banks offered in the bank picker even when the
 // current buffer doesn't use them yet. Grep'd from the patterns directory
 // so we match what's been authored by hand. Order = rough "most iconic
@@ -263,6 +318,9 @@ const READ_ONLY_BADGES = {
  *   fired after every buffer-editing action so changes are immediately
  *   audible during playback — mirrors the mute/solo auto-replay in
  *   track-bar. Wired to `editor.evaluate` in main.js; omit in tests.
+ * @param {() => boolean} [opts.isPlaying]
+ *   true while the buffer this grid edits is the one being played. Gates
+ *   the auto-replay; defaults to "the scheduler is running" when omitted.
  */
 export function mountBeatGrid({
   container,
@@ -273,13 +331,12 @@ export function mountBeatGrid({
   onPreview = null,
   getScheduler = () => null,
   onEvaluate = null,
+  isPlaying: isBufferPlaying = null,
 }) {
   // Outer wrapper sits as a sibling of the canvas inside the roll pane.
   const root = document.createElement("div");
   root.className = "beat-grid";
   root.hidden = true;
-  root.setAttribute("role", "grid");
-  root.setAttribute("aria-label", "Beat grid");
 
   // Hidden live region — announces cell toggles, mute/solo, bank/sound
   // changes to screen readers. One per grid root is enough; per-lane
@@ -319,13 +376,44 @@ export function mountBeatGrid({
   empty.appendChild(emptyHint);
   root.appendChild(empty);
 
+  // The grid proper: one row per lane, each a row header (the rail), a cell
+  // holding the lane's step buttons (or its read-only stripe) and a cell
+  // holding its controls. Only rows live in here — the live region, the
+  // empty state and the "+ Add drum" row are siblings, not grid children.
   const lanesEl = document.createElement("div");
   lanesEl.className = "beat-grid__lanes";
+  lanesEl.setAttribute("role", "grid");
+  lanesEl.setAttribute("aria-label", "Beat grid");
+  lanesEl.setAttribute("aria-colcount", "3");
   root.appendChild(lanesEl);
+
+  // "+ Add drum" action below the lane stack. Mirrors the spec's
+  // "+ Add drum (bottom of the rail)" affordance. Built once; its button is
+  // added below, once the interaction context exists.
+  const addRow = document.createElement("div");
+  addRow.className = "beat-grid__add-row";
+  addRow.hidden = true;
+  root.appendChild(addRow);
 
   container.appendChild(root);
 
   let lastHadLanes = false;
+
+  // ─── Render bookkeeping ──────────────────────────────────────────────
+  // One entry per rendered lane row, in lane order: its element, the
+  // signatures it was built from (see laneFrameSignature / stepSignature)
+  // and, for editable lanes, its step cells and playhead.
+  /** @type {Array<{ el: HTMLElement, frame: string, steps: string[] | null, cellEls: HTMLElement[], cellsEl: HTMLElement | null, playhead: { el: HTMLElement, width: number, lastX: number } | null }>} */
+  let laneEntries = [];
+  // The parse the DOM currently shows. The parser returns the same array
+  // for the same text, so identity is the "nothing changed" test.
+  let renderedLanes = null;
+  // The buffer changed while the grid could not be seen. Nothing is built
+  // until it can: show(), or the pane expanding, picks this up.
+  let dirty = false;
+  // The roll pane this grid lives in is collapsed to (almost) nothing.
+  let paneCollapsed = false;
+  const isShown = () => !root.hidden && !paneCollapsed;
 
   // ─── Paint-drag state (shift+pointerdown … document pointerup) ──────────
   /**
@@ -362,15 +450,34 @@ export function mountBeatGrid({
   let reorderDrag = null;
 
   // ─── Playhead sweep ──────────────────────────────────────────────────
-  // One entry per editable lane rendered, in lane order. Rebuilt on every
-  // rebuild() — the rAF loop reads fresh refs each tick so stale DOM
-  // never shows through. Width is cached on mount and refreshed by a
-  // ResizeObserver attached per-lane; offsetWidth reads during tick would
-  // force layout and defeat the rAF budget.
-  /** @type {Array<{ el: HTMLElement, width: number, laneIndex: number, lastX: number, ro: ResizeObserver | null }>} */
-  let lanePlayheads = [];
+  // Each editable lane entry carries a playhead (see laneEntries). Its
+  // width comes from the one ResizeObserver below, which reports the cells
+  // strip's size when it is first observed and whenever it changes — so
+  // neither a rebuild nor the rAF tick ever has to read layout.
   let raf = null;
   let isPlaying = false;
+  const playheadByCells = new WeakMap();
+  const sizeObserver =
+    typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver((entries) => {
+          for (const entry of entries) {
+            if (entry.target === container) {
+              // A collapsed pane keeps a pixel or two of border.
+              const collapsed = entry.contentRect.height < 8;
+              if (collapsed === paneCollapsed) continue;
+              paneCollapsed = collapsed;
+              if (isShown() && dirty) rebuild();
+              updatePlayheadVisibility();
+              continue;
+            }
+            const ph = playheadByCells.get(entry.target);
+            if (!ph) continue;
+            ph.width = entry.contentRect.width || 0;
+            ph.lastX = -1;
+          }
+        })
+      : null;
+  sizeObserver?.observe(container);
 
   // ─── Keyboard focus + selection state ─────────────────────────────────
   // Roving tabindex: at any time one cell in the grid has tabindex=0, all
@@ -417,123 +524,140 @@ export function mountBeatGrid({
     openMenu = entry;
   }
 
+  // Even with no lanes, let the user add one via the "+ Add drum" button
+  // inside the empty-state layout so they don't have to open the command
+  // palette to start drumming.
+  empty.appendChild(buildAddLaneButton(ctx, { variant: "primary" }));
+  addRow.appendChild(buildAddLaneButton(ctx, { variant: "ghost" }));
+
+  function noteLaneCount(count) {
+    const hasLanes = count > 0;
+    if (hasLanes === lastHadLanes) return;
+    lastHadLanes = hasLanes;
+    onLanesChange?.(count);
+  }
+
+  function dropLaneEntry(entry) {
+    if (entry.cellsEl) sizeObserver?.unobserve(entry.cellsEl);
+    entry.el.remove();
+  }
+
+  // Build a lane row and register its playhead for the rAF sweep.
+  function createLaneEntry(lane, index, code, frame) {
+    const el = renderLane(lane, index, code, ctx);
+    const editable = lane.editable && lane.steps.length > 0;
+    const cellsEl = editable ? el.querySelector(".beat-grid__cells") : null;
+    const playheadEl = cellsEl?.querySelector(".beat-grid__playhead") ?? null;
+    const entry = {
+      el,
+      frame,
+      steps: editable ? lane.steps.map(stepSignature) : null,
+      cellEls: cellsEl ? Array.from(cellsEl.querySelectorAll(".beat-grid__cell")) : [],
+      cellsEl,
+      playhead: playheadEl ? { el: playheadEl, width: 0, lastX: -1 } : null,
+    };
+    if (entry.playhead) {
+      playheadByCells.set(cellsEl, entry.playhead);
+      sizeObserver?.observe(cellsEl);
+    }
+    return entry;
+  }
+
   function rebuild() {
     const code = view.state.doc.toString();
     const lanes = parseDrumLanes(code);
 
-    // Capture focus state BEFORE teardown — once we remove the old cells
-    // from the DOM the browser retargets activeElement to <body>, so a
-    // post-teardown check can't tell whether focus used to live inside
-    // the grid.
+    if (!isShown()) {
+      // Nobody can see the grid: remember that it is stale and build
+      // nothing. Whether the buffer has drum lanes at all still matters —
+      // it decides if the "Beat grid" view is offered.
+      dirty = true;
+      noteLaneCount(lanes.length);
+      return;
+    }
+    dirty = false;
+    if (lanes === renderedLanes) return; // same parse as what is on screen
+    renderedLanes = lanes;
+
+    // Capture focus state BEFORE touching the DOM — once a focused cell is
+    // replaced the browser retargets activeElement to <body>, so a later
+    // check can't tell whether focus used to live inside the grid.
     const hadFocusInside =
       document.activeElement != null && root.contains(document.activeElement);
 
-    // Capture scroll position BEFORE teardown — removing every child from
-    // lanesEl collapses the scroll container's contentHeight, which zeroes
-    // root.scrollTop. Without this the grid jumps back to the top on any
-    // docChange-driven rebuild (typing into a lane near the bottom, any
-    // cell toggle in a tall pattern, etc.).
+    // Capture scroll position too: removing rows can shrink the scroll
+    // container's content height, which clamps root.scrollTop.
     const scrollTop = root.scrollTop;
 
-    // Tear down old per-lane resize observers before blowing away the DOM.
-    for (const ph of lanePlayheads) {
-      ph.ro?.disconnect();
-    }
-    lanePlayheads = [];
-
-    while (lanesEl.firstChild) lanesEl.removeChild(lanesEl.firstChild);
-
-    // Screen-reader grid metadata. aria-colcount reflects the widest lane
-    // so readers can announce "column N of M" consistently; per-lane
-    // resolutions vary but the time axis is the same.
-    root.setAttribute("aria-rowcount", String(Math.max(lanes.length, 0)));
-    const maxCols = lanes.reduce(
-      (m, l) => Math.max(m, l.stepCount || 0),
-      0,
-    );
-    root.setAttribute("aria-colcount", String(Math.max(maxCols, 1)));
+    lanesEl.setAttribute("aria-rowcount", String(lanes.length));
 
     if (lanes.length === 0) {
+      for (const entry of laneEntries) dropLaneEntry(entry);
+      laneEntries = [];
       empty.hidden = false;
-      // Even with no lanes, let the user add one via the "+ Add drum"
-      // button inside the empty-state layout so they don't have to open
-      // the command palette to start drumming. Replace any pre-existing
-      // button so rebuild() stays idempotent.
-      const prev = empty.querySelector(".beat-grid__add-btn");
-      if (prev) prev.remove();
-      empty.appendChild(buildAddLaneButton(ctx, { variant: "primary" }));
-      if (lastHadLanes) {
-        lastHadLanes = false;
-        onLanesChange?.(0);
-      }
+      addRow.hidden = true;
+      noteLaneCount(0);
       focusedCell = null;
       selection = null;
+      tabStopEl = null;
       return;
     }
 
     empty.hidden = true;
+    addRow.hidden = false;
 
+    // Bring the rows in line with the parse, touching only what changed:
+    // a lane whose frame is the same keeps its row and has just the step
+    // cells that differ swapped; anything else gets a fresh row. Typing in
+    // the editor usually changes no lane at all, and a click on a cell
+    // changes exactly one cell.
     for (let i = 0; i < lanes.length; i++) {
-      const laneEl = renderLane(lanes[i], i, code, ctx);
-      lanesEl.appendChild(laneEl);
-      // Register the lane's playhead (if any) for the rAF sweep. The
-      // element is created inside renderLane and tagged with data attrs;
-      // we look it up once here to avoid repeated querySelector work.
-      const playheadEl = laneEl.querySelector(".beat-grid__playhead");
-      const cellsEl = laneEl.querySelector(".beat-grid__cells");
-      if (playheadEl && cellsEl) {
-        const entry = {
-          el: playheadEl,
-          width: cellsEl.getBoundingClientRect().width || 0,
-          laneIndex: i,
-          lastX: -1,
-          ro: null,
-        };
-        // Re-measure on viewport resize so the playhead stays aligned
-        // when the bottom panel or window changes size. ResizeObserver
-        // fires before the next frame so the rAF tick always reads a
-        // fresh width.
-        if (typeof ResizeObserver !== "undefined") {
-          entry.ro = new ResizeObserver(() => {
-            entry.width = cellsEl.getBoundingClientRect().width || 0;
-            entry.lastX = -1;
-          });
-          entry.ro.observe(cellsEl);
+      const lane = lanes[i];
+      const frame = laneFrameSignature(lane, i, code);
+      const prev = laneEntries[i];
+      if (prev && prev.frame === frame) {
+        if (prev.steps) {
+          for (let j = 0; j < lane.steps.length; j++) {
+            const sig = stepSignature(lane.steps[j]);
+            if (prev.steps[j] === sig) continue;
+            const cell = buildCell(lane, i, j, ctx);
+            prev.cellsEl.replaceChild(cell, prev.cellEls[j]);
+            prev.cellEls[j] = cell;
+            prev.steps[j] = sig;
+          }
         }
-        lanePlayheads.push(entry);
+        continue;
       }
-    }
-
-    // "+ Add drum" action at the end of the lane stack. Mirrors the spec's
-    // "+ Add drum (bottom of the rail)" affordance.
-    const addRow = document.createElement("div");
-    addRow.className = "beat-grid__add-row";
-    addRow.appendChild(buildAddLaneButton(ctx, { variant: "ghost" }));
-    lanesEl.appendChild(addRow);
-
-    if (!lastHadLanes) {
-      lastHadLanes = true;
-      onLanesChange?.(lanes.length);
-    }
-
-    // Restore keyboard focus after a buffer-driven rebuild. The user's
-    // current (laneIndex, stepIndex) might not exist anymore — fall back
-    // to the nearest surviving cell.
-    if (focusedCell) {
-      const target = clampFocus(focusedCell, lanes);
-      focusedCell = target;
-      if (target) {
-        updateRovingTabindex(target);
-        // Only restore browser focus if focus was already inside the
-        // grid. Don't steal it when the user has moved on to the editor.
-        // preventScroll: true so the focus call doesn't undo our scrollTop
-        // restore below — the cell the user just clicked is, by definition,
-        // the cell they were looking at; preserving the prior viewport
-        // beats snapping it to the browser's nearest-edge default.
-        if (hadFocusInside) {
-          focusCell(target, { preventScroll: true });
-        }
+      const entry = createLaneEntry(lane, i, code, frame);
+      if (prev) {
+        if (prev.cellsEl) sizeObserver?.unobserve(prev.cellsEl);
+        lanesEl.replaceChild(entry.el, prev.el);
+      } else {
+        lanesEl.appendChild(entry.el);
       }
+      laneEntries[i] = entry;
+    }
+    for (let i = lanes.length; i < laneEntries.length; i++) {
+      dropLaneEntry(laneEntries[i]);
+    }
+    laneEntries.length = lanes.length;
+
+    noteLaneCount(lanes.length);
+
+    // Keep exactly one cell in the Tab order. That is the cell the user was
+    // on — snapped to the nearest surviving one if the buffer changed under
+    // it — or, before any cell was ever focused, the first editable one.
+    const target = focusedCell ? clampFocus(focusedCell, lanes) : null;
+    if (focusedCell) focusedCell = target;
+    updateRovingTabindex(target ?? seedFocus(lanes));
+    // Only restore browser focus if focus was already inside the grid.
+    // Don't steal it when the user has moved on to the editor.
+    // preventScroll: true so the focus call doesn't undo our scrollTop
+    // restore below — the cell the user just clicked is, by definition,
+    // the cell they were looking at; preserving the prior viewport beats
+    // snapping it to the browser's nearest-edge default.
+    if (target && hadFocusInside && !root.contains(document.activeElement)) {
+      focusCell(target, { preventScroll: true });
     }
     // Selection is discarded on any external rebuild — step offsets just
     // shifted and painting onto stale indices would corrupt the buffer.
@@ -541,17 +665,14 @@ export function mountBeatGrid({
     repaintSelection();
     updatePlayheadVisibility();
 
-    // Restore scroll position. Without this the grid snaps back to the top
-    // on any docChange-driven rebuild — typing into a bottom lane in the
-    // editor, clicking a cell on a lane that's been scrolled into view,
-    // toggling via keyboard, all looked like an unwanted "jump back to
-    // start" because the teardown collapses lanesEl's contentHeight which
-    // zeroes scrollTop. Clamp to the new maxScroll so a shrinking pattern
-    // (lane deleted) doesn't leave us past the end. The focusCell above
+    // Restore scroll position, clamped to the new maxScroll so a shrinking
+    // pattern (lane deleted) doesn't leave us past the end. Only when rows
+    // actually went away — otherwise nothing moved and reading the scroll
+    // geometry would force a layout for no reason. The focusCell above
     // uses preventScroll:true so this restore wins; keyboard nav scrolls
     // happen through the keydown handler's own focusCell call (which still
     // uses preventScroll:false), not through this rebuild path.
-    if (scrollTop > 0) {
+    if (scrollTop > 0 && root.scrollTop !== scrollTop) {
       const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
       root.scrollTop = Math.min(scrollTop, maxScroll);
     }
@@ -590,21 +711,17 @@ export function mountBeatGrid({
   }
 
   function cellFor({ laneIndex, stepIndex }) {
-    const row = lanesEl.querySelector(
-      `.beat-grid__lane[data-lane-index="${laneIndex}"]`,
-    );
-    if (!row) return null;
-    return row.querySelector(
-      `.beat-grid__cell[data-step-index="${stepIndex}"]`,
-    );
+    return laneEntries[laneIndex]?.cellEls[stepIndex] ?? null;
   }
 
+  // The one cell currently in the Tab order (every cell is built with
+  // tabindex=-1).
+  let tabStopEl = null;
   function updateRovingTabindex(target) {
-    for (const cell of lanesEl.querySelectorAll(".beat-grid__cell")) {
-      cell.setAttribute("tabindex", "-1");
-    }
-    if (!target) return;
-    const el = cellFor(target);
+    const el = target ? cellFor(target) : null;
+    if (el === tabStopEl && (!el || el.tabIndex === 0)) return;
+    if (tabStopEl) tabStopEl.setAttribute("tabindex", "-1");
+    tabStopEl = el;
     if (el) el.setAttribute("tabindex", "0");
   }
 
@@ -662,7 +779,7 @@ export function mountBeatGrid({
   // One loop for the whole grid. Gates itself on visibility + playback so
   // switching to Roll/Scope (or stopping) releases the frame budget.
   function tick() {
-    if (root.hidden || !isPlaying) {
+    if (!isShown() || !isPlaying) {
       raf = null;
       return;
     }
@@ -671,8 +788,9 @@ export function mountBeatGrid({
       sched && sched.started && typeof sched.now === "function"
         ? sched.now()
         : 0;
-    for (const ph of lanePlayheads) {
-      if (!ph.el.isConnected) continue;
+    for (const entry of laneEntries) {
+      const ph = entry.playhead;
+      if (!ph) continue;
       const x = playheadXForCycle(cycle, ph.width);
       if (x !== ph.lastX) {
         ph.lastX = x;
@@ -683,8 +801,9 @@ export function mountBeatGrid({
   }
 
   function startPlayhead() {
-    for (const ph of lanePlayheads) {
-      ph.el.hidden = false;
+    for (const entry of laneEntries) {
+      const ph = entry.playhead;
+      if (ph && ph.el.hidden) ph.el.hidden = false;
     }
     if (raf == null) raf = requestAnimationFrame(tick);
   }
@@ -694,7 +813,9 @@ export function mountBeatGrid({
     raf = null;
     // Park at step 0 and hide — stopped state shouldn't leave a stale
     // line hovering mid-lane.
-    for (const ph of lanePlayheads) {
+    for (const entry of laneEntries) {
+      const ph = entry.playhead;
+      if (!ph || ph.el.hidden) continue;
       ph.lastX = -1;
       ph.el.style.transform = "translateX(0)";
       ph.el.hidden = true;
@@ -702,7 +823,7 @@ export function mountBeatGrid({
   }
 
   function updatePlayheadVisibility() {
-    if (isPlaying && !root.hidden) startPlayhead();
+    if (isPlaying && isShown()) startPlayhead();
     else stopPlayhead();
   }
 
@@ -710,6 +831,9 @@ export function mountBeatGrid({
     const nextPlaying = state === "playing";
     if (nextPlaying === isPlaying) return;
     isPlaying = nextPlaying;
+    // A replay still pending from the last edit must not outlive playback:
+    // it would start the transport again right after Stop.
+    if (!isPlaying) cancelAutoReplay();
     updatePlayheadVisibility();
   }
 
@@ -788,6 +912,10 @@ export function mountBeatGrid({
     }
 
     if (!focusedCell) return;
+    // Everything below acts on the focused cell, so it only applies when a
+    // cell is what the key was pressed on. Enter or Space on the mute
+    // button, the bank chip or "+ Add drum" belongs to that button.
+    if (!isCellTarget(target)) return;
 
     if (key === " " || key === "Enter") {
       e.preventDefault();
@@ -1183,16 +1311,33 @@ export function mountBeatGrid({
   // grid edit becomes audible live, mirroring the composer experience
   // every DAW's step sequencer provides. On Play itself, Strudel
   // re-evaluates fresh, so any pending edits land automatically.
+  //
+  // "Running" means this buffer is the one playing (see shouldAutoReplay):
+  // an edit in a tab that is not playing must not take playback over. The
+  // check is repeated when the timer fires, since Stop or a tab switch can
+  // land inside the debounce.
   let replayTimer = null;
+  const canAutoReplay = () =>
+    shouldAutoReplay({ isPlaying: isBufferPlaying, scheduler: getScheduler?.() });
+  function cancelAutoReplay() {
+    if (replayTimer == null) return;
+    clearTimeout(replayTimer);
+    replayTimer = null;
+  }
   function scheduleAutoReplay() {
     if (!onEvaluate) return;
-    const sched = getScheduler?.();
-    if (!sched?.started) return;
-    if (replayTimer != null) clearTimeout(replayTimer);
+    if (!canAutoReplay()) return;
+    cancelAutoReplay();
     replayTimer = setTimeout(() => {
       replayTimer = null;
+      if (!canAutoReplay()) return;
       try {
-        onEvaluate();
+        const result = onEvaluate();
+        if (result && typeof result.catch === "function") {
+          result.catch((err) =>
+            console.warn("[beat-grid] auto-replay failed:", err),
+          );
+        }
       } catch (err) {
         console.warn("[beat-grid] auto-replay failed:", err);
       }
@@ -1761,6 +1906,8 @@ export function mountBeatGrid({
   return {
     show() {
       root.hidden = false;
+      // Catch up on whatever was typed while the grid was out of sight.
+      if (dirty && isShown()) rebuild();
       updatePlayheadVisibility();
     },
     hide() {
@@ -1777,7 +1924,10 @@ export function mountBeatGrid({
       return !root.hidden;
     },
     setPlaybackState,
-    rebuild,
+    rebuild() {
+      renderedLanes = null;
+      rebuild();
+    },
     /** Number of $: drum lanes currently in the buffer (any kind). */
     getLaneCount() {
       return parseDrumLanes(view.state.doc.toString()).length;
@@ -1812,6 +1962,7 @@ function renderLane(lane, index, code, ctx) {
   // Lane rail: drag handle + sound chip + nickname + step-count chip.
   const rail = document.createElement("div");
   rail.className = "beat-grid__rail";
+  rail.setAttribute("role", "rowheader");
 
   const accent = PALETTE[index % PALETTE.length];
   const dot = document.createElement("button");
@@ -1883,7 +2034,9 @@ function renderLane(lane, index, code, ctx) {
     const grid = document.createElement("div");
     grid.className = "beat-grid__cells";
     grid.style.gridTemplateColumns = `repeat(${lane.stepCount}, 1fr)`;
-    grid.setAttribute("role", "rowgroup");
+    // One grid cell holding the lane's steps; each step is a toggle button.
+    grid.setAttribute("role", "gridcell");
+    grid.setAttribute("aria-label", `${lane.steps.length} steps`);
 
     // Playhead overlay — hidden until playback starts; tick loop in the
     // mount closure translates it. Appended last so it sits above the
@@ -1893,65 +2046,8 @@ function renderLane(lane, index, code, ctx) {
     playhead.setAttribute("aria-hidden", "true");
     playhead.hidden = true;
 
-    const quarterEvery = lane.stepCount / 4; // 1, 2, or 4
-
     for (let i = 0; i < lane.steps.length; i++) {
-      const step = lane.steps[i];
-      const cell = document.createElement("button");
-      cell.type = "button";
-      cell.className = "beat-grid__cell";
-      cell.dataset.stepIndex = String(i);
-      cell.setAttribute("role", "gridcell");
-      cell.setAttribute("aria-colindex", String(i + 1));
-      // Roving tabindex — the mount closure flips exactly one cell to
-      // tabindex=0 after render. Defaulting to -1 here keeps the Tab
-      // order predictable while the grid has no focus yet.
-      cell.setAttribute("tabindex", "-1");
-      cell.style.setProperty("--cell-accent", accent);
-
-      if (step.kind === "hit") {
-        cell.classList.add("beat-grid__cell--on");
-
-        // When the cell's sound differs from the lane's primary sound (a
-        // mixed-sound row like `bd:2 sd:1 bd:2 sd:1 …`), show the actual
-        // sound name in the cell so the visual rhythm reflects what's
-        // audible. Otherwise the cell silently looks "the same as the
-        // others" — silent failure of the kind CLAUDE.md flags.
-        const isOff = lane.primarySound && step.sound !== lane.primarySound;
-        if (isOff) {
-          cell.classList.add("beat-grid__cell--off-sound");
-          cell.dataset.sound = step.sound;
-          const soundLabel = document.createElement("span");
-          soundLabel.className = "beat-grid__cell-sound";
-          soundLabel.textContent = step.sound;
-          cell.appendChild(soundLabel);
-        }
-
-        if (step.variant != null && step.variant > 0) {
-          cell.classList.add("beat-grid__cell--variant");
-          cell.dataset.variant = String(step.variant);
-          const tag = document.createElement("span");
-          tag.className = "beat-grid__variant-tag";
-          tag.textContent = String(step.variant);
-          cell.appendChild(tag);
-        }
-        const variantSuffix = step.variant != null ? `:${step.variant}` : "";
-        cell.setAttribute(
-          "aria-label",
-          `Step ${i + 1}: ${step.sound}${variantSuffix}`,
-        );
-      } else {
-        cell.setAttribute("aria-label", `Step ${i + 1}: rest`);
-      }
-      if ((i + 1) % quarterEvery === 0 && i < lane.steps.length - 1) {
-        cell.classList.add("beat-grid__cell--quarter-end");
-      }
-      if (i % quarterEvery === 0 && i > 0) {
-        cell.classList.add("beat-grid__cell--quarter-start");
-      }
-
-      wireCellInteractions(cell, index, i, ctx);
-      grid.appendChild(cell);
+      grid.appendChild(buildCell(lane, index, i, ctx));
     }
     grid.appendChild(playhead);
     row.appendChild(grid);
@@ -1972,8 +2068,12 @@ function renderLane(lane, index, code, ctx) {
     stripe.addEventListener("click", () => {
       const view = ctx?.view;
       if (!view) return;
+      // The row can outlive the parse it was built from (unchanged rows are
+      // kept across edits), so look the lane's offset up now.
+      const current = parseDrumLanes(view.state.doc.toString())[index];
+      if (!current) return;
       view.dispatch({
-        selection: { anchor: lane.stepStart, head: lane.stepStart },
+        selection: { anchor: current.stepStart, head: current.stepStart },
         scrollIntoView: true,
       });
       view.focus();
@@ -2060,12 +2160,20 @@ function renderLane(lane, index, code, ctx) {
         stripe.appendChild(snippet);
       }
     }
-    row.appendChild(stripe);
+    // The stripe is a button, and a row may only own cells: give it a
+    // cell to sit in. `display: contents` (beat-grid.css) keeps the stripe
+    // itself as the lane's grid item, so the layout is unchanged.
+    const stripeCell = document.createElement("div");
+    stripeCell.className = "beat-grid__stripe-cell";
+    stripeCell.setAttribute("role", "gridcell");
+    stripeCell.appendChild(stripe);
+    row.appendChild(stripeCell);
   }
 
   // Controls column: bank picker + M/S toggles. All clickable in Phase 3.
   const controls = document.createElement("div");
   controls.className = "beat-grid__controls";
+  controls.setAttribute("role", "gridcell");
 
   const bankChip = document.createElement("button");
   bankChip.type = "button";
@@ -2125,6 +2233,67 @@ function renderLane(lane, index, code, ctx) {
   row.appendChild(controls);
 
   return row;
+}
+
+// One step of an editable lane: a toggle button. Built on its own so a
+// single flipped step can be swapped without re-rendering its lane.
+function buildCell(lane, laneIndex, i, ctx) {
+  const step = lane.steps[i];
+  const quarterEvery = lane.stepCount / 4; // 1, 2, or 4
+  const cell = document.createElement("button");
+  cell.type = "button";
+  cell.className = "beat-grid__cell";
+  cell.dataset.stepIndex = String(i);
+  // Roving tabindex — the mount closure flips exactly one cell to
+  // tabindex=0 after render, so the grid is a single Tab stop and the arrow
+  // keys move within it.
+  cell.setAttribute("tabindex", "-1");
+  cell.setAttribute("aria-pressed", step.kind === "hit" ? "true" : "false");
+  cell.style.setProperty("--cell-accent", PALETTE[laneIndex % PALETTE.length]);
+
+  if (step.kind === "hit") {
+    cell.classList.add("beat-grid__cell--on");
+
+    // When the cell's sound differs from the lane's primary sound (a
+    // mixed-sound row like `bd:2 sd:1 bd:2 sd:1 …`), show the actual
+    // sound name in the cell so the visual rhythm reflects what's
+    // audible. Otherwise the cell silently looks "the same as the
+    // others" — silent failure of the kind CLAUDE.md flags.
+    const isOff = lane.primarySound && step.sound !== lane.primarySound;
+    if (isOff) {
+      cell.classList.add("beat-grid__cell--off-sound");
+      cell.dataset.sound = step.sound;
+      const soundLabel = document.createElement("span");
+      soundLabel.className = "beat-grid__cell-sound";
+      soundLabel.textContent = step.sound;
+      cell.appendChild(soundLabel);
+    }
+
+    if (step.variant != null && step.variant > 0) {
+      cell.classList.add("beat-grid__cell--variant");
+      cell.dataset.variant = String(step.variant);
+      const tag = document.createElement("span");
+      tag.className = "beat-grid__variant-tag";
+      tag.textContent = String(step.variant);
+      cell.appendChild(tag);
+    }
+    const variantSuffix = step.variant != null ? `:${step.variant}` : "";
+    cell.setAttribute(
+      "aria-label",
+      `Step ${i + 1}: ${step.sound}${variantSuffix}`,
+    );
+  } else {
+    cell.setAttribute("aria-label", `Step ${i + 1}: rest`);
+  }
+  if ((i + 1) % quarterEvery === 0 && i < lane.steps.length - 1) {
+    cell.classList.add("beat-grid__cell--quarter-end");
+  }
+  if (i % quarterEvery === 0 && i > 0) {
+    cell.classList.add("beat-grid__cell--quarter-start");
+  }
+
+  wireCellInteractions(cell, laneIndex, i, ctx);
+  return cell;
 }
 
 function buildLabelStateButton(letter, active, stateClass, title, onClick) {

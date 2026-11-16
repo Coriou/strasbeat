@@ -236,6 +236,12 @@
 
 /* ─── Step grid (middle column, editable lanes) ──────────────────────── */
 
+/* The read-only stripe's grid cell exists for the accessibility tree only;
+   the stripe inside it stays the lane's layout item. */
+.beat-grid__stripe-cell {
+  display: contents;
+}
+
 .beat-grid__cells {
   display: grid;
   gap: 2px;
@@ -778,7 +784,13 @@ body.beat-grid-dragging {
 .beat-grid__add-row {
   display: flex;
   justify-content: flex-start;
+  /* Sits right under the lane stack; the 2px matches the gap between lanes. */
+  margin-top: 2px;
   padding: var(--space-2) 0 0 calc(var(--space-2) + 2px);
+}
+
+.beat-grid__add-row[hidden] {
+  display: none;
 }
 
 .beat-grid__add-btn {
@@ -1013,5 +1025,20 @@ body.beat-grid-dragging {
 
   .beat-grid__add-row {
     padding-left: var(--space-2);
+  }
+}
+
+/* ─── Reduced motion ─────────────────────────────────────────────────── */
+/* The playhead still tracks the beat (it is the readout, not decoration);
+   the flourishes around it go. */
+@media (prefers-reduced-motion: reduce) {
+  .beat-grid__cell,
+  .beat-grid__lane {
+    transition: none;
+  }
+
+  .beat-grid__cell--on,
+  .beat-grid__menu {
+    animation: none;
   }
 }

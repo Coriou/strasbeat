@@ -1751,6 +1751,7 @@ beatGrid = mountBeatGrid({
   // Auto-replay after any grid edit so changes are immediately audible
   // during playback — same mechanism track-bar's mute/solo uses.
   onEvaluate: () => editor.evaluate(),
+  isPlaying: () => !!editor.repl?.scheduler?.started && tabs?.getPlayingItem() === tabs?.getActiveItem(),
 });
 async function previewDrumCell(name, { bank, variant } = {}) {
   const audioCtx = getAudioContext();
