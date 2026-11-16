@@ -1,8 +1,10 @@
+// Formatting must preserve Strudel quotes and never overwrite a changed document.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EditorSelection, EditorState } from "@codemirror/state";
 
-import { formatBuffer, formatStatus, runFormat } from "./format.js";
+import { formatStatus, runFormat } from "./format.js";
+import { formatBuffer } from "./format-core.js";
 
 // runFormat only needs `state` and `dispatch` from the view.
 function fakeView(doc, { selection } = {}) {
@@ -91,7 +93,7 @@ test("reports a formatter failure through the status sink", async () => {
   const warn = console.warn;
   console.warn = () => {};
   try {
-    assert.equal(await runFormat(view), false);
+    assert.equal(await runFormat(view, formatBuffer), false);
   } finally {
     console.warn = warn;
   }

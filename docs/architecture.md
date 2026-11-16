@@ -196,10 +196,31 @@ keystroke. Loaded on demand, each as its own chunk:
 - **the Vim and Emacs keymaps** — when that profile is selected or is the
   stored one. Until the chunk is in, the editor is on its base keymap and
   the keymap chip says LOADING or RETRY rather than naming a mode;
-- as before: Prettier, hydra-synth, and the opt-in packages.
+- **Prettier** — only inside the dedicated formatting worker, started on
+  the first format command (never during launch) and reused for the session.
+  Its static imports and quote-restoration pipeline live in
+  `src/editor/format-core.js`, shared with Node tests;
+- as before: hydra-synth and the opt-in packages.
 
 Rules:
 
+- **Formatting never falls back to the main thread.** `format.js` only
+  posts text and applies replies. The client ignores superseded replies;
+  `runFormat` still checks document identity before applying a result.
+  Worker creation, runtime/message errors and a 15-second timeout fail
+  loudly in the console and status line with a reload instruction. The
+  worker is discarded so the next command retries; parse errors retain
+  Prettier's message and do not discard the worker. `workerOnlyPrettierPlugin`
+  checks all page chunks, including lazy ones, for modules from the
+  `node_modules/prettier/` package and fails the build if any leak in.
+- **The formatting worker must be one self-contained classic/IIFE file.**
+  Keep Vite's default worker format and static imports, with no runtime
+  chunk fetches. Retired service-worker assets are leased to the old window,
+  so the window can request its worker file after an update; imports made
+  from inside the worker would not share that lease. The worker asset is
+  precached once by the existing `/assets/*` rule. Dev alone uses a module
+  worker because Vite serves unbundled source there and unregisters the
+  service worker; production always constructs a classic worker.
 - **Every new on-demand `import()` goes through `lazyImport`**
   (`src/lazy-import.js`), with the `import()` literal at the call site. A
   chunk fetch fails when the network is gone or a deploy has replaced the

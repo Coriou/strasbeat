@@ -346,6 +346,29 @@ export function eagerModuleIds(bundle) {
   return ids;
 }
 
+// Workers are built separately and emitted here as assets. Inspect every
+// page chunk, including lazy chunks: any Prettier module here is a second
+// copy that would parse/run on the main thread and enter the precache twice.
+export function workerOnlyPrettierPlugin() {
+  return {
+    name: "strasbeat:worker-only-prettier",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const leaked = Object.values(bundle)
+        .filter((item) => item.type === "chunk")
+        .flatMap((chunk) => Object.keys(chunk.modules ?? {}))
+        .filter((id) => /[\\/]node_modules[\\/]prettier[\\/]/.test(id));
+      if (leaked.length > 0) {
+        this.error(
+          `Prettier must only be bundled in the formatting worker, never in ` +
+            `page chunks: ${leaked.join(", ")} — see workerOnlyPrettierPlugin ` +
+            `in vite.config.js.`,
+        );
+      }
+    },
+  };
+}
+
 // escodegen (the code generator behind Strudel's transpiler) `require`s the
 // `source-map` package, ~30 kB, for one optional feature: emitting a source
 // map when `generate()` is called with `sourceMap`. Strudel's transpiler
@@ -427,6 +450,7 @@ function fontPreloadPlugin() {
 export default defineConfig({
   plugins: [
     slimStrudelCodemirrorPlugin(),
+    workerOnlyPrettierPlugin(),
     stubSourceMapPlugin(),
     patternSavePlugin(),
     umamiPlugin(),

@@ -35,14 +35,14 @@ import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, resolve } from 'node:path';
 
-import { formatBuffer, iterateStringLiterals } from '../src/editor/format.js';
+import { formatBuffer, iterateStringLiterals } from '../src/editor/format-core.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '..');
 const patternsDir = join(repoRoot, 'patterns');
 
-// The walker lives in src/editor/format.js so the test and the formatter
+// The walker lives in src/editor/format-core.js so the test and the formatter
 // are guaranteed to agree on what counts as a string literal. If the
 // formatter's quote-restoration logic and the test diverge here, we'd be
 // asserting one thing and shipping another.

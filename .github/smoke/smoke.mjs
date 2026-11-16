@@ -13,6 +13,7 @@
 // check fails. SMOKE_URL overrides the address of the running preview.
 import { chromium } from "playwright";
 import fs from "node:fs";
+import { checkFormatting } from "./format.mjs";
 
 const BASE = process.env.SMOKE_URL || "http://localhost:4173";
 fs.mkdirSync("out", { recursive: true });
@@ -331,6 +332,8 @@ await step("typing latency", async () => {
   check("typing: keydown → second frame p95 under 80 ms", q(0.95) < 80, JSON.stringify(info.typing));
   for (let i = 0; i < text.length; i++) await page.keyboard.press("Backspace");
 });
+
+await step("formatting worker", () => checkFormatting({ page, check, stop }));
 
 await step("command palette", async () => {
   await page.keyboard.press("Control+Shift+P");
