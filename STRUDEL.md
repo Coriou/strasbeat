@@ -88,13 +88,35 @@ Audio:
 
 ## Picking sounds
 
-**Default samples** (TidalCycles "dirt-samples"): `bd cp hh sd oh rim cr ride tom mt lt …`
+**Default samples** (TidalCycles "dirt-samples"): `bd cp hh sd oh rim cr rd ht mt lt …`
 plus weirder ones like `breath east bass jvbass amencutup` — try them.
 
-**Drum machines** via `.bank('TR909')` — a few you'll likely use:
+**Drum machines** via `.bank("RolandTR909")` — a few you'll likely use:
 `RolandTR808`, `RolandTR909`, `RolandTR707`, `RolandTR606`, `LinnDrum`,
-`AkaiLinn`, `KorgKR55`, `OberheimDMX`, `RolandCR78`. After picking a
-bank, the same names (`bd sd hh cp oh …`) map to that machine.
+`AkaiLinn`, `KorgKR55`, `OberheimDMX`, `RolandCompurhythm78`. After
+picking a bank, the same names (`bd sd hh cp oh …`) map to that machine.
+The short names strudel.cc uses work too — the brand is dropped:
+`.bank("tr909")`, `"tr808"`, `"linn"`, `"dmx"`, `"kr55"`.
+
+**Sampled piano** — `s("piano")` is the Salamander grand used all over the
+strudel.cc docs; `.piano()` is the shortcut that also holds each note for
+its step and pans by pitch:
+
+```js
+$: note("c3 e3 g3 <b3 c4>").piano()
+```
+
+**Orchestral and world percussion (VCSL)** — `kalimba`, `marimba`,
+`glockenspiel`, `vibraphone`, `gong`, `timpani`, `sus_cymbal`, `harp`,
+`recorder_alto_sus`, `sax_vib`, `pipeorgan_loud`, `tubularbells`, … (about
+130; search with `strasbeat.findSounds`). Pitched ones follow `note()`.
+
+**Wavetables** — `wt_digital`, `wt_vgame` and the single tables
+(`wt_digital_basique`, …); any sound named `wt_*` is played by the
+wavetable synth, scanned with `.wt(position)`.
+
+**Mridangam** — `mridangam_ta`, `mridangam_dhin`, `mridangam_nam`, … (13
+strokes).
 
 **Soundfonts** (General MIDI) — pitched, use with `note()`. **Names are
 _not_ 1:1 with the official GM-128 list — they've been shortened.** A few
@@ -139,6 +161,9 @@ strasbeat.countSounds(); // total registered sounds (~1000+)
 **Synths** built in: `sine`, `triangle`, `sawtooth`, `square`, `white`,
 `pink`, `brown`. Use with `note()` or `freq()`.
 
+**Your own soundfont** — `loadSoundfont(url)` loads an `.sf2` file and
+returns it for `.soundfont(font, presetIndex)`.
+
 ## Music theory helpers
 
 ```js
@@ -158,13 +183,13 @@ them at <https://strudel.cc/learn/>.
 ### `progression()` — one-line chord progressions
 
 ```js
-$: progression("Cm7 F7 Bb^7 Eb^7");
-$: progression("Cm7 F7 Bb^7 Eb^7", { rhythm: "arp-up" });
-$: progression("ii V I", { key: "C", style: "jazz-comp" });
-$: progression("C G Am F", { style: "folk-strum", bass: true });
-$: progression("Am F C G@2"); // G held for 2 cycle-lengths
-$: progression("Am F C G*2"); // G repeated twice (compressed)
-$: progression("ii V@2 I", { key: "C" }); // Roman + weight
+$: progression('Cm7 F7 Bb^7 Eb^7')
+$: progression('Cm7 F7 Bb^7 Eb^7', { rhythm: 'arp-up' })
+$: progression('ii V I', { key: 'C', style: 'jazz-comp' })
+$: progression('C G Am F', { style: 'folk-strum', bass: true })
+$: progression('Am F C G@2') // G lasts 2 cycles (5 cycles in all)
+$: progression('Am F C G*2') // G struck twice within its cycle
+$: progression('ii V@2 I', { key: 'C' }) // Roman + hold
 ```
 
 The chord string is a whitespace-separated list of either **absolute
@@ -172,10 +197,17 @@ chord symbols** (`Cm7 F7 Bb^7 Eb^7`) or **Roman numerals** (`ii V I`,
 when `options.key` is supplied). Each token can carry an optional
 modifier mirroring mini-notation operators:
 
-- **`@N`** (weight) — hold a chord longer: `G@2` gives G twice the
-  time of an unweighted chord. Internally uses Strudel's `timeCat`.
-- **`*N`** (repeat) — play a chord N times in its slot: `G*2` plays G
-  twice in the space one chord normally occupies (compressed).
+Every chord lasts one cycle unless a modifier says otherwise:
+
+- **`@N`** (hold) — keep a chord for N cycles: `G@2` makes G last two
+  cycles, so the progression gets one cycle longer. With the default
+  `block` rhythm the chord is simply held; with any other rhythm
+  (`strum`, `comp`, `arp-up`, …) each held cycle plays the full rhythm
+  figure again.
+- **`*N`** (repeat) — play a chord N times within its one cycle: `G*2`
+  strikes G twice in the time one chord normally takes. With a rhythm
+  other than `block`, the rhythm figure itself runs N times in that
+  cycle.
 - `/N` is **not** supported (collides with slash chords like `Cm7/G`).
 
 Strudel's voicing dictionaries do the
@@ -274,12 +306,12 @@ Explicit options always override style fields:
 #### Roman numerals
 
 ```js
-progression("ii V I", { key: "C" }); // → Dm G C
-progression("I V vi IV", { key: "G" }); // → G D Em C
-progression("i iv v", { key: "Am" }); // → Am Dm Em (natural minor)
-progression("I bIII IV", { key: "C" }); // → C Eb F
-progression("vii°7", { key: "C" }); // → Bo7 (° → o for Strudel)
-progression("ii7 V7 I^7", { key: "F" }); // → Gm7 C7 F^7
+progression('ii V I', { key: 'C' }) // → Dm G C
+progression('I V vi IV', { key: 'G' }) // → G D Em C
+progression('i iv v', { key: 'Am' }) // → Am Dm Em (natural minor)
+progression('I bIII IV', { key: 'C' }) // → C Eb F
+progression('vii°7', { key: 'C' }) // → Bo7 (° → o for Strudel)
+progression('ii7 V7 I^7', { key: 'F' }) // → Gm7 C7 F^7
 ```
 
 - **Uppercase** numeral → major triad. **Lowercase** → minor triad.
@@ -445,30 +477,164 @@ mypreset: {
 
 The dropdown will rebuild automatically on save (Vite HMR).
 
-## MIDI/OSC output
+## Inputs, outputs and other engines
 
-Both are opt-in packages enabled in the Setup panel. When enabled, pattern
-code can route events to external hardware/software.
+MIDI, OSC, Csound, microtonal tuning and serial output live in opt-in
+packages. Turn one on under **Settings → Packages** and reload; until
+then its functions don't exist, and evaluating code that uses them says
+which package to enable.
+
+| package           | adds                                                |
+| ----------------- | --------------------------------------------------- |
+| `@strudel/midi`   | `.midi()`, `midin()`, `midikeys()`, `midimaps()`    |
+| `@strudel/osc`    | `.osc()`                                            |
+| `@strudel/csound` | `.csound()`, `.csoundm()`, `loadOrc()`              |
+| `@strudel/xen`    | `.tune()`, `.xen()`, `.tuning()`                    |
+| `@strudel/serial` | `.serial()`                                         |
+
+Device and file names passed to these are plain strings, so write them
+with **single quotes** (double-quoted strings become mini-notation).
 
 ### `.midi()` — MIDI output
 
 ```js
-note("c4 e4 g4").midi(); // default output device
-note("c4 e4 g4").midi("IAC Driver Bus 1"); // specific device by name
+$: note("c4 e4 g4").midi() // the output selected in the MIDI bar
+$: note("c4 e4 g4").midi('IAC Driver Bus 1') // a specific device, by name
+$: note("c2 c3").midichan(2).midi() // MIDI channel 2
+$: ccv(sine.segment(16).slow(4)).ccn(74).midi() // a control-change sweep
 ```
 
-Requires `@strudel/midi` enabled in Setup. The MIDI bar shows an output
-device selector when enabled. Selected device is persisted across sessions.
+A bare `.midi()` goes to the device picked in the MIDI bar's output
+selector (remembered across sessions). If that device is unplugged, or
+none was ever picked, it falls back to the first IAC bus, else the first
+output, and says so in the console. Naming a port in the call always
+wins.
+
+### `midin()` / `midikeys()` — MIDI input in a pattern
+
+```js
+const cc = await midin('Launch Control XL')
+
+$: note("c2 eb2 g2 c3")
+  .s("sawtooth")
+  .lpf(cc(21).range(200, 4000))
+```
+
+`midin(device)` resolves to a function: `cc(number)` is a signal (0 to 1)
+that follows that controller. `midikeys(device)` does the same for keys —
+`const kb = await midikeys('KeyStep')` then `kb().s("triangle")` plays
+whatever you hold. Both are separate from the built-in MIDI keyboard
+bridge above, which needs no package and no code.
 
 ### `.osc()` — OSC output
 
 ```js
-note("c4 e4 g4").osc();
+$: note("c4 e4 g4").osc()
 ```
 
-Requires `@strudel/osc` enabled in Setup. Sends events via WebSocket to
-`ws://localhost:8080` (hardcoded — an OSC bridge server must listen there).
-Works with SuperCollider/SuperDirt or any OSC receiver.
+Sends events over WebSocket to `ws://localhost:8080` (fixed by the
+upstream package — an OSC bridge server must listen there). Works with
+SuperCollider/SuperDirt or any OSC receiver.
+
+### Csound
+
+```js
+await loadOrc('github:kunstmusik/csound-live-code/master/livecode.orc')
+
+$: note("c3 eb3 g3 bb3").csound('FM1')
+```
+
+`loadOrc` fetches and compiles an orchestra; `.csound('name')` plays the
+pattern on one of its instruments.
+
+### Microtonal tuning
+
+```js
+$: "0 1 2 3 4 5"
+  .tune("hexany15")
+  .mul(220)
+  .freq()
+  .s("triangle")
+```
+
+`.tune(scale)` turns scale steps into frequency ratios — multiply by a
+base frequency and send the result to `.freq()`. `.xen(scale)` gives
+frequencies directly and also takes equal divisions of the octave:
+`"0 5 10 18".xen("31edo").freq()`.
+
+### Serial
+
+`.serial(baudRate)` writes each event to a serial port (an Arduino, say).
+The browser asks which port to use the first time.
+
+## Sliders and inline visuals
+
+```js
+$: note("c2 eb2 g2 c3")
+  .s("sawtooth")
+  .lpf(slider(800, 100, 4000))
+  ._scope()
+```
+
+- **`slider(value, min, max, step)`** draws a slider right in the code;
+  dragging it rewrites the number and the sound follows without a
+  re-evaluate. The arguments must be plain numbers.
+- **`._pianoroll()`**, **`._scope()`** and **`._spectrum()`** draw a
+  small visual in the editor, directly under the pattern they are chained
+  to. They appear on the next evaluate and go away when the call is
+  removed.
+
+## Pasting from strudel.cc
+
+Most snippets from the strudel.cc docs and from shared patterns run
+unchanged: strasbeat uses the same engine and loads the same default
+sounds.
+
+**Works as on strudel.cc**
+
+- The pattern language: mini-notation, `$:` blocks, `_$:` muting,
+  `setcpm`/`setcps`, `all()`, `hush()`, and inline `samples(...)` calls
+  (`github:`, `shabda:`, plain URLs).
+- The default sounds: synths and noise, ZZFX (`z_*`), every `gm_*`
+  soundfont, the default drum kit, drum machines by long or short bank
+  name (`.bank("tr909")`), `piano` and `.piano()`, VCSL, wavetables
+  (`wt_*`), mridangam, `loadSoundfont()`.
+- `slider()` and the inline `._pianoroll()` / `._scope()` /
+  `._spectrum()` widgets; Hydra via `await initHydra()`.
+
+**Known differences**
+
+- **Opt-in packages.** `.midi()`, `midin`, `.osc()`, `.csound()`,
+  `.tune()`, `.serial()` need their package enabled first (see above).
+- **Not available.** `gamepad()`, the device-motion signals, `mqtt()`,
+  and the `mondo` / `tidal` template syntaxes are not wired in.
+- **Newer than the published packages.** strudel.cc runs Strudel's
+  development branch; strasbeat runs the latest release on npm. A few
+  recent functions (`.cycleStruct()`, `.flux()`, `.juxFlip()`,
+  `edoScale()`, `stackCenter()`, …) will report "is not a function"
+  until they are released. Autocomplete and hover docs only list what
+  this build can run.
+- **Default kit.** strasbeat loads the complete dirt-samples set, which
+  strudel.cc does not, so many more sample names resolve here
+  (`amencutup`, `jvbass`, …). Where dirt-samples and another default set
+  share a name, dirt-samples plays: `bd sd hh cp cb cr ht lt mt` and `sax`
+  are its samples here, not the uzu-drumkit and VCSL ones strudel.cc
+  plays (VCSL's saxophone is still there as `sax_vib` / `sax_stacc`). Add
+  a `.bank(...)` when the exact drum sound matters.
+- **Tempo carries over between tabs.** Tempo, default voicings and
+  default control values are global: a pattern with no `setcpm` line
+  plays at whatever the last evaluated pattern set, not at Strudel's
+  0.5 cycles per second. Give every pattern its own tempo line.
+- **Visuals without the underscore.** `.punchcard()`, `.spiral()`,
+  `.wordfall()` and your own `.onPaint(...)` draw in the bottom panel:
+  a "Custom" mode appears next to Roll and Scope, and is selected, as
+  soon as a playing pattern uses one. `.pianoroll()`, `.scope()`,
+  `.spectrum()` and `.pitchwheel()` draw on Strudel's own full-window
+  canvas instead, which strasbeat does not lay the app out around the
+  way strudel.cc does — for those, use the underscore forms or the
+  panel's Roll and Scope.
+- **Helper strings.** strasbeat's own helpers (`progression()`) take
+  single-quoted strings; see the single-quote rule above.
 
 ## Where to look next
 
