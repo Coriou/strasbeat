@@ -962,6 +962,14 @@ async function promptForNewFolderName(formModal, store) {
   });
   if (!v) return null;
   const name = v.name.trim();
-  store.setIndex({ ...idx, folders: [...existing, name] });
+  // Read the index again: the dialog may have been open for a while, and
+  // writing back the copy from before it would drop whatever another window
+  // added to the library in the meantime.
+  const latest = store.getIndex();
+  const folders = latest.folders ?? [];
+  store.setIndex({
+    ...latest,
+    folders: folders.includes(name) ? folders : [...folders, name],
+  });
   return name;
 }
