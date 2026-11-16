@@ -23,7 +23,8 @@
 // JS structure.
 
 import { keymap } from "@codemirror/view";
-import { EditorSelection } from "@codemirror/state";
+import { EditorSelection, Facet } from "@codemirror/state";
+import { diffChanges } from "./text-diff.js";
 
 let prettierModulesPromise = null;
 
@@ -56,17 +57,28 @@ async function loadPrettier() {
  * a single literal wrong here is silent corruption of mini-notation.
  *
  * Comment skipping is approximate but sufficient for our use: we don't try
- * to detect regex-literal contexts (Strudel patterns don't use regex), and
- * `${...}` interpolation inside template literals throws because none of
- * our patterns use it and a sloppy walk could mis-balance braces.
+ * to detect regex-literal contexts (Strudel patterns don't use regex).
+ *
+ * Template literals are yielded whole (body = raw text including any
+ * `${...}` interpolations). The string literals *inside* an interpolation
+ * are real JS strings that Prettier re-quotes like any other, so the walker
+ * descends into `${...}` and yields those too, before the enclosing template.
  *
  * Exported so the round-trip test under scripts/test-format.mjs can use the
  * same walker the formatter does — keeping them in sync prevents drift
  * between what the test asserts and what the formatter restores.
  */
 export function* iterateStringLiterals(source) {
-  let i = 0;
+  yield* scanCode(source, 0, false);
+}
+
+// Scan JS code starting at `i`. With `untilBrace` set we are inside a
+// template interpolation and stop after the `}` that closes it (tracking
+// nested braces so an object literal or arrow body doesn't end it early).
+// Returns the index scanning stopped at.
+function* scanCode(source, i, untilBrace) {
   const n = source.length;
+  let depth = 0;
   while (i < n) {
     const c = source[i];
 
@@ -81,6 +93,14 @@ export function* iterateStringLiterals(source) {
       while (i < n - 1 && !(source[i] === "*" && source[i + 1] === "/")) i++;
       i += 2;
       continue;
+    }
+
+    if (untilBrace) {
+      if (c === "{") depth++;
+      else if (c === "}") {
+        if (depth === 0) return i + 1;
+        depth--;
+      }
     }
 
     if (c === '"' || c === "'" || c === "`") {
@@ -100,9 +120,10 @@ export function* iterateStringLiterals(source) {
           break;
         }
         if (quote === "`" && ch === "$" && source[i + 1] === "{") {
-          throw new Error(
-            "[strasbeat/format] template-literal interpolation is not supported by the quote-restoration walker",
-          );
+          const exprEnd = yield* scanCode(source, i + 2, true);
+          body += source.slice(i, exprEnd);
+          i = exprEnd;
+          continue;
         }
         body += ch;
         i++;
@@ -113,6 +134,7 @@ export function* iterateStringLiterals(source) {
 
     i++;
   }
+  return i;
 }
 
 /**
@@ -217,6 +239,11 @@ export async function formatBuffer(code) {
     printWidth: 80,
     semi: false,
     trailingComma: "all",
+    // Prettier's default ("as-needed") strips the quotes off object keys
+    // that are valid identifiers. That removes a string literal, which
+    // breaks the positional quote restoration below — and the key's quote
+    // style is the author's business anyway.
+    quoteProps: "preserve",
   });
 
   // Snapshot the original quote characters in source order so we can put
@@ -256,31 +283,82 @@ export function computeNewSelection(oldSelection, oldDoc, formatted) {
   return EditorSelection.create(newRanges);
 }
 
-export const formatCommand = (view) => {
-  const code = view.state.doc.toString();
-  const oldSelection = view.state.selection;
-  const oldDoc = view.state.doc;
+/**
+ * Where format outcomes the user should see are reported: a formatter error
+ * (usually a syntax error in the buffer) or a result dropped because the
+ * buffer changed underneath it. The host provides `(message) => void` — in
+ * strasbeat that is the transport status line. Without a sink the outcome
+ * still reaches the devtools console.
+ */
+export const formatStatus = Facet.define();
 
+function reportFormatStatus(view, message) {
+  for (const sink of view.state.facet(formatStatus)) {
+    try {
+      sink(message);
+    } catch (err) {
+      console.warn("[strasbeat/format] status sink failed:", err);
+    }
+  }
+}
+
+// Prettier's syntax errors carry a multi-line code frame; the status line
+// only has room for the headline.
+function describeFormatError(err) {
+  const first = String(err?.message ?? err).split("\n")[0].trim();
+  return first.replace(/^\[strasbeat\/format\]\s*/, "");
+}
+
+/**
+ * Format the view's buffer and apply the result. Resolves to `true` when the
+ * buffer was (or already is) formatted, `false` when the result was dropped
+ * or the formatter failed.
+ *
+ * Formatting is async (the first run also lazy-loads Prettier), so the
+ * document can change while it is in flight: the user keeps typing, or
+ * switches tab and the view now holds a different pattern entirely. The
+ * formatted text only describes the document it was computed from, so it is
+ * applied only if that exact document is still the live one.
+ *
+ * `format` is injectable for tests.
+ */
+export async function runFormat(view, format = formatBuffer) {
+  const startDoc = view.state.doc;
+  const code = startDoc.toString();
+
+  let formatted;
+  try {
+    formatted = await format(code);
+  } catch (err) {
+    // Surface failures loudly per CLAUDE.md "Surface silent failures
+    // loudly" — a parser error here means the formatter saw something it
+    // doesn't expect, which the user should know about.
+    console.warn("[strasbeat/format] prettier failed:", err);
+    reportFormatStatus(view, `format failed: ${describeFormatError(err)}`);
+    return false;
+  }
+
+  if (view.state.doc !== startDoc) {
+    reportFormatStatus(view, "format skipped — the code changed while formatting");
+    return false;
+  }
+  if (formatted === code) return true;
+
+  // Dispatch only the characters that differ (see text-diff.js). The
+  // selection, scroll position and Strudel's highlight/slider decorations
+  // all map through the changes, so there is nothing to restore by hand.
+  view.dispatch({
+    changes: diffChanges(code, formatted),
+    userEvent: "input.format",
+  });
+  return true;
+}
+
+export const formatCommand = (view) => {
   // Returning true claims the binding even though the actual format runs
   // async — otherwise CM6 would let the keystroke fall through to the
   // browser, and on most platforms Cmd-Shift-F triggers full-text search.
-  formatBuffer(code)
-    .then((formatted) => {
-      if (formatted === code) return;
-      const newSelection = computeNewSelection(oldSelection, oldDoc, formatted);
-      view.dispatch({
-        changes: { from: 0, to: code.length, insert: formatted },
-        selection: newSelection,
-        userEvent: "input.format",
-      });
-    })
-    .catch((err) => {
-      // Surface failures loudly per CLAUDE.md "Surface silent failures
-      // loudly" — Strudel patterns are unusual JS (template literals with
-      // mini-notation) and a parser error here means the formatter saw
-      // something it doesn't expect, which the user should know about.
-      console.warn("[strasbeat/format] prettier failed:", err);
-    });
+  runFormat(view);
   return true;
 };
 

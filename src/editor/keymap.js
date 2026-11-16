@@ -38,14 +38,16 @@ import {
   toggleMute,
   toggleSolo,
 } from "./track-labels.js";
-import { computeNewSelection } from "./format.js";
+import { diffChanges } from "./text-diff.js";
 
 // Exported so command-palette.js can call mute/solo without simulating
 // keypresses. The view and onEvaluate are passed by the caller.
+//
+// Only the label text that changed is dispatched (not the whole buffer), so
+// the cursor, undo history and Strudel's highlight/slider decorations map
+// through the edit instead of collapsing to the top of the document.
 export function toggleLabelAtCursor(view, onEvaluate, toggleLabel, userEvent) {
   const code = view.state.doc.toString();
-  const oldSelection = view.state.selection;
-  const oldDoc = view.state.doc;
   const cursorLine = view.state.doc.lineAt(
     view.state.selection.main.head,
   ).number;
@@ -54,8 +56,7 @@ export function toggleLabelAtCursor(view, onEvaluate, toggleLabel, userEvent) {
   const nextCode = toggleLabel(code, label.displayName);
   if (nextCode === code) return true;
   view.dispatch({
-    changes: { from: 0, to: code.length, insert: nextCode },
-    selection: computeNewSelection(oldSelection, oldDoc, nextCode),
+    changes: diffChanges(code, nextCode),
     userEvent,
   });
   onEvaluate();
@@ -70,8 +71,10 @@ export function toggleLabelAtCursor(view, onEvaluate, toggleLabel, userEvent) {
  *
  * @param {object} options
  * @param {() => void} options.onEvaluate
- *   Called when the user triggers a mute/solo toggle. Should be
- *   `() => editor.evaluate()` for the StrudelMirror instance.
+ *   Called after a mute/solo toggle edited the buffer, so the change is
+ *   heard. The host decides whether that means re-evaluating — see
+ *   `evaluateIfPlaying` in editor-setup.js (a toggle while stopped must not
+ *   start playback).
  */
 export function createVscodeKeymap({ onEvaluate }) {
   return keymap.of([
