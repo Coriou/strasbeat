@@ -1,6 +1,9 @@
 // MUST stay the first import: it makes localStorage safe to touch before any
 // other module (ours or Strudel's) evaluates. See src/storage-guard.js.
 import { storageIsEphemeral } from "./storage-guard.js";
+import { flagEnabled } from "./flags.js";
+import { installFrameLoop } from "./frame-loop.js";
+import { installLegacyDrawer } from "./legacy-drawer.js";
 import { initAppUpdates } from "./app-update.js";
 import { StrudelMirror } from "@strudel/codemirror";
 import { transpiler } from "./transpiler-patch.js";
@@ -57,7 +60,11 @@ import { prompt, confirm, formModal, choiceModal } from "./ui/modal.js";
 import { applyStoredAccent } from "./ui/settings-drawer.js";
 import { createLocalStore, describeStorageEvent } from "./store.js";
 import { mountStorageNotice } from "./ui/storage-notice.js";
-import { readSharedFromHash, shareCurrent, adoptSharedPattern } from "./share.js";
+import {
+  readSharedFromHash,
+  shareCurrent,
+  adoptSharedPattern,
+} from "./share.js";
 import { prewarmSounds, isExportRunning } from "./export.js";
 import { mountPianoRollResize } from "./piano-roll-resize.js";
 import { mountDebugHelpers } from "./debug.js";
@@ -83,7 +90,11 @@ import {
   strasbeatOverlayCompartment,
 } from "./editor-setup.js";
 import { createTabController, isTabPlaying } from "./tabs.js";
-import { freshTabState, liveCompartmentValues, syncTabState } from "./editor/build-editor-state.js";
+import {
+  freshTabState,
+  liveCompartmentValues,
+  syncTabState,
+} from "./editor/build-editor-state.js";
 import { createDocSync } from "./editor/doc-sync.js";
 import { readSelectedCompletion } from "./editor/keymap-universal.js";
 import { previewSoundName, insertSoundName } from "./editor-actions.js";
@@ -324,11 +335,12 @@ let currentName = initialName;
 const INITIAL_STORED_CM_SETTINGS = readStoredCmSettingsFromLocalStorage();
 
 // ─── Boot state machine ─────────────────────────────────────────────────
-const { bootPromise, getBootReady, getBootFailures, drumKit, prebake } = createBoot({
-  shellEl,
-  exportBtn,
-  status,
-});
+const { bootPromise, getBootReady, getBootFailures, drumKit, prebake } =
+  createBoot({
+    shellEl,
+    exportBtn,
+    status,
+  });
 
 // Forward decl — panel mounted further down; onEvalError fires after boot.
 let consolePanel = null;
@@ -380,6 +392,22 @@ const editor = new StrudelMirror({
     bottomCanvas?.draw(haps, time);
   },
   prebake,
+});
+const useFrameLoop = flagEnabled("frameloop");
+installFrameLoop(editor, {
+  enabled: useFrameLoop,
+  drawTime,
+  afterInvalidate: (time, refill) =>
+    bottomCanvas?.afterInvalidate({
+      code: editor.repl.state.activeCode,
+      painters: editor.drawer.painters,
+      haps: editor.drawer.visibleHaps,
+      time,
+      refill,
+    }),
+  // (`transport` is mounted further down; a frame cannot fail before it is.)
+  onError: (error) =>
+    transport?.setStatus(`playback drawing failed: ${error?.message ?? error}`),
 });
 // Paint the first frame (what `autodraw` would have done in the constructor).
 // It evaluates the buffer inside the repl once boot is through, without going
@@ -443,6 +471,9 @@ function focusEditorLocation({ line, column } = {}) {
 
 bottomCanvas = createBottomCanvas({
   canvas,
+  onError: useFrameLoop
+    ? (error) => editor.drawer.reportError(error)
+    : undefined,
   modes: bottomModes,
   scope,
   drawTime,
@@ -461,85 +492,20 @@ bottomCanvas = createBottomCanvas({
   },
 });
 
-// The Drawer's window. It keeps — and re-filters on every frame — each hap
-// inside `drawTime`, so the window is the roll's full four cycles only while
-// something shows them: the roll itself, or draw functions the pattern
-// registered. Otherwise it shrinks to the present moment, which is all that
-// highlighting and the shader uniforms read, and what upstream uses for any
-// pattern without painters. (Upstream picks the window after every evaluate
-// through setDrawTime; that call is intercepted here.)
-const NOW_ONLY = [0, 0];
-const _setDrawTime = editor.drawer.setDrawTime.bind(editor.drawer);
-const _invalidate = editor.drawer.invalidate.bind(editor.drawer);
-let paintersWantWindow = false;
-// Returns whether the window changed.
-function applyDrawWindow(wide) {
-  const current = editor.drawer.drawTime;
-  const wasWide = current[0] !== 0 || current[1] !== 0;
-  if (wasWide === wide) return false;
-  _setDrawTime(wide ? drawTime : NOW_ONLY);
-  // The Drawer queries from its previous frame's right edge to the new one.
-  // After shrinking, that edge lies in the future; make the next frame
-  // re-anchor instead of querying backwards. After widening it lies behind
-  // the stretch the invalidate that follows is about to queue; move it to
-  // where a Drawer that had been wide all along would have it, or the next
-  // frame queues the end of that stretch a second time.
-  if (!wide) {
-    editor.drawer.lastFrame = null;
-  } else if (editor.drawer.lastFrame != null) {
-    const sched = editor.repl?.scheduler;
-    if (sched?.started) editor.drawer.lastFrame = sched.now() + drawTime[1];
-  }
-  return true;
-}
-editor.drawer.setDrawTime = (dt) => {
-  // Upstream passes [0, 0] unless the evaluated pattern has painters.
-  paintersWantWindow = Array.isArray(dt) && (dt[0] !== 0 || dt[1] !== 0);
-  applyDrawWindow(paintersWantWindow || bottomCanvas.wantsHapWindow());
-};
-// Every evaluate (and the boot-time first frame) ends in an invalidate: the
-// one moment the pattern's painters and the code its haps point into are
-// both known. `refill` is for the invalidates below, which only query the
-// pattern on show again.
-function invalidateDrawer(scheduler, t, refill) {
-  _invalidate(scheduler, t);
-  bottomCanvas.afterInvalidate({
-    code: editor.repl.state.activeCode,
-    painters: editor.drawer.painters,
-    haps: editor.drawer.visibleHaps,
-    time: t ?? editor.drawer.scheduler?.now?.() ?? 0,
-    refill,
+if (useFrameLoop) {
+  bottomCanvas.setOnHapDemandChange((wide) => {
+    editor.drawer.setHapDemand(wide, {
+      hasFrame: bottomCanvas.hasFrame(),
+      time: bottomCanvas.getLastTime(),
+    });
   });
+  editor.drawer.setHapDemand(bottomCanvas.wantsHapWindow(), {
+    hasFrame: bottomCanvas.hasFrame(),
+    time: bottomCanvas.getLastTime(),
+  });
+} else {
+  installLegacyDrawer(editor, bottomCanvas, drawTime);
 }
-editor.drawer.invalidate = (scheduler, t) => invalidateDrawer(scheduler, t, false);
-// The roll came into view or went out of it (pane collapse, mode switch).
-bottomCanvas.setOnHapDemandChange((wide) => {
-  if (!applyDrawWindow(wide || paintersWantWindow)) return;
-  const sched = editor.repl?.scheduler;
-  if (!sched?.pattern) return;
-  if (!wide) {
-    // Drop the haps queued beyond the narrower window.
-    if (sched.started) invalidateDrawer(sched, undefined, true);
-    return;
-  }
-  // Stopped with nothing on the roll (the tab was switched): leave it empty.
-  if (!sched.started && !bottomCanvas.hasFrame()) return;
-  // Refill the window around the playhead (or, while stopped, around the
-  // frame the roll last showed) so the roll does not come back half empty.
-  const t = sched.started ? sched.now() : bottomCanvas.getLastTime();
-  try {
-    editor.drawer.visibleHaps =
-      t > 0
-        ? sched.pattern
-            .queryArc(Math.max(0, t + drawTime[0]), t)
-            .filter((hap) => hap.hasOnset())
-        : [];
-    invalidateDrawer(sched, t, true);
-    bottomCanvas.draw(editor.drawer.visibleHaps, t);
-  } catch (err) {
-    console.warn("[strasbeat] could not refill the piano roll:", err);
-  }
-});
 
 // The Vim and Emacs keymaps are fetched on first use (editor/lazy-keymaps.js):
 // asking for one before its code is in leaves the editor on its base keymap,
@@ -582,15 +548,19 @@ dispatchEditorExtensions(editor, {
     // The payload carries the resolved name + bank + variant `n` so the
     // bank-aware and variant-aware audition fires the right sample.
     if (sel.audition) {
-      previewSoundName(sel.audition.name, {
-        getAudioContext,
-        getSound,
-        superdough,
-        setStatus: (s) => transport?.setStatus(s),
-      }, {
-        bank: sel.audition.bank ?? undefined,
-        n: sel.audition.n ?? undefined,
-      });
+      previewSoundName(
+        sel.audition.name,
+        {
+          getAudioContext,
+          getSound,
+          superdough,
+          setStatus: (s) => transport?.setStatus(s),
+        },
+        {
+          bank: sel.audition.bank ?? undefined,
+          n: sel.audition.n ?? undefined,
+        },
+      );
       return;
     }
     // Fallback for legacy sound completions that don't carry a stashed
@@ -652,22 +622,31 @@ dispatchEditorExtensions(editor, {
 // src/editor/completions/info.js). Same shape as the Alt+Arrow audition
 // path above — the third arg is unused by previewSoundName today and
 // reserved for Phase 3 (Task 18) sample-variant opts.
-installCompletions(editor.editor, [
-  ...new Set([
-    ...Object.keys(strudelCore),
-    ...Object.keys(strudelMini),
-    ...Object.keys(strudelTonal),
-    ...Object.keys(strudelWebaudio),
-    ...Object.keys(strudelExt),
-  ]),
-], {
-  audition: (name, opts) => previewSoundName(name, {
-    getAudioContext,
-    getSound,
-    superdough,
-    setStatus: (s) => transport?.setStatus(s),
-  }, opts),
-});
+installCompletions(
+  editor.editor,
+  [
+    ...new Set([
+      ...Object.keys(strudelCore),
+      ...Object.keys(strudelMini),
+      ...Object.keys(strudelTonal),
+      ...Object.keys(strudelWebaudio),
+      ...Object.keys(strudelExt),
+    ]),
+  ],
+  {
+    audition: (name, opts) =>
+      previewSoundName(
+        name,
+        {
+          getAudioContext,
+          getSound,
+          superdough,
+          setStatus: (s) => transport?.setStatus(s),
+        },
+        opts,
+      ),
+  },
+);
 
 // Fetch the function docs now that the editor is up. Hover docs, signature
 // hints and the doc text in completions start working when it lands; a
@@ -846,7 +825,8 @@ async function deleteFolderHandler(folderName) {
     );
     store.setIndex(idx);
     for (const name of inFolder) {
-      if (tabs.getOpenItems().includes(name)) tabs.close(name, { flush: false });
+      if (tabs.getOpenItems().includes(name))
+        tabs.close(name, { flush: false });
     }
   }
   removeFolderEntry(folderName);
@@ -918,9 +898,10 @@ async function moveMany(names, target /* string | null | "__new__" */) {
     );
   } else if (movedUser > 0) {
     const folderLabel = target ?? "Unfiled";
-    const suffix = skippedDemos > 0
-      ? ` (skipped ${skippedDemos} Demo${skippedDemos > 1 ? "s" : ""})`
-      : "";
+    const suffix =
+      skippedDemos > 0
+        ? ` (skipped ${skippedDemos} Demo${skippedDemos > 1 ? "s" : ""})`
+        : "";
     transport.setStatus(
       `Moved ${movedUser} pattern${movedUser > 1 ? "s" : ""} to ${folderLabel}${suffix}`,
     );
@@ -1198,16 +1179,17 @@ if (sharedArrival) {
 }
 
 // ─── Autosave ────────────────────────────────────────────────────────────
-const { flushToStore, scheduleAutosave, hasPending, renamePending } = createAutosave({
-  editor,
-  store,
-  patterns,
-  patternNames,
-  getCurrentName: () => currentName,
-  leftRail,
-  transport,
-  onDirtyChange: () => tabStrip?.render(),
-});
+const { flushToStore, scheduleAutosave, hasPending, renamePending } =
+  createAutosave({
+    editor,
+    store,
+    patterns,
+    patternNames,
+    getCurrentName: () => currentName,
+    leftRail,
+    transport,
+    onDirtyChange: () => tabStrip?.render(),
+  });
 
 editor.editor.dispatch({
   effects: StateEffect.appendConfig.of([
@@ -1233,7 +1215,8 @@ editor.editor.dispatch({
         bankUpdateTimer = null;
         const text = update.view.state.doc.toString();
         BANK_DETECT_RE.lastIndex = 0;
-        let m, last = null;
+        let m,
+          last = null;
         while ((m = BANK_DETECT_RE.exec(text)) !== null) last = m[1];
         transport?.setBank(last ?? null);
       }, 200);
@@ -1269,7 +1252,11 @@ function refreshNowPlaying() {
   if (orphan) {
     transport.setNowPlaying({ name: orphan, isFocused: false, isOrphan: true });
   } else if (playing) {
-    transport.setNowPlaying({ name: playing, isFocused: playing === active, isOrphan: false });
+    transport.setNowPlaying({
+      name: playing,
+      isFocused: playing === active,
+      isOrphan: false,
+    });
   } else {
     transport.setNowPlaying(null);
   }
@@ -1912,10 +1899,8 @@ async function previewDrumCell(name, { bank, variant } = {}) {
   };
   if (bank) value.bank = bank;
   if (variant != null) value.n = variant;
-  Promise.resolve(
-    superdough(value, audioCtx.currentTime + 0.01, 0.4),
-  ).catch((err) =>
-    console.warn(`[beat-grid] preview "${name}" failed:`, err),
+  Promise.resolve(superdough(value, audioCtx.currentTime + 0.01, 0.4)).catch(
+    (err) => console.warn(`[beat-grid] preview "${name}" failed:`, err),
   );
 }
 bottomModes.setBeatsAvailable(beatGrid.getLaneCount() > 0);

@@ -441,3 +441,37 @@ describe("createBottomCanvas()", () => {
     assert.equal(surface.hasFrame(), true);
   });
 });
+
+test("painter failures reach the host reporter during discovery and live draw", () => {
+  const env = makeEnv();
+  const modes = createBottomPanelModes();
+  const errors = [];
+  const surface = createBottomCanvas({
+    canvas: env.canvas,
+    modes,
+    scope: { render() {}, markDirty() {} },
+    drawTime: [-2, 2],
+    getView: () => null,
+    isPlaying: () => true,
+    onError: (error) => errors.push(error.message),
+  });
+  env.resize(400, 180);
+  const panel = (ctx) => {
+    ctx.fillRect(0, 0, 1, 1);
+    throw new Error("panel failed");
+  };
+  const widget = () => {
+    throw new Error("widget failed");
+  };
+  surface.afterInvalidate({
+    code: "",
+    painters: [panel, widget],
+    haps: [],
+    time: 0,
+  });
+  assert.ok(errors.includes("panel failed"));
+  assert.ok(errors.includes("widget failed"));
+  errors.length = 0;
+  surface.draw([], 1);
+  assert.deepEqual(errors, ["widget failed", "panel failed"]);
+});

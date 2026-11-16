@@ -191,6 +191,62 @@ await step("play / stop", async () => {
   check("after stop: loops wind down", r <= 3, `${r} rAF/s`);
 });
 
+// Regression checks for the owned playback loop. Performance acceptance is
+// measured by the separate 120 Hz rig; this checks the browser integration.
+await step("playback frame loop", async () => {
+  const original = await page.evaluate(() => window.editor.code);
+  try {
+    const result = await page.evaluate(async () => {
+      const editor = window.editor;
+      editor.setCode('setcps(0.5)\nnote("c4").s("sine").slow(8)');
+      const outcome = await editor.evaluate();
+      if (outcome.status !== "ok") throw new Error(JSON.stringify(outcome));
+      const drawer = editor.drawer;
+      if (!drawer.window) throw new Error("owned frame loop was not installed");
+      let highlights = 0;
+      let queries = 0;
+      const highlight = editor.highlight;
+      const query = drawer.window.query;
+      editor.highlight = function (...args) {
+        highlights++;
+        return highlight.apply(this, args);
+      };
+      drawer.window.query = function (...args) {
+        queries++;
+        return query.apply(this, args);
+      };
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return { highlights, queries, haps: drawer.visibleHaps.length };
+      } finally {
+        editor.highlight = highlight;
+        drawer.window.query = query;
+      }
+    });
+    check("frame loop: sustained highlights use keep-alives", result.highlights >= 1 && result.highlights <= 9, JSON.stringify(result));
+    check("frame loop: queries are sliced", result.queries >= 1 && result.queries <= 16, JSON.stringify(result));
+    check("frame loop: roll retains long notes", result.haps > 0);
+  } finally {
+    await stop(page);
+    await page.evaluate((code) => window.editor.setCode(code), original);
+    await page.evaluate(() => window.editor.evaluate(false));
+  }
+});
+
+await step("legacy playback escape hatch", async () => {
+  const legacy = await open({ width: 1440, height: 900 }, {
+    storage: { ...KIT_NUDGE_SEEN, "strasbeat:flag:frameloop": "off" },
+  });
+  try {
+    check("frame loop off: upstream Drawer retained", await legacy.page.evaluate(() => !!window.editor.drawer.framer && !window.editor.drawer.window));
+    check("frame loop off: playback starts", await play(legacy.page));
+    await stop(legacy.page);
+    check("frame loop off: no idle animation loop", await rafRate(legacy.page, 1500) <= 3);
+  } finally {
+    await legacy.context.close();
+  }
+});
+
 await step("evaluate outcome", async () => {
   const original = await page.evaluate(() => window.editor.code);
   const ok = await page.evaluate(() => window.editor.evaluate(false));

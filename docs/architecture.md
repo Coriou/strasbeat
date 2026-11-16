@@ -352,6 +352,7 @@ the change has proven itself.
 
 | Flag | Default | Off means | Kind |
 |---|---|---|---|
+| `frameloop` | on | upstream Drawer and per-frame highlighting (reload required) | temporary — remove with the legacy path after comparison on real hardware |
 | `sw` | on | no service worker in this browser: unregister, delete strasbeat's caches, load from the network | safety switch, permanent |
 
 ## Strudel extensions and the docs index
@@ -425,17 +426,37 @@ roll, the scope and Strudel's own draw functions. One rule for all three:
 paint only when the canvas can be seen and there is something new to
 show.
 
-- While playing, the Drawer calls `bottomCanvas.draw(haps, time)` every
+- While playing, `src/frame-loop.js` calls `bottomCanvas.draw(haps, time)` every
   frame; nothing is painted while the pane is collapsed, another mode
   (Beat grid, Visuals) covers the canvas, or the tab is in the
   background. While stopped there is no frame loop: the last frame is
   kept and repainted on resize, display change, mode switch or hover.
   Geometry comes from one ResizeObserver; no frame reads layout.
-- The Drawer's hap window is the roll's four cycles only while the roll
-  or a painter needs it; otherwise `main.js` narrows it to `[0, 0]`
-  (highlighting and shader uniforms only need "now"). `main.js`
-  intercepts `drawer.setDrawTime` and `drawer.invalidate` for this —
-  don't call the originals from new code.
+- `src/hap-window.js` owns the numeric hap window and query horizon. It
+  caches timing once per incoming hap, queries ahead in slices of `cps / 6`
+  cycles (roughly six queries per second), and expires notes by numeric
+  `endClipped`. Consecutive slices share the exact boundary. Re-evaluate
+  keeps past onsets and replaces future ones. Time jumps refill around the
+  new playhead; long notes crossing the refill's left edge are recovered
+  with point queries at their onsets, never a query across the whole gap.
+- The window is four cycles only while the roll or a painter needs it,
+  otherwise `[0, 0]`. Demand changes refill synchronously, including the
+  past on expansion; a stopped canvas cleared by a tab swap stays empty.
+  New consumers must use the visible snapshot, not the private prefetched
+  records, and must not mutate haps or published arrays. The bottom canvas
+  retains that array after stop. Painters receive only the visible window;
+  highlights receive the inclusive active set. Uniforms detect crossed
+  onsets themselves and cache numeric times per hap.
+- The loop replaces `editor.drawer` before `drawFirstFrame()`. Its
+  `invalidate` fills haps and discovers painters synchronously, including
+  the scrubber and capture preview's direct repl evaluations. Only a running
+  scheduler owns rAF. Highlight signatures contain each source location's
+  winning CSS (latest onset wins, first wins ties); transactions occur only
+  on signature changes or a 250 ms keep-alive. Frame errors reach the console
+  and status line once per evaluation, while the loop keeps running.
+- `?sb-frameloop=off` selects the unchanged upstream Drawer plus
+  `src/legacy-drawer.js` interception at startup. This remembered flag needs
+  a reload; remove it and the legacy module together after hardware review.
 - Painters registered by a pattern (`.punchcard()`, `.spiral()`,
   `.wordfall()`, `.onPaint(fn)`) draw into this canvas under the
   **Custom** mode, which is offered and selected once when a pattern has

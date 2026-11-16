@@ -4,7 +4,7 @@
 // — and the rule for all of them is the same: draw only when the canvas can
 // be seen and there is something new to show.
 //
-//   playing   Strudel's Drawer calls draw(haps, time) once per animation
+//   playing   The playback loop calls draw(haps, time) once per animation
 //             frame. Nothing is painted while the pane is collapsed, another
 //             view (beat grid, visuals) covers the canvas, or the tab is in
 //             the background.
@@ -53,7 +53,7 @@ export function canvasJob({ mode, visible, docHidden }) {
 
 /**
  * Whether anything on screen needs haps beyond the present moment. The
- * Drawer keeps (and re-filters, every frame) every hap inside its window, so
+ * playback loop keeps every hap inside its numeric window, so
  * the window is only worth its full width while the roll or a painter is
  * there to show it; highlighting and shader uniforms need just "now".
  *
@@ -110,13 +110,19 @@ export function createContextProbe(target) {
  * @param {Function[]} painters
  * @param {(painter: Function, ctx: any) => void} run  calls the painter
  * @param {object} target  context (or stand-in) the probe forwards to
+ * @param {(error: Error) => void} [onError] reports painter failures
  * @returns {{
  *   panel: Function[],
  *   self: Function[],
  *   probes: Map<Function, ReturnType<typeof createContextProbe>>,
  * }}
  */
-export function classifyPainters(painters, run, target) {
+export function classifyPainters(
+  painters,
+  run,
+  target,
+  onError = (error) => console.warn("[strasbeat] draw function threw:", error),
+) {
   const panel = [];
   const self = [];
   const probes = new Map();
@@ -125,7 +131,7 @@ export function classifyPainters(painters, run, target) {
     try {
       run(painter, probe.ctx);
     } catch (err) {
-      console.warn("[strasbeat] draw function threw:", err);
+      onError(err);
     }
     if (probe.touched()) {
       panel.push(painter);
@@ -145,6 +151,7 @@ const LIVE_FRAME_MS = 100;
 /**
  * @param {object} opts
  * @param {HTMLCanvasElement} opts.canvas
+ * @param {(error: Error) => void} [opts.onError] reports painter failures
  * @param {ReturnType<import("./bottom-panel-modes.js").createBottomPanelModes>} opts.modes
  * @param {ReturnType<import("./scope.js").createScope>} opts.scope
  * @param {[number, number]} opts.drawTime  visible window around the playhead, in cycles
@@ -157,6 +164,7 @@ const LIVE_FRAME_MS = 100;
  */
 export function createBottomCanvas({
   canvas,
+  onError = (error) => console.warn("[strasbeat] draw function threw:", error),
   modes,
   scope,
   drawTime,
@@ -317,7 +325,7 @@ export function createBottomCanvas({
         try {
           runPainter(painter, probe.ctx, haps, time);
         } catch (err) {
-          console.warn("[strasbeat] draw function threw:", err);
+          onError(err);
         }
         if (probe.touched()) {
           selfProbes.delete(painter);
@@ -357,7 +365,7 @@ export function createBottomCanvas({
           try {
             runPainter(painter, ctx, haps, time);
           } catch (err) {
-            console.warn("[strasbeat] draw function threw:", err);
+            onError(err);
           }
         }
       } else {
@@ -366,7 +374,7 @@ export function createBottomCanvas({
           try {
             customFn(ctx, haps, time);
           } catch (err) {
-            console.warn("[strasbeat] custom draw error:", err);
+            onError(err);
           }
         }
       }
@@ -454,6 +462,7 @@ export function createBottomCanvas({
         allPainters.filter((p) => !known.has(p)),
         (painter, probe) => runPainter(painter, probe, probeHaps, time ?? 0),
         getScratchCtx(),
+        onError,
       );
       selfPainters = sorted.self;
       selfProbes = sorted.probes;

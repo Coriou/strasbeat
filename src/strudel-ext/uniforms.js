@@ -42,6 +42,7 @@ const DECAY_TAU = 0.12; // seconds. value *= exp(-dt/TAU); snappy percussive env
 
 export function createUniformDeriver() {
   let prevTime = null; // playhead (cycles) at the previous frame
+  const timing = new WeakMap();
   const values = {};
   const overrides = {};
 
@@ -103,10 +104,18 @@ export function createUniformDeriver() {
   function isOnset(h, from, to) {
     const whole = h?.whole;
     if (!whole) return false; // continuous signal — no discrete onset
-    const begin = Number(whole.begin);
+    let times = timing.get(h);
+    if (!times) {
+      times = {
+        begin: Number(whole.begin),
+        end: whole.end == null ? Infinity : Number(whole.end),
+      };
+      timing.set(h, times);
+    }
+    const { begin, end } = times;
     if (!(begin <= to)) return false; // in the future (or not a number)
     if (from !== null) return begin > from;
-    return whole.end == null || Number(whole.end) > to;
+    return end > to;
   }
 
   // One frame: decay every live uniform, then pulse the uniforms of any hap

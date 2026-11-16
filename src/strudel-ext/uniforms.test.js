@@ -243,3 +243,20 @@ describe("shared singleton + teardown reset (_resetDeriver)", () => {
     _resetDeriver();
   });
 });
+
+test("stable haps never reread Fraction timing on later frames", () => {
+  let reads = 0;
+  const time = (value) => ({
+    valueOf() {
+      reads++;
+      return value;
+    },
+  });
+  const h = { value: { s: "bd" }, whole: { begin: time(0), end: time(1) } };
+  const d = createUniformDeriver();
+  d.frame([h], 0, 1 / 120);
+  assert.equal(reads, 2);
+  d.frame([h], 0.01, 1 / 120);
+  d.frame([h], 0.02, 1 / 120);
+  assert.equal(reads, 2);
+});
