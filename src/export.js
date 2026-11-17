@@ -751,8 +751,16 @@ export async function runExport(options, ctx) {
     const { gain: normalizeGain } = options.normalize
       ? normalizeBuffer(rendered, sourceStats.peakAmplitude)
       : { gain: 1 };
+    // Scaling moves the peak by the same factor and keeps zero samples zero,
+    // so the stats follow without another pass over the buffer.
     const stats =
-      normalizeGain === 1 ? sourceStats : computeBufferStats(rendered);
+      normalizeGain === 1
+        ? sourceStats
+        : {
+            ...sourceStats,
+            peakAmplitude: sourceStats.peakAmplitude * normalizeGain,
+            clipped: sourceStats.peakAmplitude * normalizeGain > 1,
+          };
 
     const wavArrayBuffer = audioBufferToWav16(rendered);
     // Cache a Uint8Array view so the panel's "download again" button

@@ -457,14 +457,14 @@ export function createSettingsPanel({
 
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "settings-panel__toggle";
+      btn.className = "settings-panel__toggle switch";
       btn.dataset.settingKey = key;
       btn.setAttribute("role", "switch");
       btn.setAttribute("aria-label", label);
       const on = !!settings[key];
       btn.setAttribute("aria-checked", on ? "true" : "false");
       if (on) btn.classList.add("is-on");
-      const knob = el("span", "settings-panel__toggle-knob");
+      const knob = el("span", "switch__knob");
       btn.appendChild(knob);
 
       btn.addEventListener("click", (e) => {
@@ -511,14 +511,14 @@ export function createSettingsPanel({
 
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "settings-panel__toggle";
+      btn.className = "settings-panel__toggle switch";
       btn.dataset.pkgId = pkg.id;
       btn.setAttribute("role", "switch");
       btn.setAttribute("aria-label", pkg.label);
       const on = enabledSet.has(pkg.id);
       btn.setAttribute("aria-checked", on ? "true" : "false");
       if (on) btn.classList.add("is-on");
-      const knob = el("span", "settings-panel__toggle-knob");
+      const knob = el("span", "switch__knob");
       btn.appendChild(knob);
       btn.addEventListener("click", (e) => {
         e.stopPropagation();

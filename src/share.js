@@ -171,9 +171,9 @@ export function clearShareHash() {
 // installed app has no URL bar to fall back on); it resolves to true when the
 // link reached the clipboard, false when that failed again, and null when the
 // dialog was dismissed. Without it the hash goes into the URL bar.
-// Returns true when a share URL was generated (regardless of clipboard
-// permission), false when nothing was shared. Callers use this to decide
-// whether to flash success or error feedback.
+// Returns true when the link reached the clipboard (or, without offerLink, the
+// URL bar), false when sharing failed, and null when the user closed the
+// link dialog. Callers flash success or error feedback on true / false.
 export async function shareCurrent({ getCode, getName, setStatus, offerLink }) {
   const code = getCode() ?? "";
   if (!code.trim()) {
@@ -205,19 +205,23 @@ export async function shareCurrent({ getCode, getName, setStatus, offerLink }) {
     setStatus("share link copied to clipboard");
   } catch (err) {
     console.warn("[strasbeat] clipboard refused the share link:", err);
-    if (offerLink) {
-      const copied = await offerLink(url);
-      setStatus(
-        copied === true
-          ? "share link copied to clipboard"
-          : copied === false
-            ? "share link not copied — the browser blocked the clipboard"
-            : "share link dialog closed",
-      );
-    } else {
+    if (!offerLink) {
       history.replaceState(null, "", hash);
       setStatus("share link is in the URL bar — copy from there");
+      track("pattern_shared");
+      return true;
     }
+    const copied = await offerLink(url);
+    if (copied == null) {
+      // Closed: the user may well have copied it by hand.
+      setStatus("share link dialog closed");
+      return null;
+    }
+    if (!copied) {
+      setStatus("share link not copied — the browser blocked the clipboard");
+      return false;
+    }
+    setStatus("share link copied to clipboard");
   }
   track("pattern_shared");
   return true;

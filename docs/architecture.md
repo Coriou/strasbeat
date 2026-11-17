@@ -612,8 +612,10 @@ at boot and during export.
   in an open tab, and `window.launchQueue` in the installed app, whose
   manifest (`launch_handler: focus-existing`, `handle_links: preferred`)
   focuses the open window without navigating it. The manifest shortcuts'
-  `?action=` arrive the same way. The queue also replays the launch that
-  opened the page; that one is skipped, boot has handled it.
+  `?action=` arrive the same way. The queue also holds the launch that
+  opened (or, after a reload, first opened) the window; boot has handled
+  that one from the address bar, so `src/launch-queue.js` skips it. Its
+  consumer is set before main.js first awaits.
 - **Unusable localStorage** (blocked, `null`, zero quota): the
   `storage-guard.js` stand-in keeps the app working for the session and
   `src/ui/storage-notice.js` shows a persistent "Not saving" notice. A

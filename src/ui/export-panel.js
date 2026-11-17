@@ -233,19 +233,15 @@ export function createExportPanel({
 
     // Normalize — scales the render so its loudest sample sits at -1 dB.
     // On by default: a mix that runs past 0 dB is otherwise hard-clipped
-    // in the 16-bit file. A <div> row, not a <label>: a label would turn a
-    // click on the switch into two toggles.
-    const normalizeRow = el("div", "export-panel__row");
-    const normalizeLabelId = "export-normalize-label";
-    const normalizeLabel = el("span", "export-panel__row-label", "Normalize");
-    normalizeLabel.id = normalizeLabelId;
-    normalizeRow.appendChild(normalizeLabel);
-    const normalizeControl = el("span", "export-panel__row-control export-panel__switch-wrap");
-    normalizeBtn = el("button", "export-panel__switch");
+    // in the 16-bit file. The row is a <label> like the others, so a click
+    // on the word toggles the switch too.
+    const normalizeRow = buildRow("Normalize");
+    normalizeRow.control.classList.add("export-panel__switch-wrap");
+    normalizeBtn = el("button", "switch");
     normalizeBtn.type = "button";
     normalizeBtn.setAttribute("role", "switch");
-    normalizeBtn.setAttribute("aria-labelledby", normalizeLabelId);
-    normalizeBtn.appendChild(el("span", "export-panel__switch-knob"));
+    normalizeBtn.setAttribute("aria-label", "Normalize to -1 dB");
+    normalizeBtn.appendChild(el("span", "switch__knob"));
     setNormalize(readStoredNormalize());
     normalizeBtn.addEventListener("click", () => {
       const on = normalizeBtn.getAttribute("aria-checked") !== "true";
@@ -258,14 +254,18 @@ export function createExportPanel({
         onFocusEditor();
       }
     });
-    normalizeControl.appendChild(normalizeBtn);
-    normalizeControl.appendChild(
-      el("span", "export-panel__switch-hint", "peak at −1 dB"),
+    normalizeRow.control.appendChild(normalizeBtn);
+    normalizeRow.control.appendChild(
+      el("span", "export-panel__switch-hint", "peak at \u22121 dB"),
     );
-    normalizeRow.appendChild(normalizeControl);
-    controls.appendChild(normalizeRow);
+    controls.appendChild(normalizeRow.row);
 
     root.appendChild(controls);
+    // The tempo changes with every evaluate and nothing tells the panel, so
+    // the length is re-read when the panel is shown or the pointer or focus
+    // comes into it, which is when it is read.
+    root.addEventListener("pointerenter", syncLength);
+    root.addEventListener("focusin", syncLength);
 
     // ─── Export button ─────────────────────────────────────────────────
     exportBtn = el("button", "export-panel__export");

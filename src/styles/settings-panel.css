@@ -384,52 +384,6 @@
   color: var(--text);
 }
 
-/* Pill switch — 32×18 is tight enough to fit the panel, large enough to
-   hit comfortably with the cursor. The knob slides via transform on the
-   `.is-on` state, which gives the free hardware-accelerated animation
-   without a dedicated transition on the parent. */
-.settings-panel__toggle {
-  position: relative;
-  width: 34px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  border: 1px solid var(--border-soft);
-  cursor: pointer;
-  padding: 0;
-  flex: 0 0 auto;
-  transition:
-    background var(--t-hover),
-    border-color var(--t-hover);
-}
-.settings-panel__toggle:hover {
-  border-color: var(--border);
-}
-.settings-panel__toggle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.settings-panel__toggle.is-on {
-  background: var(--accent);
-  border-color: var(--accent-hi);
-}
-
-.settings-panel__toggle-knob {
-  position: absolute;
-  top: 50%;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  margin-top: -7px;
-  border-radius: 50%;
-  background: var(--text);
-  box-shadow: var(--shadow-low);
-  transition: transform var(--t-hover);
-}
-.settings-panel__toggle.is-on .settings-panel__toggle-knob {
-  transform: translateX(14px);
-}
-
 /* ─── About section ──────────────────────────────────────────────────── */
 
 .settings-panel__about-line {

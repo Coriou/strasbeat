@@ -109,6 +109,14 @@ import { handleCaptureClick } from "./capture.js";
 import { mountCommandPalette } from "./ui/command-palette.js";
 import { mountTabStrip } from "./ui/tab-strip.js";
 import { buildPaletteCommands } from "./command-palette-actions.js";
+import { listenForLaunches } from "./launch-queue.js";
+
+// Before anything awaits: a launch handed to this window later must not be
+// mistaken for the one that opened it (see launch-queue.js). Handled at the
+// end of this file, once boot has run.
+const launches = listenForLaunches(window.launchQueue, {
+  bootHref: location.href,
+});
 
 const { getAudioContext, webaudioOutput, initAudio, setLogger, soundMap, getSound, superdough, setAudioContext, setSuperdoughAudioController, resetGlobalEffects } = strudelWebaudio; // prettier-ignore
 
@@ -280,9 +288,6 @@ window.addEventListener("resize", () => {
 
 // ─── Editor ──────────────────────────────────────────────────────────────
 // Boot sequence: share link > store lastOpen > first shipped pattern.
-// The address this page was opened at, before boot strips the share hash
-// or the shortcut action from it (see the launchQueue consumer at the end).
-const launchHref = location.href;
 const shared = await readSharedFromHash();
 // Re-list stored patterns the library lost track of, before anything reads
 // the index.
@@ -2047,9 +2052,11 @@ shareBtn.addEventListener("click", async () => {
     sharing = false;
     shareBtn.disabled = false;
     shareBtn.removeAttribute("aria-busy");
-    const flash = ok ? "is-flash-ok" : "is-flash-err";
-    shareBtn.classList.add(flash);
-    setTimeout(() => shareBtn.classList.remove(flash), 700);
+    if (ok != null) {
+      const flash = ok ? "is-flash-ok" : "is-flash-err";
+      shareBtn.classList.add(flash);
+      setTimeout(() => shareBtn.classList.remove(flash), 700);
+    }
   }
 });
 
@@ -2175,33 +2182,10 @@ function runLaunchAction(action) {
 }
 
 // ─── Launches into the open app window ──────────────────────────────────
-// The installed app declares launch_handler "focus-existing" with
-// handle_links "preferred": a strasbeat link or a home-screen shortcut
-// opened while the app window is up focuses that window WITHOUT navigating
-// it, and the URL only arrives here. Ignoring the queue dropped every share
-// link and shortcut on the floor.
-//
-// The launch that started this page is queued too, but boot has already
-// handled its share hash and shortcut action from the address bar; it is
-// skipped so a shortcut does not run twice.
-if ("launchQueue" in window) {
-  let bootLaunchSkipped = false;
-  window.launchQueue.setConsumer(async (params) => {
-    const target = params?.targetURL;
-    if (!target) return;
-    if (!bootLaunchSkipped) {
-      bootLaunchSkipped = true;
-      if (target === launchHref) return;
-    }
-    let url;
-    try {
-      url = new URL(target);
-    } catch (err) {
-      console.warn("[strasbeat] unreadable launch URL:", target, err);
-      return;
-    }
-    openSharedLink(await readSharedFromHash(url.hash));
-    const action = url.searchParams.get("action");
-    if (action) bootPromise.then(() => runLaunchAction(action));
-  });
-}
+// A share link or a shortcut opened while the installed app is up arrives
+// here instead of loading the page (see launch-queue.js).
+launches.setHandler(async (url) => {
+  openSharedLink(await readSharedFromHash(url.hash));
+  const action = url.searchParams.get("action");
+  if (action) bootPromise.then(() => runLaunchAction(action));
+});

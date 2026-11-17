@@ -254,7 +254,9 @@ export function registerPanels({
     onFocusEditor: () => editor.editor.focus(),
     onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, onBeforeContextTeardown: () => scope.disconnect() }),
     getPatternName: () => getCurrentName() || "untitled",
-    getCps: () => editor.repl?.scheduler?.cps,
+    // Only once something was evaluated: before that the scheduler holds
+    // its default tempo, not the pattern's.
+    getCps: () => (editor.repl?.state?.pattern ? editor.repl.scheduler.cps : null),
   });
   rightRail.registerPanel(exportPanel);
 

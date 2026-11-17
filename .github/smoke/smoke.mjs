@@ -2,7 +2,7 @@
 // walks the main flows — boot, play/stop, evaluate outcomes, the panels,
 // completions, the palette, Hydra and shader visuals, a stored Vim profile,
 // the default-drum-kit nudge and switch, a broken working copy, share links,
-// and three viewport widths.
+// a normalized WAV export, and three viewport widths.
 //
 // Run by .github/workflows/smoke.yml on `ci/smoke-*` branches (and by hand
 // from the Actions tab), against `vite preview`. It is not part of
@@ -59,6 +59,15 @@ async function open(viewport, { storage = KIT_NUDGE_SEEN } = {}) {
     if (!localStorage.getItem("smoke:seeded")) {
       for (const [k, v] of Object.entries(storage || {})) localStorage.setItem(k, v);
       localStorage.setItem("smoke:seeded", "1");
+    }
+    // Keep the launchQueue consumer the app sets, so a step can hand the
+    // open window a launch the way the installed app would.
+    const lq = window.launchQueue;
+    if (lq && typeof lq.setConsumer === "function") {
+      const set = lq.setConsumer.bind(lq);
+      lq.setConsumer = (fn) => { window.__launchConsumer = fn; return set(fn); };
+    } else {
+      window.launchQueue = { setConsumer: (fn) => { window.__launchConsumer = fn; } };
     }
     const raf = window.requestAnimationFrame.bind(window);
     window.__raf = 0;
@@ -655,7 +664,11 @@ await step("share", async () => {
   });
   check("share: the button is the element under its own centre", hit.onTop && !hit.disabled, JSON.stringify(hit));
   await s.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(BASE).origin });
-  const code = await s.page.evaluate(() => window.editor.code);
+  // Code no stored pattern has, so the link lands as a new shared pattern.
+  const code = await s.page.evaluate(() => {
+    window.editor.setCode(`// smoke share ${Date.now()}\n$: s("bd sd")`);
+    return window.editor.code;
+  });
   await s.page.evaluate(() => { document.getElementById("status").textContent = ""; });
   await s.page.click("#share");
   const status = await s.page
@@ -671,11 +684,69 @@ await step("share", async () => {
     await r.page.waitForSelector(".shell.is-ready", { timeout: 90000 });
     const got = await r.page.evaluate(() => ({ code: window.editor.code, hash: location.hash }));
     check("share: the link opens the shared code", got.code === code && got.hash === "", JSON.stringify({ same: got.code === code, hash: got.hash.slice(0, 40) }));
+    check("share: no unexpected page errors opening the link", r.problems.length === 0, [...new Set(r.problems)].slice(0, 6).join(" || "));
     await r.context.close();
+
+    // The installed app gets a link opened while it runs through
+    // window.launchQueue, not a page load. Hand the open window one.
+    const l = await open({ width: 1280, height: 800 });
+    await l.page.evaluate((c) => { window.__sharedCode = c; }, code);
+    const sharedName = await l.page.evaluate(async (href) => {
+      const fn = window.__launchConsumer;
+      if (!fn) return "no launch consumer was set";
+      fn({ targetURL: href });
+      for (let i = 0; i < 50 && !/opened shared pattern/.test(document.getElementById("status").textContent); i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return { status: document.getElementById("status").textContent, same: window.editor.code === window.__sharedCode };
+    }, url).catch((e) => String(e));
+    check("share: a link handed to the open app window opens the pattern", /opened shared pattern/.test(sharedName?.status ?? "") && sharedName.same, JSON.stringify(sharedName));
+    check("share: no unexpected page errors on a launch", l.problems.length === 0, [...new Set(l.problems)].slice(0, 6).join(" || "));
+    await l.context.close();
   }
+
+  // A clipboard that refuses: the link is offered in a dialog instead.
+  const d = await open({ width: 1280, height: 800 });
+  await d.page.evaluate(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new DOMException("denied", "NotAllowedError"));
+    document.getElementById("status").textContent = "";
+  });
+  await d.page.click("#share");
+  const offered = await d.page
+    .waitForSelector(".modal-overlay--open .modal__input", { timeout: 5000 })
+    .then((h) => h.inputValue())
+    .catch(() => null);
+  check("share: a refused clipboard offers the link in a dialog", /#code=/.test(offered ?? ""), String(offered).slice(0, 80));
+  await d.page.keyboard.press("Escape");
+  await d.page.waitForTimeout(400);
+  const after = await d.page.evaluate(() => ({ status: document.getElementById("status").textContent, hash: location.hash }));
+  check("share: closing the dialog says so and leaves the address alone", /dialog closed/.test(after.status) && after.hash === "", JSON.stringify(after));
+  check("share: no unexpected page errors with a refused clipboard", d.problems.length === 0, [...new Set(d.problems)].slice(0, 6).join(" || "));
+  await d.context.close();
   check("share: no unexpected page errors", s.problems.length === 0, [...new Set(s.problems)].slice(0, 6).join(" || "));
   await s.page.screenshot({ path: "out/10-share.png" });
   await s.context.close();
+});
+
+// ── Export: Normalize brings the render to -1 dB ───────────────────────────
+await step("export", async () => {
+  const e = await open({ width: 1280, height: 800 });
+  await e.page.locator('.right-rail__tab[data-panel-id="export"]').click();
+  await e.page.waitForSelector(".export-panel .switch", { timeout: 15000 });
+  const before = await e.page.evaluate(() => ({
+    length: document.querySelector(".export-panel__length")?.textContent ?? "",
+    normalize: document.querySelector(".export-panel .switch")?.getAttribute("aria-checked"),
+  }));
+  check("export: Normalize is on by default and Cycles shows a length", before.normalize === "true" && /\u2248 \d/.test(before.length), JSON.stringify(before));
+  await e.page.click(".export-panel__export");
+  const peak = await e.page
+    .waitForSelector(".export-panel__result:not([hidden]) .export-panel__stats--peak", { timeout: 120000 })
+    .then((h) => h.textContent())
+    .catch((err) => `no result: ${err.message}`);
+  check("export: a normalized render peaks at -1.0 dB", /^Peak -1\.0 dB/.test(peak ?? ""), peak);
+  await e.page.screenshot({ path: "out/11-export-result.png" });
+  check("export: no unexpected page errors", e.problems.length === 0, [...new Set(e.problems)].slice(0, 6).join(" || "));
+  await e.context.close();
 });
 
 // ── Narrow viewports ───────────────────────────────────────────────────────
