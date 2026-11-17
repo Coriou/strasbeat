@@ -375,8 +375,14 @@ here.
 **Panels**
 
 - [ ] Export panel: filename follows a pattern switch; the waveform draws
-      when the render finishes while the panel is hidden; a peak over 0 dB
-      reads as clipped; the download works a second time.
+      when the render finishes while the panel is hidden; with Normalize
+      off a peak over 0 dB reads as clipped and shows red past the dashed
+      0 dB lines; with it on (the default) a hot mix exports at −1 dB and
+      says "normalized from …"; Normalize remembers its state; `.wav` stays
+      beside the filename and "≈ 8.0s" beside Cycles in a narrow rail; the
+      Download button works a second time.
+- [ ] Installed app (PWA) open: opening a share link in the browser
+      focuses the app window and opens the shared pattern in a tab.
 - [ ] Import samples from a real manifest URL: they appear under "User",
       and deleting a bank shows a readable confirm.
 - [ ] Sounds panel with the full sound set: scrolling, search and the

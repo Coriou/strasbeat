@@ -254,6 +254,7 @@ export function registerPanels({
     onFocusEditor: () => editor.editor.focus(),
     onExport: (options) => runExport(options, { editor, consolePanel, exportPanel, exportBtn, status, setLogger, getAudioContext, getSound, setAudioContext, setSuperdoughAudioController, resetGlobalEffects, initAudio, superdough, onBeforeContextTeardown: () => scope.disconnect() }),
     getPatternName: () => getCurrentName() || "untitled",
+    getCps: () => editor.repl?.scheduler?.cps,
   });
   rightRail.registerPanel(exportPanel);
 

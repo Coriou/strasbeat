@@ -23,6 +23,7 @@
 //     onFocusEditor,   // () => void        — Escape returns focus
 //     onExport,        // (options: ExportOptions) => Promise<ExportResult>
 //     getPatternName,  // () => string      — seeds the filename input
+//     getCps,          // () => number      — tempo, for the length readout
 //   });
 //   rightRail.registerPanel(panel);
 //
@@ -32,9 +33,10 @@
 //   panel.reset();                // back to idle
 //   panel.autoExport();           // toolbar button entry point
 //
-// ExportOptions: { cycles, sampleRate, filename }
+// ExportOptions: { cycles, sampleRate, filename, normalize }
 // ExportResult:  { buffer, scheduled, cycles, sampleRate, filename,
-//                  fileSize, duration, peakAmplitude, percentNonZero }
+//                  fileSize, duration, peakAmplitude, sourcePeak,
+//                  normalizeGain, percentNonZero }
 //
 // Pure DOM, no framework. Match the imperative style of
 // src/ui/sound-browser.js, src/ui/reference-panel.js, and
@@ -45,6 +47,7 @@ import { makeIcon } from "./icons.js";
 const STORAGE_KEY_CYCLES = "strasbeat:export-cycles";
 const STORAGE_KEY_RATE = "strasbeat:export-rate";
 const STORAGE_KEY_FILENAME = "strasbeat:export-filename";
+const STORAGE_KEY_NORMALIZE = "strasbeat:export-normalize";
 
 const DEFAULT_CYCLES = 4;
 const MIN_CYCLES = 1;
@@ -67,6 +70,9 @@ const WAVEFORM_PEAK_COLS = 2048;
 // a WAV-export sanity check would care about: if the user won't be able
 // to hear it, warn.
 const NEAR_SILENT_PEAK = 0.001;
+// Share of the half-height that full scale (0 dB) occupies; the rest is
+// room to show what a clipped render pushed past it.
+const WAVEFORM_FULL_SCALE = 0.8;
 
 export function createExportPanel({
   onFocusEditor = () => {},
@@ -74,6 +80,7 @@ export function createExportPanel({
     throw new Error("export-panel: onExport not wired");
   },
   getPatternName = () => "untitled",
+  getCps = () => null,
 }) {
   // ─── State ────────────────────────────────────────────────────────────
   // 'idle' — show inputs + Export button; progress/result/error hidden
@@ -101,13 +108,16 @@ export function createExportPanel({
   let filenameInput = null;
   let cyclesInput = null;
   let rateSelect = null;
+  let lengthEl = null;
+  let normalizeBtn = null;
   let exportBtn = null;
   let progressRow = null;
   let progressFill = null;
   let progressLabel = null;
   let resultSection = null;
   let waveformCanvas = null;
-  let statsLine1 = null;
+  let statsName = null;
+  let statsDuration = null;
   let statsLine2 = null;
   let statsPeak = null;
   let warningEl = null;
@@ -141,7 +151,7 @@ export function createExportPanel({
     root.appendChild(buildHeader());
 
     // ─── Controls block ────────────────────────────────────────────────
-    // Three rows: filename, cycles, sample rate. Every row shares the
+    // Four rows: filename, cycles, sample rate, normalize. Every row shares the
     // same label-then-control layout via grid so the control columns
     // line up regardless of label text.
     const controls = el("div", "export-panel__controls");
@@ -180,14 +190,22 @@ export function createExportPanel({
     cyclesInput.setAttribute("aria-label", "Cycles to render");
     cyclesInput.value = String(readStoredCycles());
     cyclesInput.addEventListener("keydown", onInputKeydown);
+    cyclesInput.addEventListener("input", syncLength);
     cyclesInput.addEventListener("change", () => {
       // Persist whatever the user committed (blur/enter), not every
       // keystroke — otherwise half-typed values get saved.
       const parsed = parseCycles(cyclesInput.value);
       if (parsed != null) writeStoredCycles(parsed);
     });
-    cyclesRow.control.appendChild(cyclesInput);
+    // How long that many cycles last at the tempo of the last evaluate.
+    lengthEl = el("span", "export-panel__length");
+    lengthEl.title = "Length at the current tempo";
+    const cyclesField = el("div", "export-panel__field");
+    cyclesField.appendChild(cyclesInput);
+    cyclesField.appendChild(lengthEl);
+    cyclesRow.control.appendChild(cyclesField);
     controls.appendChild(cyclesRow.row);
+    syncLength();
 
     // Sample rate — the design system forbids native <select> (SYSTEM.md
     // §2.7) but shipping a popover picker for three options is overkill.
@@ -213,6 +231,40 @@ export function createExportPanel({
     rateRow.control.appendChild(rateSelect);
     controls.appendChild(rateRow.row);
 
+    // Normalize — scales the render so its loudest sample sits at -1 dB.
+    // On by default: a mix that runs past 0 dB is otherwise hard-clipped
+    // in the 16-bit file. A <div> row, not a <label>: a label would turn a
+    // click on the switch into two toggles.
+    const normalizeRow = el("div", "export-panel__row");
+    const normalizeLabelId = "export-normalize-label";
+    const normalizeLabel = el("span", "export-panel__row-label", "Normalize");
+    normalizeLabel.id = normalizeLabelId;
+    normalizeRow.appendChild(normalizeLabel);
+    const normalizeControl = el("span", "export-panel__row-control export-panel__switch-wrap");
+    normalizeBtn = el("button", "export-panel__switch");
+    normalizeBtn.type = "button";
+    normalizeBtn.setAttribute("role", "switch");
+    normalizeBtn.setAttribute("aria-labelledby", normalizeLabelId);
+    normalizeBtn.appendChild(el("span", "export-panel__switch-knob"));
+    setNormalize(readStoredNormalize());
+    normalizeBtn.addEventListener("click", () => {
+      const on = normalizeBtn.getAttribute("aria-checked") !== "true";
+      setNormalize(on);
+      writeStoredNormalize(on);
+    });
+    normalizeBtn.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onFocusEditor();
+      }
+    });
+    normalizeControl.appendChild(normalizeBtn);
+    normalizeControl.appendChild(
+      el("span", "export-panel__switch-hint", "peak at −1 dB"),
+    );
+    normalizeRow.appendChild(normalizeControl);
+    controls.appendChild(normalizeRow);
+
     root.appendChild(controls);
 
     // ─── Export button ─────────────────────────────────────────────────
@@ -225,13 +277,6 @@ export function createExportPanel({
     exportBtn.appendChild(btnLabel);
     exportBtn.addEventListener("click", onExportClick);
     root.appendChild(exportBtn);
-
-    const exportHint = el(
-      "div",
-      "export-panel__hint",
-      "Offline render. .wav is added automatically.",
-    );
-    root.appendChild(exportHint);
 
     // ─── Progress row (hidden until a render starts) ──────────────────
     progressRow = el("div", "export-panel__progress");
@@ -254,6 +299,25 @@ export function createExportPanel({
     resultSection.hidden = true;
     resultSection.setAttribute("role", "status");
 
+    // Result head: file name and length, with Download again beside them.
+    const resultHead = el("div", "export-panel__result-head");
+    const resultTitle = el("div", "export-panel__result-title");
+    statsName = el("div", "export-panel__stats export-panel__stats--name");
+    statsDuration = el("div", "export-panel__stats");
+    resultTitle.appendChild(statsName);
+    resultTitle.appendChild(statsDuration);
+    resultHead.appendChild(resultTitle);
+    // Re-downloads the cached WAV bytes so the user doesn't have to
+    // re-render just to save it to a different folder.
+    downloadAgainBtn = el("button", "export-panel__download-again");
+    downloadAgainBtn.type = "button";
+    downloadAgainBtn.title = "Download the file again";
+    downloadAgainBtn.appendChild(makeIcon("download"));
+    downloadAgainBtn.appendChild(el("span", null, "Download"));
+    downloadAgainBtn.addEventListener("click", onDownloadAgain);
+    resultHead.appendChild(downloadAgainBtn);
+    resultSection.appendChild(resultHead);
+
     // Waveform canvas. Size is set in CSS; the backing store is scaled
     // to dpr when we draw into it so HiDPI screens stay crisp.
     const waveformWrap = el("div", "export-panel__waveform");
@@ -269,13 +333,10 @@ export function createExportPanel({
       new ResizeObserver(() => drawWaveform()).observe(waveformWrap);
     }
 
-    // Stats lines — two rows of dense mono text + a per-line peak read-
-    // out. The spec shows peak dB with an "silent!" fallback when the
-    // buffer is completely zero.
-    statsLine1 = el("div", "export-panel__stats export-panel__stats--name");
+    // Stats: one line of file facts, one peak readout ("silent!" when the
+    // buffer is completely zero).
     statsLine2 = el("div", "export-panel__stats");
     statsPeak = el("div", "export-panel__stats export-panel__stats--peak");
-    resultSection.appendChild(statsLine1);
     resultSection.appendChild(statsLine2);
     resultSection.appendChild(statsPeak);
 
@@ -284,18 +345,6 @@ export function createExportPanel({
     warningEl = el("div", "export-panel__warning");
     warningEl.hidden = true;
     resultSection.appendChild(warningEl);
-
-    // Download-again button — re-downloads the cached WAV bytes so the
-    // user doesn't have to re-render just to save it to a different
-    // folder.
-    downloadAgainBtn = el(
-      "button",
-      "export-panel__download-again",
-      "Download again",
-    );
-    downloadAgainBtn.type = "button";
-    downloadAgainBtn.addEventListener("click", onDownloadAgain);
-    resultSection.appendChild(downloadAgainBtn);
 
     root.appendChild(resultSection);
 
@@ -320,6 +369,7 @@ export function createExportPanel({
   function activate({ focus = true } = {}) {
     if (!mounted) return;
     if (mode !== "running") syncFilename();
+    syncLength();
     // A result that arrived while the tab was hidden had no width to draw
     // into; the rail may also have been resized since.
     if (mode === "done") drawWaveform();
@@ -404,7 +454,8 @@ export function createExportPanel({
     const peak = Number(result.peakAmplitude) || 0;
     const pctNonZero = Number(result.percentNonZero) || 0;
 
-    statsLine1.textContent = `${displayName} — ${fmtDuration(duration)}`;
+    statsName.textContent = displayName;
+    statsDuration.textContent = fmtDuration(duration);
     statsLine2.textContent =
       `${scheduled} event${scheduled === 1 ? "" : "s"} · ` +
       `${fmtRateKhz(rate)} · ${fmtFileSize(size)}`;
@@ -416,15 +467,19 @@ export function createExportPanel({
     // A peak above full scale can't be stored in a 16-bit WAV: everything
     // over 0 dB is flattened. Flag it the same way as silence.
     const isClipped = peak > 1;
+    const gain = Number(result.normalizeGain) || 1;
+    const sourcePeak = Number(result.sourcePeak) || peak;
     statsPeak.classList.remove("export-panel__stats--silent");
     if (peak <= 0) {
-      statsPeak.textContent = "Peak: -∞ dB (silent!)";
+      statsPeak.textContent = "Peak -∞ dB (silent!)";
       statsPeak.classList.add("export-panel__stats--silent");
     } else if (isClipped) {
-      statsPeak.textContent = `Peak: ${fmtDb(peak)} dB — clipped`;
+      statsPeak.textContent = `Peak ${fmtDb(peak)} dB · clipped`;
       statsPeak.classList.add("export-panel__stats--silent");
+    } else if (gain !== 1) {
+      statsPeak.textContent = `Peak ${fmtDb(peak)} dB · normalized from ${fmtDb(sourcePeak)} dB`;
     } else {
-      statsPeak.textContent = `Peak: ${fmtDb(peak)} dB`;
+      statsPeak.textContent = `Peak ${fmtDb(peak)} dB`;
     }
 
     // Silent-export warning — spec says fire if peak is 0 OR non-zero %
@@ -437,8 +492,7 @@ export function createExportPanel({
       warningEl.textContent = "This export appears silent — check your pattern.";
     } else if (isClipped) {
       warningEl.textContent =
-        "The loudest parts go past 0 dB and are clipped in the file. " +
-        "Lower the layers' .gain() and export again.";
+        "Clipped above 0 dB. Turn on Normalize, or lower .gain().";
     }
     warningEl.hidden = !(isSilentish || isClipped);
 
@@ -567,7 +621,8 @@ export function createExportPanel({
     // If onExport throws synchronously or rejects, we still want to
     // land back in a clean state — wrap in a promise chain rather than
     // relying on the host's catch.
-    const options = { cycles, sampleRate, filename };
+    const normalize = normalizeBtn?.getAttribute("aria-checked") === "true";
+    const options = { cycles, sampleRate, filename, normalize };
     Promise.resolve()
       .then(() => onExport(options))
       .then((result) => {
@@ -584,6 +639,24 @@ export function createExportPanel({
     if (filenameInput) filenameInput.disabled = disabled;
     if (cyclesInput) cyclesInput.disabled = disabled;
     if (rateSelect) rateSelect.disabled = disabled;
+    if (normalizeBtn) normalizeBtn.disabled = disabled;
+  }
+
+  function setNormalize(on) {
+    normalizeBtn.setAttribute("aria-checked", on ? "true" : "false");
+    normalizeBtn.classList.toggle("is-on", on);
+  }
+
+  // "≈ 8.0s" beside the cycles input: what that many cycles last at the
+  // tempo of the last evaluate. Blank when either is unknown.
+  function syncLength() {
+    if (!lengthEl) return;
+    const cycles = parseCycles(cyclesInput?.value);
+    const cps = Number(getCps());
+    lengthEl.textContent =
+      cycles != null && Number.isFinite(cps) && cps > 0
+        ? `≈ ${fmtDuration(cycles / cps)}`
+        : "";
   }
 
   function setExportButtonState(state) {
@@ -678,8 +751,27 @@ export function createExportPanel({
     const styles = getComputedStyle(root);
     const bg = styles.getPropertyValue("--surface-2").trim() || "#222";
     const accent = styles.getPropertyValue("--accent").trim() || "#cf418d";
+    const rec = styles.getPropertyValue("--rec").trim() || "#e5484d";
+    const guide = styles.getPropertyValue("--border").trim() || "#444";
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
+
+    // Full scale (0 dB) sits a little inside the edges, marked by dashed
+    // lines, so a normalized file reads as "just under the line" and
+    // anything past it (clipped in the file) shows outside, in --rec.
+    const scale = (midY - 1) * WAVEFORM_FULL_SCALE;
+    const over = (midY - 1) / scale;
+    ctx.save();
+    ctx.strokeStyle = guide;
+    ctx.lineWidth = Math.max(1, Math.floor(dpr));
+    ctx.setLineDash([3 * dpr, 3 * dpr]);
+    ctx.beginPath();
+    for (const y of [Math.round(midY - scale) + 0.5, Math.round(midY + scale) - 0.5]) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+    }
+    ctx.stroke();
+    ctx.restore();
 
     const cols = lastPeaks.length / 2;
     if (cols === 0) return;
@@ -691,6 +783,7 @@ export function createExportPanel({
     ctx.strokeStyle = accent;
     ctx.lineWidth = Math.max(1, Math.floor(dpr));
     ctx.beginPath();
+    const clippedCols = [];
 
     // One line per device pixel, each spanning the min/max of the peak
     // columns it covers — the standard DAW waveform grammar. Samples past
@@ -704,13 +797,34 @@ export function createExportPanel({
         if (lastPeaks[c * 2] < min) min = lastPeaks[c * 2];
         if (lastPeaks[c * 2 + 1] > max) max = lastPeaks[c * 2 + 1];
       }
-      const y1 = midY - Math.min(1, max) * (midY - 1);
-      const y2 = midY - Math.max(-1, min) * (midY - 1);
+      const y1 = midY - Math.min(over, max) * scale;
+      const y2 = midY - Math.max(-over, min) * scale;
       ctx.moveTo(x + 0.5, y1);
       ctx.lineTo(x + 0.5, y2);
+      if (max > 1 || min < -1) clippedCols.push(x, y1, y2);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
+
+    // The parts past full scale, in --rec.
+    if (clippedCols.length) {
+      ctx.strokeStyle = rec;
+      ctx.beginPath();
+      for (let i = 0; i < clippedCols.length; i += 3) {
+        const x = clippedCols[i] + 0.5;
+        const y1 = clippedCols[i + 1];
+        const y2 = clippedCols[i + 2];
+        if (y1 < midY - scale) {
+          ctx.moveTo(x, y1);
+          ctx.lineTo(x, midY - scale);
+        }
+        if (y2 > midY + scale) {
+          ctx.moveTo(x, midY + scale);
+          ctx.lineTo(x, y2);
+        }
+      }
+      ctx.stroke();
+    }
   }
 
   // ─── Keyboard handlers ────────────────────────────────────────────────
@@ -784,6 +898,22 @@ function readStoredRate() {
 function writeStoredRate(n) {
   try {
     localStorage.setItem(STORAGE_KEY_RATE, String(n));
+  } catch {
+    /* ignore */
+  }
+}
+
+function readStoredNormalize() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_NORMALIZE) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function writeStoredNormalize(on) {
+  try {
+    localStorage.setItem(STORAGE_KEY_NORMALIZE, on ? "on" : "off");
   } catch {
     /* ignore */
   }

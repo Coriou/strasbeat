@@ -556,6 +556,29 @@ export function computeBufferStats(buffer) {
   };
 }
 
+// Peak an export is normalized to: -1 dBFS, the usual headroom for a file
+// that will be converted or mixed further.
+export const NORMALIZE_PEAK = 10 ** (-1 / 20);
+// Below this (-60 dB) a render counts as silent: boosting it would only
+// amplify noise and hide the silent-export warning.
+const NORMALIZE_MIN_PEAK = 0.001;
+
+/**
+ * Scale every channel of `buffer` in place so its peak lands on
+ * NORMALIZE_PEAK. Down for a mix that would clip in the 16-bit file, up for
+ * a quiet one. A silent or near-silent render is left untouched.
+ * @returns {{ gain: number }} the factor applied (1 when nothing was done)
+ */
+export function normalizeBuffer(buffer, peak) {
+  if (!(peak >= NORMALIZE_MIN_PEAK)) return { gain: 1 };
+  const gain = NORMALIZE_PEAK / peak;
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < data.length; i++) data[i] *= gain;
+  }
+  return { gain };
+}
+
 /**
  * Throws unless `outcome` (what the patched `editor.evaluate` resolved to)
  * says the CURRENT buffer was evaluated. Shared by the export and the
@@ -721,6 +744,16 @@ export async function runExport(options, ctx) {
         webaudioCtx,
       );
 
+    // Measure the mix as rendered, then (if asked) bring its peak to
+    // -1 dBFS before it is encoded: a mix past full scale would otherwise be
+    // hard-clipped by the 16-bit encoder.
+    const sourceStats = computeBufferStats(rendered);
+    const { gain: normalizeGain } = options.normalize
+      ? normalizeBuffer(rendered, sourceStats.peakAmplitude)
+      : { gain: 1 };
+    const stats =
+      normalizeGain === 1 ? sourceStats : computeBufferStats(rendered);
+
     const wavArrayBuffer = audioBufferToWav16(rendered);
     // Cache a Uint8Array view so the panel's "download again" button
     // can re-download the same bytes without touching the render path.
@@ -729,7 +762,7 @@ export async function runExport(options, ctx) {
     // wasteful but harmless at typical export sizes.
     const wavBytes = new Uint8Array(wavArrayBuffer);
     downloadWav(wavArrayBuffer, filename);
-    track("wav_exported", { cycles, sampleRate });
+    track("wav_exported", { cycles, sampleRate, normalize: !!options.normalize });
 
     // Events superdough refused outright (unknown sound, a node that
     // couldn't be built). They are missing from the file.
@@ -755,13 +788,12 @@ export async function runExport(options, ctx) {
       );
     }
 
-    const stats = computeBufferStats(rendered);
     const duration = rendered.length / rendered.sampleRate;
     const fileSize = wavArrayBuffer.byteLength;
 
     if (stats.clipped) {
       consolePanel?.warn?.(
-        `export: the mix peaks at ${stats.peakAmplitude.toFixed(2)} (above full scale) and was clipped in the file — lower .gain() or add .postgain() to avoid distortion`,
+        `export: the mix peaks at ${stats.peakAmplitude.toFixed(2)} (above full scale) and was clipped in the file — turn on Normalize, or lower .gain()`,
       );
     }
 
@@ -805,6 +837,9 @@ export async function runExport(options, ctx) {
       fileSize,
       duration,
       peakAmplitude: stats.peakAmplitude,
+      // The peak before normalization, and the gain it applied (1 = none).
+      sourcePeak: sourceStats.peakAmplitude,
+      normalizeGain,
       percentNonZero: stats.percentNonZero,
     };
   } catch (err) {

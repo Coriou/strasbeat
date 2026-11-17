@@ -116,6 +116,71 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* "≈ 8.0s" beside the cycles input. */
+.export-panel__length {
+  min-width: 6ch;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Normalize switch — same pill as the settings panel's toggles. */
+.export-panel__switch-wrap {
+  align-items: center;
+  gap: var(--space-2);
+}
+.export-panel__switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+  transition:
+    background var(--t-hover),
+    border-color var(--t-hover);
+}
+.export-panel__switch:hover:not(:disabled) {
+  border-color: var(--border);
+}
+.export-panel__switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.export-panel__switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.export-panel__switch.is-on {
+  background: var(--accent);
+  border-color: var(--accent-hi);
+}
+.export-panel__switch-knob {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: var(--shadow-low);
+  transition: transform var(--t-hover);
+}
+.export-panel__switch.is-on .export-panel__switch-knob {
+  transform: translateX(14px);
+}
+.export-panel__switch-hint {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
 .export-panel__input,
 .export-panel__select {
   width: 100%;
@@ -250,14 +315,6 @@
   height: 14px;
 }
 
-.export-panel__hint {
-  margin-top: calc(var(--space-4) * -1 + var(--space-2));
-  font-family: var(--font-sans);
-  font-size: var(--text-xs);
-  line-height: var(--lh-sm);
-  color: var(--text-dim);
-}
-
 /* The progress / result / error sections use the HTML `hidden` attr to
    toggle visibility (export-panel.js sets `.hidden = true|false`). An
    explicit `display: flex` in author CSS overrides the UA stylesheet's
@@ -365,14 +422,31 @@
   line-height: var(--lh-sm);
 }
 
-/* Subtle secondary button — the "download again" affordance shouldn't
-   compete with the primary Export button above it, so ghost it. */
+/* File name + length on the left, Download on the right. */
+.export-panel__result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.export-panel__result-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Secondary button: clearly a button, but it doesn't compete with the
+   primary Export button above. */
 .export-panel__download-again {
-  align-self: flex-start;
-  height: 26px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 28px;
   padding: 0 var(--space-3);
   background: var(--surface-2);
-  color: var(--text-mut);
+  color: var(--text);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   font: inherit;
@@ -383,6 +457,10 @@
     background var(--t-hover),
     border-color var(--t-hover),
     color var(--t-hover);
+}
+.export-panel__download-again svg {
+  width: 13px;
+  height: 13px;
 }
 .export-panel__download-again:hover {
   background: var(--surface-3);
@@ -452,14 +530,6 @@
     gap: var(--space-1);
   }
 
-  .export-panel__field {
-    grid-template-columns: 1fr;
-  }
-
-  .export-panel__suffix {
-    justify-self: start;
-    height: 24px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

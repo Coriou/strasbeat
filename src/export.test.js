@@ -16,6 +16,8 @@ const {
   computeBufferStats,
   prewarmSounds,
   flushStaleNodePools,
+  normalizeBuffer,
+  NORMALIZE_PEAK,
 } = await import("./export.js");
 
 // A hap as the render loop sees it.
@@ -341,5 +343,36 @@ describe("prewarmSounds() / computeBufferStats()", () => {
     });
     assert.equal(computeBufferStats(buffer([0, 0.5, -0.9])).clipped, false);
     assert.equal(computeBufferStats(buffer([0, 1.4, -0.9])).clipped, true);
+  });
+});
+
+describe("normalizeBuffer()", () => {
+  const stereo = (l, r) => {
+    const ch = [Float32Array.from(l), Float32Array.from(r)];
+    return { numberOfChannels: 2, getChannelData: (i) => ch[i] };
+  };
+  const peakOf = (b) => computeBufferStats(b).peakAmplitude;
+
+  test("brings a clipping mix down to the target peak, both channels by the same gain", () => {
+    const b = stereo([0, 1.8, -0.9], [0.45, -0.2, 0]);
+    const { gain } = normalizeBuffer(b, peakOf(b));
+    assert.ok(Math.abs(peakOf(b) - NORMALIZE_PEAK) < 1e-6);
+    assert.ok(Math.abs(gain - NORMALIZE_PEAK / 1.8) < 1e-6);
+    assert.ok(Math.abs(b.getChannelData(1)[0] - 0.45 * gain) < 1e-6);
+    assert.equal(computeBufferStats(b).clipped, false);
+  });
+
+  test("raises a quiet mix to the same peak", () => {
+    const b = stereo([0, 0.25], [-0.1, 0]);
+    normalizeBuffer(b, peakOf(b));
+    assert.ok(Math.abs(peakOf(b) - NORMALIZE_PEAK) < 1e-6);
+  });
+
+  test("leaves silence and near-silence alone, so the silent-export warning still fires", () => {
+    for (const s of [[0, 0], [0.0005, -0.0002]]) {
+      const b = stereo(s, s);
+      assert.equal(normalizeBuffer(b, peakOf(b)).gain, 1);
+      assert.deepEqual([...b.getChannelData(0)], [...Float32Array.from(s)]);
+    }
   });
 });
