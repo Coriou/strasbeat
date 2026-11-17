@@ -2,8 +2,7 @@
 // walks the main flows — boot, play/stop, evaluate outcomes, the panels,
 // completions, the palette, Hydra and shader visuals, a stored Vim profile,
 // the default-drum-kit nudge and switch, a broken working copy, share links,
-// and three
-// viewport widths.
+// and three viewport widths.
 //
 // Run by .github/workflows/smoke.yml on `ci/smoke-*` branches (and by hand
 // from the Actions tab), against `vite preview`. It is not part of

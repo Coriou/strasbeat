@@ -280,6 +280,9 @@ window.addEventListener("resize", () => {
 
 // ─── Editor ──────────────────────────────────────────────────────────────
 // Boot sequence: share link > store lastOpen > first shipped pattern.
+// The address this page was opened at, before boot strips the share hash
+// or the shortcut action from it (see the launchQueue consumer at the end).
+const launchHref = location.href;
 const shared = await readSharedFromHash();
 // Re-list stored patterns the library lost track of, before anything reads
 // the index.
@@ -1480,26 +1483,6 @@ window.addEventListener("hashchange", async () => {
   openSharedLink(await readSharedFromHash());
 });
 
-// The installed app declares launch_handler "focus-existing" with
-// handle_links "preferred": a strasbeat link opened while the app window is
-// up focuses that window WITHOUT navigating it, and the link only arrives
-// here. Ignoring the queue drops every share link on the floor. The launch
-// that started this page is queued too; its link was already adopted at boot
-// and adopting it again only re-focuses the same pattern.
-if ("launchQueue" in window) {
-  window.launchQueue.setConsumer(async (params) => {
-    if (!params?.targetURL) return;
-    let hash;
-    try {
-      hash = new URL(params.targetURL).hash;
-    } catch (err) {
-      console.warn("[strasbeat] unreadable launch URL:", params.targetURL, err);
-      return;
-    }
-    openSharedLink(await readSharedFromHash(hash));
-  });
-}
-
 function openSharedLink(again) {
   if (!again) return;
   const arrival = adoptSharedPattern({ shared: again, store, patterns });
@@ -2042,6 +2025,23 @@ shareBtn.addEventListener("click", async () => {
       setStatus: (s) => {
         status.textContent = s;
       },
+      // The link, selected, in a dialog: copy it with Cmd/Ctrl+C, or press
+      // Copy to try the clipboard again from a fresh click.
+      offerLink: async (url) => {
+        const value = await prompt({
+          title: "Copy this share link",
+          defaultValue: url,
+          confirmLabel: "Copy",
+        });
+        if (value == null) return null;
+        try {
+          await navigator.clipboard.writeText(url);
+          return true;
+        } catch (err) {
+          console.warn("[strasbeat] clipboard refused the share link again:", err);
+          return false;
+        }
+      },
     });
   } finally {
     sharing = false;
@@ -2140,6 +2140,10 @@ bootPromise.then(() => {
   const clean = new URL(location.href);
   clean.searchParams.delete("action");
   history.replaceState(null, "", clean.pathname + clean.search + clean.hash);
+  runLaunchAction(action);
+});
+
+function runLaunchAction(action) {
   if (action === "new") {
     handleNewPatternClick({
       store,
@@ -2165,5 +2169,39 @@ bootPromise.then(() => {
     });
   } else if (action === "export") {
     exportBtn?.click();
+  } else {
+    console.warn(`[strasbeat] unknown launch action "${action}"`);
   }
-});
+}
+
+// ─── Launches into the open app window ──────────────────────────────────
+// The installed app declares launch_handler "focus-existing" with
+// handle_links "preferred": a strasbeat link or a home-screen shortcut
+// opened while the app window is up focuses that window WITHOUT navigating
+// it, and the URL only arrives here. Ignoring the queue dropped every share
+// link and shortcut on the floor.
+//
+// The launch that started this page is queued too, but boot has already
+// handled its share hash and shortcut action from the address bar; it is
+// skipped so a shortcut does not run twice.
+if ("launchQueue" in window) {
+  let bootLaunchSkipped = false;
+  window.launchQueue.setConsumer(async (params) => {
+    const target = params?.targetURL;
+    if (!target) return;
+    if (!bootLaunchSkipped) {
+      bootLaunchSkipped = true;
+      if (target === launchHref) return;
+    }
+    let url;
+    try {
+      url = new URL(target);
+    } catch (err) {
+      console.warn("[strasbeat] unreadable launch URL:", target, err);
+      return;
+    }
+    openSharedLink(await readSharedFromHash(url.hash));
+    const action = url.searchParams.get("action");
+    if (action) bootPromise.then(() => runLaunchAction(action));
+  });
+}

@@ -382,7 +382,9 @@ here.
       beside the filename and "≈ 8.0s" beside Cycles in a narrow rail; the
       Download button works a second time.
 - [ ] Installed app (PWA) open: opening a share link in the browser
-      focuses the app window and opens the shared pattern in a tab.
+      focuses the app window and opens the shared pattern in a tab. The
+      dock/taskbar shortcuts "New Pattern" and "Export WAV" work with the
+      app already open, and once (not twice) when they start it.
 - [ ] Import samples from a real manifest URL: they appear under "User",
       and deleting a bank shows a readable confirm.
 - [ ] Sounds panel with the full sound set: scrolling, search and the

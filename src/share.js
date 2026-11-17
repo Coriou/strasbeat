@@ -166,13 +166,15 @@ export function clearShareHash() {
 // Encodes the editor buffer into a gzipped base64url hash and copies the
 // resulting URL to the clipboard. The sharer's own address bar is left alone:
 // writing the hash there would make their next reload open the link as an
-// arrival instead of resuming the pattern they were working on. Only when the
-// clipboard is unavailable does the hash go into the URL bar, as the one place
-// left to copy it from.
+// arrival instead of resuming the pattern they were working on. When the
+// clipboard refuses, `offerLink(url)` shows the link for copying by hand (the
+// installed app has no URL bar to fall back on); it resolves to true when the
+// link reached the clipboard, false when that failed again, and null when the
+// dialog was dismissed. Without it the hash goes into the URL bar.
 // Returns true when a share URL was generated (regardless of clipboard
 // permission), false when nothing was shared. Callers use this to decide
 // whether to flash success or error feedback.
-export async function shareCurrent({ getCode, getName, setStatus }) {
+export async function shareCurrent({ getCode, getName, setStatus, offerLink }) {
   const code = getCode() ?? "";
   if (!code.trim()) {
     setStatus("nothing to share — editor is empty");
@@ -201,9 +203,21 @@ export async function shareCurrent({ getCode, getName, setStatus }) {
   try {
     await navigator.clipboard.writeText(url);
     setStatus("share link copied to clipboard");
-  } catch {
-    history.replaceState(null, "", hash);
-    setStatus("share link is in the URL bar — copy from there");
+  } catch (err) {
+    console.warn("[strasbeat] clipboard refused the share link:", err);
+    if (offerLink) {
+      const copied = await offerLink(url);
+      setStatus(
+        copied === true
+          ? "share link copied to clipboard"
+          : copied === false
+            ? "share link not copied — the browser blocked the clipboard"
+            : "share link dialog closed",
+      );
+    } else {
+      history.replaceState(null, "", hash);
+      setStatus("share link is in the URL bar — copy from there");
+    }
   }
   track("pattern_shared");
   return true;

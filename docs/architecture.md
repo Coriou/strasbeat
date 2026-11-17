@@ -611,7 +611,9 @@ at boot and during export.
   original snapshot. They come in three ways: the boot hash, a `hashchange`
   in an open tab, and `window.launchQueue` in the installed app, whose
   manifest (`launch_handler: focus-existing`, `handle_links: preferred`)
-  focuses the open window without navigating it.
+  focuses the open window without navigating it. The manifest shortcuts'
+  `?action=` arrive the same way. The queue also replays the launch that
+  opened the page; that one is skipped, boot has handled it.
 - **Unusable localStorage** (blocked, `null`, zero quota): the
   `storage-guard.js` stand-in keeps the app working for the session and
   `src/ui/storage-notice.js` shows a persistent "Not saving" notice. A
