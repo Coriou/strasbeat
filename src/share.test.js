@@ -12,6 +12,7 @@ import {
   SHARE_MAX_DECODED_BYTES,
   resolveSharedArrival,
   adoptSharedPattern,
+  readSharedFromHash,
 } from './share.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,6 +81,22 @@ function bytesToLegacyBase64Url(bytes) {
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
+
+describe('reading a share link', () => {
+  // The installed app gets links through window.launchQueue, not the address
+  // bar, so the hash has to be readable from a URL it was handed.
+  test('reads code and name from a given hash', async () => {
+    const code = 's("bd sd")';
+    const params = new URLSearchParams({ code: await encodeShareCode(code), name: 'groove' });
+    const url = new URL(`https://strasbeat.example/#${params}`);
+    assert.deepEqual(await readSharedFromHash(url.hash), { code, name: 'groove' });
+  });
+
+  test('a hash without a code is not a share link', async () => {
+    assert.equal(await readSharedFromHash('#foo=1'), null);
+    assert.equal(await readSharedFromHash(''), null);
+  });
+});
 
 describe('share decoding limits', () => {
   test('refuses a payload that inflates past the decoded-size budget', async () => {

@@ -1477,7 +1477,30 @@ window.addEventListener("storage", (e) => {
 // A share link pasted into an already-open strasbeat changes only the
 // fragment, so there is no page load to pick it up.
 window.addEventListener("hashchange", async () => {
-  const again = await readSharedFromHash();
+  openSharedLink(await readSharedFromHash());
+});
+
+// The installed app declares launch_handler "focus-existing" with
+// handle_links "preferred": a strasbeat link opened while the app window is
+// up focuses that window WITHOUT navigating it, and the link only arrives
+// here. Ignoring the queue drops every share link on the floor. The launch
+// that started this page is queued too; its link was already adopted at boot
+// and adopting it again only re-focuses the same pattern.
+if ("launchQueue" in window) {
+  window.launchQueue.setConsumer(async (params) => {
+    if (!params?.targetURL) return;
+    let hash;
+    try {
+      hash = new URL(params.targetURL).hash;
+    } catch (err) {
+      console.warn("[strasbeat] unreadable launch URL:", params.targetURL, err);
+      return;
+    }
+    openSharedLink(await readSharedFromHash(hash));
+  });
+}
+
+function openSharedLink(again) {
   if (!again) return;
   const arrival = adoptSharedPattern({ shared: again, store, patterns });
   if (!arrival.saved) {
@@ -1489,7 +1512,7 @@ window.addEventListener("hashchange", async () => {
   refreshRail();
   tabs.openOrFocus(arrival.name);
   transport.setStatus(`opened shared pattern as "${arrival.name}"`);
-});
+}
 
 // Save problems stay on screen for as long as they last.
 const storageNotice = mountStorageNotice(

@@ -40,9 +40,11 @@ export async function decodeShareCode(encoded) {
   return new TextDecoder().decode(base64UrlToBytes(encoded));
 }
 
-export async function readSharedFromHash() {
-  if (!location.hash) return null;
-  const params = new URLSearchParams(location.hash.slice(1));
+// `hash` defaults to the address bar's; the installed app passes the hash of a
+// link it was handed through window.launchQueue instead (see main.js).
+export async function readSharedFromHash(hash = location.hash) {
+  if (!hash) return null;
+  const params = new URLSearchParams(hash.slice(1));
   const codeParam = params.get("code");
   if (!codeParam) return null;
   try {

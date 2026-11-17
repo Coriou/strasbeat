@@ -608,7 +608,10 @@ at boot and during export.
 - **Share links** (`#code=…`) arrive as an indexed user pattern named
   `shared-<name>` (`-2`, `-3`, … when taken) and the hash is cleared once
   it is stored, so a reload restores the recipient's edits rather than the
-  original snapshot.
+  original snapshot. They come in three ways: the boot hash, a `hashchange`
+  in an open tab, and `window.launchQueue` in the installed app, whose
+  manifest (`launch_handler: focus-existing`, `handle_links: preferred`)
+  focuses the open window without navigating it.
 - **Unusable localStorage** (blocked, `null`, zero quota): the
   `storage-guard.js` stand-in keeps the app working for the session and
   `src/ui/storage-notice.js` shows a persistent "Not saving" notice. A
