@@ -1,7 +1,8 @@
 // Browser smoke test: boots the production build in headless Chromium and
 // walks the main flows — boot, play/stop, evaluate outcomes, the panels,
 // completions, the palette, Hydra and shader visuals, a stored Vim profile,
-// the default-drum-kit nudge and switch, a broken working copy, and three
+// the default-drum-kit nudge and switch, a broken working copy, share links,
+// and three
 // viewport widths.
 //
 // Run by .github/workflows/smoke.yml on `ci/smoke-*` branches (and by hand
@@ -642,6 +643,40 @@ await step("broken working copy", async () => {
     JSON.stringify({ recovered: !!st.recovered, listed: st.listed, inRail: st.inRail }));
   check("broken working copy: no unexpected page errors", h.problems.length === 0, [...new Set(h.problems)].slice(0, 6).join(" || "));
   await h.context.close();
+});
+
+// ── Share: the button copies a link, the link opens the pattern ────────────
+await step("share", async () => {
+  const s = await open({ width: 1280, height: 800 });
+  const hit = await s.page.evaluate(() => {
+    const b = document.getElementById("share");
+    const r = b.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { onTop: !!top && b.contains(top), top: top ? `${top.tagName}.${top.className}` : null, disabled: b.disabled };
+  });
+  check("share: the button is the element under its own centre", hit.onTop && !hit.disabled, JSON.stringify(hit));
+  await s.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(BASE).origin });
+  const code = await s.page.evaluate(() => window.editor.code);
+  await s.page.evaluate(() => { document.getElementById("status").textContent = ""; });
+  await s.page.click("#share");
+  const status = await s.page
+    .waitForFunction(() => document.getElementById("status").textContent || null, null, { timeout: 5000 })
+    .then((h) => h.jsonValue())
+    .catch(() => null);
+  const url = await s.page.evaluate(() => navigator.clipboard.readText()).catch((e) => `readText threw: ${e}`);
+  check("share: a click reports in the status line", /copied|URL bar/i.test(status ?? ""), `status=${JSON.stringify(status)}`);
+  check("share: the clipboard holds a #code= link", /#code=z%3A|#code=z:/.test(url), String(url).slice(0, 160));
+  if (/#code=/.test(url)) {
+    const r = await open({ width: 1280, height: 800 });
+    await r.page.goto(url, { waitUntil: "domcontentloaded" });
+    await r.page.waitForSelector(".shell.is-ready", { timeout: 90000 });
+    const got = await r.page.evaluate(() => ({ code: window.editor.code, hash: location.hash }));
+    check("share: the link opens the shared code", got.code === code && got.hash === "", JSON.stringify({ same: got.code === code, hash: got.hash.slice(0, 40) }));
+    await r.context.close();
+  }
+  check("share: no unexpected page errors", s.problems.length === 0, [...new Set(s.problems)].slice(0, 6).join(" || "));
+  await s.page.screenshot({ path: "out/10-share.png" });
+  await s.context.close();
 });
 
 // ── Narrow viewports ───────────────────────────────────────────────────────
